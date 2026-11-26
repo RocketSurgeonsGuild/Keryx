@@ -26,6 +26,8 @@ dotnet_diagnostic.CA2227.severity = none
 dotnet_diagnostic.CA2254.severity = none
 dotnet_diagnostic.IDE0060.severity = none
 dotnet_diagnostic.RCS1163.severity = none
+# LINQ in loops: test code reads generated syntax trees and diagnostics, where clarity matters more than allocations.
+dotnet_diagnostic.ZA0601.severity = none
 dotnet_diagnostic.IL2026.severity = none
 dotnet_diagnostic.IL2067.severity = none
 resharper_possible_multiple_enumeration_highlighting = none

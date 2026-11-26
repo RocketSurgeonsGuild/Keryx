@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DiffEngine;
+using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
 using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
@@ -14,6 +15,8 @@ internal static class ModuleInitializer
     {
         VerifyGeneratorTextContext.Initialize(DiagnosticSeverity.Warning, Customizers.Default, Customizers.ExcludeParseOptions);
         VerifierSettings.ScrubInlineGuids();
+        // The analyzer assembly's version changes with every commit; generated [GeneratedCode] attributes carry it.
+        VerifierSettings.AddScrubber(static builder => builder.Replace($"\"Keryx\", \"{HandlerEmitter.Version}\"", "\"Keryx\", \"{KeryxVersion}\""));
 
         DiffRunner.Disabled = true;
         DerivePathInfo(

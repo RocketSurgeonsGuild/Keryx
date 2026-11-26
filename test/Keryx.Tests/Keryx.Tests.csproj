@@ -36,9 +36,11 @@
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" VersionOverride="5.12.0" PrivateAssets="all" />
         <PackageReference Include="Rocket.Surgery.Extensions.Testing.SourceGenerators" />
         <PackageReference Include="PublicApiGenerator" />
+        <!-- FromKeyedServicesAttribute for the keyed-parameter generator and analyzer tests. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     </ItemGroup>
     <ItemGroup>
-        <Compile Remove="snapshots\**" />
+        <Compile Remove="**\snapshots\**" />
     </ItemGroup>
     <ItemGroup>
         <!-- InternalsVisibleTo exposes the analyzers' Polyfill copy of NotNullAttribute, making the repo-wide alias ambiguous. -->

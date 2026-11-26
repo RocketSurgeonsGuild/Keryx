@@ -171,6 +171,107 @@ as errors and CI Phase 4 cannot be committed. How the tests behave in that case 
 - **Proposal:** re-enable the skipped tests once the allocation is fixed, and keep the Performance contract at 0 B. Alternative: record
   the measured allocation as a documented exception in the Performance contract and assert that value instead.
 
+### OQ-23: Hint name of a nested handler class
+
+The ADR's hint-name rule replaces `+` (and any character outside `[A-Za-z0-9_.]`) in the fully qualified metadata name with `_`, but its
+example names `MyApp.Orders.Create.Keryx.g.cs`, which matches the rule only when `Orders` is a namespace. For the nested-class grouping the
+ADR recommends (`public static partial class Orders { public partial class Create { ... } }`), the rule gives
+`MyApp.Orders_Create.Keryx.g.cs`.
+
+- **Interim:** follow the rule: `MyApp.Orders+Create` becomes `MyApp.Orders_Create.Keryx.g.cs`. The assembly manifest goes to the fixed
+  hint name `KeryxManifest.g.cs`, which cannot collide with a handler hint name because it does not end in `.Keryx.g.cs`. OQ-28 adds
+  a hash before `.Keryx.g.cs` (`MyApp.Orders_Create.<hash>.Keryx.g.cs`) so that sanitised names cannot collide.
+- **Proposal:** confirm the rule and change the example to a namespace-qualified class, or add a nested example.
+
+### OQ-24: Types the generated public constructor and invoker mention
+
+KRX016 lists request, response, notification and behavior types. The generated constructor also takes every injected parameter type, and
+the generated invoker takes a polymorphic notification handler's base type or interface. Outside a host the handler class is public, so an
+internal injected type makes the generated public constructor fail to compile (CS0051), and a host could not construct the handler anyway.
+Inside a host a public handler class may use internal request or service types, and the ADR says nothing about its generated members.
+
+- **Interim:** outside a host, KRX016 also covers injected parameter types and polymorphic notification parameter types (reported on the
+  parameter) and the behavior types attached with `[Behavior]` on the handler method (reported on the attribute); the handler generator
+  skips such a handler. In a host, a public handler class whose request, response or injected types are internal gets `internal`
+  generated members and no `[KeryxHandler]` attribute, like the host's internal handlers; a handler whose signature uses a type narrower
+  than `internal` is skipped. Generated member accessibility follows the signature alone (`public` only when every type it mentions is
+  effectively public), so a `protected internal` handler class with internal signature types also gets `internal` members rather than
+  public ones that fail with CS0051.
+- **Proposal:** confirm and extend the KRX016 row of the ADR ("... and every type the generated constructor and invoker mention").
+
+### OQ-25: Where KRX021 is reported
+
+KRX021 says a struct request is boxed when sent through `ISender`, but not where the diagnostic goes: on the struct's declaration (every
+struct request, sent or not) or where it is boxed.
+
+- **Interim:** at the call site: the request argument of an `ISender.Send`/`ISender.Stream` call (including through `IMediator`) whose
+  argument is a value type converted to the interface. A struct request that is never sent through `ISender` reports nothing.
+- **Proposal:** confirm. The alternative (Info on every struct request declaration) also fires in hosts that only use the typed overloads.
+
+### OQ-26: Handler candidate and handler class edge cases
+
+The handler rules leave a few shapes open. Phase 2 implements these, all on the side that reports or skips rather than generating code
+that does not compile:
+
+- **Abstract methods** named `Handle`/`HandleAsync` (an interface's own members, abstract class members) are not handler candidates, like
+  interface implementations and overrides: they declare a contract and have no body to call.
+- **Interfaces and file-local types.** KRX004 also reports a handler class that is an interface, and any file-local (`file`) type in the
+  containing chain: Keryx cannot generate the other half of a file-local type from another file.
+- **Generic containing types.** A handler class nested in a generic type is reported as "has type parameters" (KRX012), like a generic
+  handler class, because the host cannot construct it.
+- **`IRequest<Unit>` written directly** counts as `IRequest`: its handler may also return `ValueTask`, `Task` or synchronous `void`.
+
+- **Interim:** as listed.
+- **Proposal:** confirm and fold into the ADR's Handlers section.
+
+### OQ-27: KRX022 as a compilation-end diagnostic
+
+The ADR names KRX001, same-assembly KRX005 and in-source KRX008 as compilation-end diagnostics. KRX022 is "reported once per compilation"
+from the parse options, which an analyzer can only do from a compilation action, and RS1037 then requires the `CompilationEnd` tag. In the
+IDE it therefore appears only with full-solution analysis or on build, like KRX001.
+
+- **Interim:** KRX022 is reported from `RegisterCompilationAction` with `Location.None` and carries `CompilationEnd`. Every other Keryx
+  analyzer and both generators stay silent below C# 11, so KRX022 is the only Keryx error there.
+- **Proposal:** confirm and list KRX022 with the compilation-end diagnostics in the ADR. The alternative (reporting it from a syntax-tree
+  action on one chosen tree) shows it in the IDE, but on an arbitrary file.
+
+### OQ-28: Hint names that the sanitised metadata name merges
+
+The ADR's hint-name rule (see also OQ-23) is not injective. In one namespace a nested `Orders.Cancel` (`Sample.Orders+Cancel`) and a
+top-level `Orders_Cancel` both become `Sample.Orders_Cancel.Keryx.g.cs`, because `+` and `_` both map to `_`. Roslyn also compares hint
+names case-insensitively, so classes `Ping` and `ping` collide. `AddSource` then throws, the generator fails with CS8785, and no handler in
+the compilation gets its partial.
+
+- **Interim:** the hint name is the sanitised metadata name, then 8 lowercase hex digits of the 32-bit FNV-1a hash of the UTF-8 bytes of
+  the exact (ordinal) metadata name, then `.Keryx.g.cs`: `Sample.Orders_Cancel.1a2b3c4d.Keryx.g.cs`. The sanitised prefix keeps the name
+  readable; the hash keeps names apart that differ only in `+`/`_`, other replaced characters, or case. The manifest keeps
+  `KeryxManifest.g.cs`.
+- **Proposal:** amend the ADR rule (Incremental generation rules) to append the hash, and change its example. Escaping alone (`_` as
+  `__`, `+` as `_p`) would not be enough, because it still collides on case.
+
+### OQ-29: Accessibility floor of a handler class in a host
+
+The ADR says only that "a host may keep handlers `internal` for its own mediator". A handler class, or a type containing it, that is
+`private`, `protected` or `private protected` cannot be reached by the host's generated `KeryxMediator`/`AddKeryx` (Phase 3), which live
+outside the class. Nothing reported it, and the handler generator still generated its partial.
+
+- **Interim:** KRX004 is also reported in a host when the handler class or any containing type is narrower than `internal` (with the
+  "make public" code fix), and the handler generator skips such a handler in a host. `protected internal` counts as `internal`.
+- **Proposal:** fold into the KRX004 row: "... is not `public` outside a host, or is narrower than `internal` in a host".
+
+### OQ-30: Injected parameter types a field cannot hold
+
+KRX013 lists `ref`, `in`, `out`, `params` and a second `CancellationToken`. An injected service is stored in a `private readonly` field of
+the handler class, which a ref struct (`Span<T>`, `ReadOnlySpan<T>`, `TypedReference`, any `ref struct`), a pointer or a function
+pointer cannot be. Without a rule the generated half fails to compile (CS8345, CS0214), which goes against reporting or skipping
+(OQ-26).
+
+- **Interim:** report KRX013 on such a parameter ("is a ref struct; an injected service is stored in a field of the handler class") and
+  skip the handler. A parameter that breaks KRX013 for any reason is not counted as an injected service, so a static handler class does not
+  also get KRX014 (whose "remove static" fix would not help) and the base-constructor part of KRX007 does not apply.
+- **Proposal:** extend the KRX013 row: "Handler parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a
+  pointer, or there is more than one `CancellationToken`."
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

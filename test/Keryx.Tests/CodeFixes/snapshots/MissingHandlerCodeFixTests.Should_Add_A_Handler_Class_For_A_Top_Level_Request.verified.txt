@@ -1,0 +1,44 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample.Orders;
+
+public sealed record DeleteOrder(int Id) : IRequest;
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX001: Request type 'DeleteOrder' has no handler in this assembly,
+      Title: Add a handler for 'DeleteOrder',
+      EquivalenceKey: Keryx.AddHandlerStub,
+      After: {
+        DeleteOrderHandler.cs:
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Sample.Orders;
+
+public partial class DeleteOrderHandler
+{
+    private static ValueTask Handle(DeleteOrder request, CancellationToken ct) => throw new NotImplementedException();
+}
+      }
+    },
+    {
+      Diagnostic: KRX001: Request type 'DeleteOrder' has no handler in this assembly,
+      Title: Mark this assembly as a contracts assembly,
+      EquivalenceKey: Keryx.MarkContractsAssembly,
+      After: {
+        Input0.cs:
+using Keryx;
+
+[assembly: KeryxContracts]
+
+namespace Sample.Orders;
+
+public sealed record DeleteOrder(int Id) : IRequest;
+      }
+    }
+  ]
+}

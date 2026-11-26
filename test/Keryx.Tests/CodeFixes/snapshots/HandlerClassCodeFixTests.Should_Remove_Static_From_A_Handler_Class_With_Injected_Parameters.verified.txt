@@ -1,0 +1,36 @@
+﻿{
+  Before: [
+    using System;
+using Keryx;
+
+namespace Sample;
+
+public sealed record Command : IRequest<int>;
+
+public static partial class CommandHandler
+{
+    private static int Handle(Command request, IServiceProvider services) => 1;
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX014: 'CommandHandler' is static, but its handler injects 'services'; remove 'static' so Keryx can generate a constructor,
+      Title: Remove 'static' from 'CommandHandler',
+      EquivalenceKey: Keryx.RemoveStatic,
+      After: {
+        Input0.cs:
+using System;
+using Keryx;
+
+namespace Sample;
+
+public sealed record Command : IRequest<int>;
+
+public partial class CommandHandler
+{
+    private static int Handle(Command request, IServiceProvider services) => 1;
+}
+      }
+    }
+  ]
+}

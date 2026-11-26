@@ -40,4 +40,27 @@ public class KnownTypeNamesTests
 
         await Assert.That(KnownNames.Order(StringComparer.Ordinal).ToArray()).IsEquivalentTo(exported);
     }
+
+    [Test]
+    public async Task Every_Well_Known_Type_Name_Resolves()
+    {
+        var names = typeof(WellKnownTypeNames).GetFields(BindingFlags.Public | BindingFlags.Static)
+                                              .Where(static f => f.IsLiteral)
+                                              .Select(static f => (string)f.GetRawConstantValue()!)
+                                              .ToArray();
+        var compilation = CSharpCompilation.Create(
+            "WellKnownTypeNames",
+            references:
+            [
+                .. ManifestContractTests.FrameworkReferences,
+                MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute).Assembly.Location),
+            ]
+        );
+
+        await Assert.That(names).IsNotEmpty();
+        foreach (var name in names)
+        {
+            await Assert.That(compilation.GetTypeByMetadataName(name)).IsNotNull().Because(name);
+        }
+    }
 }

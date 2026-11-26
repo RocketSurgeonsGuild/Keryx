@@ -1,0 +1,36 @@
+﻿{
+  Before: [
+    using System.Threading.Tasks;
+using Keryx;
+
+namespace Sample;
+
+public partial class Ping
+{
+    public sealed record Query : IRequest<string>;
+
+    public ValueTask<string> Handle(Query request) => new("pong");
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX002: Handler 'Ping.Handle(Ping.Query)' must be declared 'private static',
+      Title: Make the handler private static,
+      EquivalenceKey: Keryx.MakeHandlerPrivateStatic,
+      After: {
+        Input0.cs:
+using System.Threading.Tasks;
+using Keryx;
+
+namespace Sample;
+
+public partial class Ping
+{
+    public sealed record Query : IRequest<string>;
+
+    private static ValueTask<string> Handle(Query request) => new("pong");
+}
+      }
+    }
+  ]
+}
