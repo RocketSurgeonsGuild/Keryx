@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <!--
-        A contracts assembly (ADR 0001, Which projects may target what): requests, a stream request and notifications, with their handlers in
-        Keryx.Samples.Orders. netstandard2.0, as contracts shared with older clients often are; [assembly: KeryxContracts] turns off KRX001.
+        A contracts assembly (ADR 0001, Which projects may target what): the order notifications, handled in Keryx.Samples.Orders and in the
+        host. netstandard2.0, as contracts shared with older clients often are. It declares no requests: a request's handler lives in the
+        request's own assembly (KRX023), so the order requests are declared in Keryx.Samples.Orders.
     -->
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>

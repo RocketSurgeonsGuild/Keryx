@@ -3,7 +3,7 @@ using Keryx.Analyzers.Diagnostics;
 namespace Keryx.Tests.Diagnostics;
 
 /// <summary>
-///     KRX002-KRX007, KRX012 (handler classes), KRX013-KRX018 and KRX040, each with a positive and a negative case.
+///     KRX002-KRX007, KRX012 (handler classes), KRX013-KRX018, KRX023 and KRX040, each with a positive and a negative case.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HandlerAnalyzerTests : AnalyzerTest
@@ -554,6 +554,67 @@ public class HandlerAnalyzerTests : AnalyzerTest
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    /// <summary>A library that declares a request, a stream request and a notification, for KRX023 (no handlers: KRX001 is its own).</summary>
+    private const string MessagesLibrary = """
+        namespace Messages;
+        public sealed record Ping : Keryx.IRequest<string>;
+        public sealed record Numbers : Keryx.IStreamRequest<int>;
+        public sealed record Happened : Keryx.INotification;
+        """;
+
+    [Test]
+    [Arguments("", "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    [Arguments("", "private static async IAsyncEnumerable<int> Handle(Messages.Numbers request) { yield return 1; await Task.Yield(); }", "Numbers")]
+    [Arguments("[assembly: KeryxHost]", "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    public async Task KRX023_Handler_Of_A_Request_Declared_In_Another_Assembly(
+        string assemblyAttribute,
+        string handler,
+        string request,
+        CancellationToken cancellationToken
+    )
+    {
+        // A library and a host alike: a request's handler lives in the request's own assembly (decision 2026-11-26, KeryxContracts removed).
+        var result = await Builder
+                          .AddReferences(Hosts.TestLibraries.Reference("Messages", MessagesLibrary))
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + assemblyAttribute + "\npublic static partial class H { " + handler + " }")
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX023"]);
+        await Assert.That(Messages(diagnostics, "KRX023"))
+                    .IsEquivalentTo(
+                         [
+                             $"Handler 'H.Handle({request})' handles '{request}', which is declared in assembly 'Messages'; a request or stream request is handled in the assembly that declares it",
+                         ]
+                     );
+        var diagnostic = diagnostics.Single();
+        await Assert.That(diagnostic.Severity).IsEqualTo(Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
+        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("request");
+        await Assert.That(diagnostic.Descriptor.HelpLinkUri).IsEqualTo(Descriptors.HelpLinkBase + "krx023");
+        // The handler generator skips the handler, as it does for every handler error: no partial, so no manifest entry either.
+        await Assert.That(result.Results.Values.SelectMany(static r => r.SyntaxTrees).Where(static t => t.ToString().Contains("class H", StringComparison.Ordinal))).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public sealed record Ping : IRequest<string>; public static partial class H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public static partial class H { private static ValueTask Handle(Messages.Happened notification) => default; }")]
+    [Arguments("public sealed record Local : Messages.IBase; public static partial class H { private static string Handle(Local request) => \"\"; }")]
+    public async Task KRX023_Own_Requests_And_Notifications_From_Anywhere(string source, CancellationToken cancellationToken)
+    {
+        // Notifications are unaffected: a handler of a notification declared in another assembly is fine. A request declared here is fine
+        // even when its request interface comes from another assembly.
+        var result = await Builder
+                          .AddReferences(Hosts.TestLibraries.Reference("Messages", MessagesLibrary + "public interface IBase : Keryx.IRequest<string> { }"))
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + source)
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+
+        await Assert.That(Ids(result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics)).IsEmpty();
     }
 
     [Test]

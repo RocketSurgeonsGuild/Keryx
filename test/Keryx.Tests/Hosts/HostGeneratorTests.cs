@@ -8,7 +8,7 @@ namespace Keryx.Tests.Hosts;
 
 /// <summary>
 ///     Snapshots and diagnostics of the host generator (ADR 0001, Generated host; the Phase 3 brief): the mediator, <c>AddKeryx()</c>, the
-///     host namespace, the dispatch threshold, KRX022, KRX030 (with <c>ExternallyHandled</c>), KRX031 and KRX036 for <c>ExternallyHandled</c>.
+///     host namespace, the dispatch threshold, KRX022, KRX030 (referenced requests only: the host's own are KRX001's) and KRX031.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HostGeneratorTests : HostTest
@@ -168,7 +168,8 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddGlobalOption("build_property.TargetFrameworkIdentifier", ".NETStandard")
                                       .AddGlobalOption("build_property.TargetFrameworkVersion", "v2.0")
                                       .WithProjectName("Legacy.Host")
-                                      .AddSources(Usings + Requests + Orphan)
+                                      .AddReferences(OrphanLibrary)
+                                      .AddSources(Usings + Requests)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -203,9 +204,10 @@ public class HostGeneratorTests : HostTest
     [Test]
     public async Task KRX022_A_Host_Below_CSharp_14_Gets_No_Host_Sources(CancellationToken cancellationToken)
     {
-        // Requests is valid C# 13; the orphan shows that KRX030 is not reported either.
-        var source = Usings + Requests + Orphan;
+        // Requests is valid C# 13; the referenced orphan shows that KRX030 is not reported either.
+        var source = Usings + Requests;
         var result = await HostBuilder.WithLanguageVersion(LanguageVersion.CSharp13)
+                                      .AddReferences(OrphanLibrary)
                                       .WithAnalyzer<LanguageVersionAnalyzer>()
                                       .AddSources(source)
                                       .Build()
@@ -226,9 +228,12 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
-    public async Task KRX030_Request_Types_Without_Handlers_In_The_Host(CancellationToken cancellationToken)
+    public async Task KRX001_Not_KRX030_For_The_Hosts_Own_Request_Types_Without_Handlers(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(
+        // KRX001 applies in a host too (decision 2026-11-26); KRX030 is the safety net for referenced requests only, so a request declared in
+        // the host is reported once.
+        var result = await HostBuilder.WithAnalyzer<MissingHandlerAnalyzer>()
+                                      .AddSources(
                                            Usings
                                          + """
                                            [assembly: KeryxHost]
@@ -246,20 +251,19 @@ public class HostGeneratorTests : HostTest
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
-        var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
-        await Assert.That(diagnostics.Select(static d => d.Id).Distinct()).IsEquivalentTo(["KRX030"]);
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
+        var diagnostics = result.AnalyzerResults[typeof(MissingHandlerAnalyzer)].Diagnostics;
+        await Assert.That(diagnostics.Select(static d => d.Id).Distinct()).IsEquivalentTo(["KRX001"]);
         await Assert.That(diagnostics.Select(static d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)))
                     .IsEquivalentTo(
                          [
-                             "Request type 'Orphan' has no handler in this host",
-                             "Request type 'OrphanStream' has no handler in this host",
-                             "Request type 'OrphanStruct' has no handler in this host",
-                             "Request type 'Outer.Nested' has no handler in this host",
-                             "Request type 'Split' has no handler in this host",
+                             "Request type 'Orphan' has no handler in this assembly",
+                             "Request type 'OrphanStream' has no handler in this assembly",
+                             "Request type 'OrphanStruct' has no handler in this assembly",
+                             "Request type 'Outer.Nested' has no handler in this assembly",
+                             "Request type 'Split' has no handler in this assembly",
                          ]
                      );
-        await Assert.That(diagnostics.All(static d => d.Severity == DiagnosticSeverity.Error && d.Location.GetLineSpan().Path.EndsWith(".cs", StringComparison.Ordinal))).IsTrue();
-        await Assert.That(diagnostics[0].Descriptor.HelpLinkUri).IsEqualTo(Descriptors.HelpLinkBase + "krx030");
     }
 
     [Test]
@@ -277,82 +281,13 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
-    public async Task ExternallyHandled_Silences_KRX030_For_The_Named_Type_Only(CancellationToken cancellationToken)
-    {
-        var result = await HostBuilder.AddSources(
-                                           Usings
-                                         + """
-                                           [assembly: KeryxHost]
-                                           [assembly: ExternallyHandled(typeof(Sample.Orphan))]
-                                           [assembly: ExternallyHandled(typeof(Sample.OrphanStream))]
-
-                                           namespace Sample;
-
-                                           public sealed record Orphan : IRequest<int>;
-                                           public sealed record OrphanStream : IStreamRequest<int>;
-                                           public sealed record Other : IRequest<int>;
-                                           """
-                                       )
-                                      .Build()
-                                      .GenerateAsync(cancellationToken);
-
-        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}"))
-                    .IsEquivalentTo(["KRX030: Request type 'Other' has no handler in this host"]);
-    }
-
-    [Test]
-    public async Task KRX036_For_ExternallyHandled_On_A_Handled_Request_Or_A_Type_That_Is_Not_A_Request(CancellationToken cancellationToken)
-    {
-        var result = await HostBuilder.AddSources(
-                                           Usings
-                                         + """
-                                           [assembly: KeryxHost]
-                                           [assembly: ExternallyHandled(typeof(Sample.Handled))]
-                                           [assembly: ExternallyHandled(typeof(Sample.Happened))]
-                                           [assembly: ExternallyHandled(typeof(string))]
-                                           [assembly: ExternallyHandled(typeof(IRequest<int>))]
-                                           [assembly: ExternallyHandled(typeof(Sample.Base))]
-                                           [assembly: ExternallyHandled(typeof(Sample.Generic<>))]
-
-                                           namespace Sample;
-
-                                           public sealed record Handled : IRequest<int>;
-                                           public static partial class H { private static int Handle(Handled request) => 1; }
-                                           public sealed record Happened : INotification;
-                                           public abstract record Base : IRequest<int>;
-                                           public sealed record Generic<T> : IRequest<int>;
-                                           """
-                                       )
-                                      .Build()
-                                      .GenerateAsync(cancellationToken);
-
-        var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
-        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}"))
-                    .IsEquivalentTo(
-                         [
-                             "KRX036: [assembly: ExternallyHandled(typeof(Handled))] has no effect, because 'Handled' has a handler in this host",
-                             "KRX036: [assembly: ExternallyHandled(typeof(Happened))] has no effect, because 'Happened' is not a request or stream request",
-                             "KRX036: [assembly: ExternallyHandled(typeof(string))] has no effect, because 'string' is not a request or stream request",
-                             "KRX036: [assembly: ExternallyHandled(typeof(IRequest<int>))] has no effect, because 'IRequest<int>' is not a request or stream request",
-                             "KRX036: [assembly: ExternallyHandled(typeof(Base))] has no effect, because 'Base' is not a request or stream request",
-                             "KRX036: [assembly: ExternallyHandled(typeof(Generic<>))] has no effect, because 'Generic<>' is not a request or stream request",
-                         ]
-                     );
-        await Assert.That(diagnostics.All(static d => d.Severity == DiagnosticSeverity.Warning && d.Location.IsInSource)).IsTrue();
-        foreach (var diagnostic in diagnostics)
-        {
-            await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).StartsWith("ExternallyHandled");
-        }
-    }
-
-    [Test]
     [Arguments(ReportDiagnostic.Suppress, null)]
     [Arguments(ReportDiagnostic.Warn, DiagnosticSeverity.Warning)]
     [Arguments(ReportDiagnostic.Default, DiagnosticSeverity.Error)]
     public async Task KRX030_Severity_Can_Be_Changed(ReportDiagnostic option, DiagnosticSeverity? expected, CancellationToken cancellationToken)
     {
         // What dotnet_diagnostic.KRX030.severity in .editorconfig becomes; the testing helpers do not pass severity options on.
-        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;\npublic sealed record Orphan : IRequest<int>;");
+        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;").AddReferences(OrphanLibrary);
         compilation = compilation.WithOptions(compilation.Options.WithSpecificDiagnosticOptions([new("KRX030", option)]));
 
         _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions)
@@ -367,8 +302,8 @@ public class HostGeneratorTests : HostTest
     public async Task KRX030_Severity_Can_Be_Changed_Per_File(ReportDiagnostic option, DiagnosticSeverity? expected, CancellationToken cancellationToken)
     {
         // What `[*.cs] dotnet_diagnostic.KRX030.severity` in an .editorconfig becomes: a per-tree option, which applies only to a diagnostic
-        // reported on the tree itself (OQ-35), not on a file location without one.
-        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;\npublic sealed record Orphan : IRequest<int>;");
+        // reported on the tree itself (OQ-35), not on a file location without one. A referenced request's KRX030 is on [assembly: KeryxHost].
+        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;").AddReferences(OrphanLibrary);
         compilation = compilation.WithOptions(compilation.Options.WithSyntaxTreeOptionsProvider(new TreeOptions(compilation.SyntaxTrees.Single(), "KRX030", option)));
 
         _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions)
@@ -467,8 +402,10 @@ public class HostGeneratorTests : HostTest
         await Assert.That(MediatorSource(result)).DoesNotContain("Send(global::Sample.Ping request");
     }
 
-    /// <summary>A request without a handler, for KRX030.</summary>
-    private const string Orphan = "\npublic sealed record Orphan : IRequest<int>;\n";
+    /// <summary>
+    ///     A referenced library with a request and no handler, for KRX030 (built without the analyzers, as if KRX001 were suppressed there).
+    /// </summary>
+    private static MetadataReference OrphanLibrary { get; } = TestLibraries.Reference("Orphans", "namespace Orphans; public sealed record Orphan : Keryx.IRequest<int>;");
 
     internal static string ManyRequests(int count)
     {

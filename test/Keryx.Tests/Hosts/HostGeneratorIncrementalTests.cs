@@ -71,10 +71,6 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostHandlerEntries,
         TrackingNames.HostHandlers,
         TrackingNames.HostHandlerList,
-        TrackingNames.HostRequestCandidates,
-        TrackingNames.HostRequestModels,
-        TrackingNames.HostRequests,
-        TrackingNames.HostRequestList,
         TrackingNames.HostNotificationCandidates,
         TrackingNames.HostNotificationModels,
         TrackingNames.HostNotifications,
@@ -86,7 +82,6 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostCompositionInputs,
         TrackingNames.HostCompositionAndCompilation,
         TrackingNames.HostSources,
-        TrackingNames.HostDiagnosticsInputs,
         TrackingNames.HostDiagnostics,
         TrackingNames.HostDiagnosticsAndCompilation,
     ];
@@ -230,7 +225,7 @@ public class HostGeneratorIncrementalTests
         var compilation = Compile(Host).AddReferences(contracts, orders);
         var driver = Run(compilation, cancellationToken);
         await Assert.That(driver.GetRunResult().Results.Single().GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("Send(global::Contracts.CreateOrder request");
+                    .Contains("Send(global::Orders.CreateOrder request");
 
         driver = driver.RunGenerators(
             compilation.AddSyntaxTrees(

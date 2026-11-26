@@ -52,8 +52,8 @@ internal readonly struct MessageType
     public bool IsNotificationOnly => IsNotification && RequestClosings + StreamClosings == 0;
 
     /// <summary>
-    ///     A concrete request or stream request type of a supported shape: the types KRX030 covers and <c>ExternallyHandled</c> can name
-    ///     (ADR 0001, Host control). An interface, an abstract request base or an open generic request type is not one.
+    ///     A concrete request or stream request type of a supported shape: the types KRX001 and KRX030 cover. An interface, an abstract request
+    ///     base or an open generic request type is not one.
     /// </summary>
     public bool IsCoveredRequest => ( IsRequest || IsStream ) && IsConcrete && !IsUnsupportedShape;
 

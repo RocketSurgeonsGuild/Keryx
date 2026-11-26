@@ -351,7 +351,6 @@ public class NotificationBehaviorTests : HostTest
             using System.Threading.Tasks;
             using Keryx;
 
-            [assembly: KeryxContracts]
             [assembly: Behavior(typeof(Contracts.ContractsLog))]
 
             namespace Contracts;

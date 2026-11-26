@@ -1,5 +1,4 @@
 using Keryx;
-using Keryx.Samples.Contracts;
 using Keryx.Samples.Host;
 using Keryx.Samples.Orders;
 using Microsoft.Extensions.DependencyInjection;

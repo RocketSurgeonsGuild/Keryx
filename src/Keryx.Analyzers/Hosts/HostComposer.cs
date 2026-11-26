@@ -267,36 +267,8 @@ internal static class HostComposer
             referencedRequests.Values.ToImmutableArray(),
             GlobalBehaviors(catalog),
             BehaviorExclusions(catalog),
-            ExternallyHandled(compilation, symbols),
             context.Diagnostics.ToImmutableArray()
         );
-    }
-
-    /// <summary>
-    ///     The host's <c>[assembly: ExternallyHandled(typeof(X))]</c> entries (ADR 0001, Host control), for KRX030 and KRX036, in declaration
-    ///     order.
-    /// </summary>
-    private static ImmutableArray<ExternallyHandledModel> ExternallyHandled(Compilation compilation, KeryxSymbols symbols)
-    {
-        var entries = ImmutableArray.CreateBuilder<ExternallyHandledModel>();
-        foreach (var attribute in compilation.Assembly.GetAttributes())
-        {
-            if (KeryxSymbols.IsAttribute(attribute, symbols.ExternallyHandledAttribute)
-             && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: ITypeSymbol type }])
-            {
-                entries.Add(
-                    new(
-                        CSharpText.TypeOf(type),
-                        type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                        // The same set KRX030 covers: an interface, abstract base or open generic is never reported, so naming one does nothing.
-                        MessageType.Classify(type, symbols).IsCoveredRequest,
-                        LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute))
-                    )
-                );
-            }
-        }
-
-        return entries.ToImmutable();
     }
 
     /// <summary>

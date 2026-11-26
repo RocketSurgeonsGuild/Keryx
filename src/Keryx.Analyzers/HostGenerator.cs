@@ -52,20 +52,9 @@ public sealed class HostGenerator : IIncrementalGenerator
                       .Select(static (entry, _) => entry!)
                       .WithTrackingName(TrackingNames.HostHandlers);
 
-        var requests = context
-                      .SyntaxProvider.CreateSyntaxProvider(
-                           static (node, _) => HostModelFactory.IsRequestCandidateSyntax(node),
-                           static (syntaxContext, cancellationToken) => HostModelFactory.CreateRequest(syntaxContext, cancellationToken)
-                       )
-                      .WithTrackingName(TrackingNames.HostRequestCandidates)
-                      .Where(static request => request is not null)
-                      .WithTrackingName(TrackingNames.HostRequestModels)
-                      .Select(static (request, _) => request!)
-                      .WithTrackingName(TrackingNames.HostRequests);
-
         var notifications = context
                            .SyntaxProvider.CreateSyntaxProvider(
-                                static (node, _) => HostModelFactory.IsRequestCandidateSyntax(node),
+                                static (node, _) => HostModelFactory.IsNotificationCandidateSyntax(node),
                                 static (syntaxContext, cancellationToken) => HostModelFactory.CreateNotification(syntaxContext, cancellationToken)
                             )
                            .WithTrackingName(TrackingNames.HostNotificationCandidates)
@@ -113,9 +102,7 @@ public sealed class HostGenerator : IIncrementalGenerator
         // Diagnostics have their own output: they are computed from the cached models, and only reporting them reads the compilation, to
         // put each one on its syntax tree so per-file .editorconfig severity applies (OQ-35). The source output above stays cached.
         var diagnostics = composition
-                         .Combine(requests.Collect().WithTrackingName(TrackingNames.HostRequestList))
-                         .WithTrackingName(TrackingNames.HostDiagnosticsInputs)
-                         .Select(static (inputs, _) => CreateDiagnostics(inputs.Left, inputs.Right))
+                         .Select(static (model, _) => CreateDiagnostics(model))
                          .WithTrackingName(TrackingNames.HostDiagnostics);
 
         context.RegisterSourceOutput(
@@ -138,15 +125,14 @@ public sealed class HostGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline) and for the referenced
-    ///     ones (from the scan, those declared in another host included, OQ-16), except the types <c>ExternallyHandled</c> names, then KRX031,
-    ///     then the composition's own (KRX005 across assemblies, KRX032, KRX033, KRX034, KRX036 for <c>ExcludeHandler</c>), then KRX008 for
-    ///     behavior pairs that involve a referenced behavior (the analyzer checks in-source pairs), KRX035 for each global behavior, KRX036 for
-    ///     each <c>ExcludeBehavior</c> that removed nothing and for each <c>ExternallyHandled</c> that names a handled type or a type that is
-    ///     not a request (OQ-10), and KRX037 for each struct notification that handlers typed as an interface receive. A request whose handler
-    ///     candidate breaks a rule counts as handled: the analyzers report the handler.
+    ///     The host diagnostics: KRX030 for the referenced request and stream request types (from the scan, those declared in another host
+    ///     included, OQ-16; the host's own are KRX001's), then KRX031, then the composition's own (KRX005 across assemblies, KRX032, KRX033,
+    ///     KRX034, KRX036 for <c>ExcludeHandler</c>), then KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks
+    ///     in-source pairs), KRX035 for each global behavior, KRX036 for each <c>ExcludeBehavior</c> that removed nothing, and KRX037 for each
+    ///     struct notification that handlers typed as an interface receive. A request whose handler candidate breaks a rule counts as handled:
+    ///     the analyzers report the handler.
     /// </summary>
-    private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(HostModel model, ImmutableArray<HostRequestModel> requests)
+    private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(HostModel model)
     {
         var settings = model.Settings;
         if (!settings.Enabled)
@@ -156,11 +142,9 @@ public sealed class HostGenerator : IIncrementalGenerator
 
         var diagnostics = ImmutableArray.CreateBuilder<HostDiagnosticModel>();
         var handled = new HashSet<string>(model.HandledRequests, StringComparer.Ordinal);
-        var external = new HashSet<string>(model.ExternallyHandled.Where(static e => e.IsRequest).Select(static e => e.Type), StringComparer.Ordinal);
-        var reported = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var request in requests.OrderBy(static r => r.Type, StringComparer.Ordinal).Concat(model.ReferencedRequests))
+        foreach (var request in model.ReferencedRequests)
         {
-            if (!handled.Contains(request.Type) && !external.Contains(request.Type) && reported.Add(request.Type))
+            if (!handled.Contains(request.Type))
             {
                 diagnostics.Add(new(Descriptors.UnhandledRequestInHost, request.Location ?? settings.HostAttribute, ImmutableArray.Create(request.DisplayName)));
             }
@@ -198,20 +182,6 @@ public sealed class HostGenerator : IIncrementalGenerator
                         exclusion.Location ?? settings.HostAttribute,
                         ImmutableArray.Create("ExcludeBehavior", exclusion.Display, Descriptors.NotPartOfAnyPipeline(exclusion.Display))
                     )
-                );
-            }
-        }
-
-        // ExternallyHandled has no effect on a type the host handles or a type that is not a request or stream request (OQ-10).
-        foreach (var entry in model.ExternallyHandled)
-        {
-            var reason = !entry.IsRequest ? Descriptors.NotARequest(entry.Display)
-                : handled.Contains(entry.Type) ? Descriptors.HandledByThisHost(entry.Display)
-                : null;
-            if (reason is not null)
-            {
-                diagnostics.Add(
-                    new(Descriptors.UnusedExclusion, entry.Location ?? settings.HostAttribute, ImmutableArray.Create("ExternallyHandled", entry.Display, reason))
                 );
             }
         }

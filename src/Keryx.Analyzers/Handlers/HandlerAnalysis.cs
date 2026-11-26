@@ -178,7 +178,7 @@ internal static class HandlerAnalysis
         !GetCandidates(type, symbols).IsEmpty || type.GetTypeMembers().Any(nested => IsOrContainsHandlerClass(nested, symbols));
 
     /// <summary>
-    ///     The method-level rules: KRX002, KRX003, KRX013, KRX016 (injected and polymorphic notification parameters), KRX017, KRX018.
+    ///     The method-level rules: KRX002, KRX003, KRX013, KRX016 (injected and polymorphic notification parameters), KRX017, KRX018, KRX023.
     /// </summary>
     public static HandlerSignature AnalyzeMethod(IMethodSymbol method, KeryxSymbols symbols, IssueCollector issues)
     {
@@ -666,6 +666,13 @@ internal static class HandlerAnalysis
                 $"must take the concrete request type, not '{parameterTypeName}'; dispatch is by exact request type"
             );
             return;
+        }
+
+        // KRX023: a request's one handler lives in the request's own assembly, so that assembly checks it is handled (KRX001) and every host
+        // composes the same handler. Notifications may be handled anywhere.
+        if (parameter.Type.ContainingAssembly is { } requestAssembly && !SymbolEqualityComparer.Default.Equals(requestAssembly, method.ContainingAssembly))
+        {
+            issues.Add(Descriptors.ForeignRequestHandler, parameterLocation, methodName, parameterTypeName, requestAssembly.Identity.Name);
         }
 
         if (signature.Kind == HandlerKind.Stream)

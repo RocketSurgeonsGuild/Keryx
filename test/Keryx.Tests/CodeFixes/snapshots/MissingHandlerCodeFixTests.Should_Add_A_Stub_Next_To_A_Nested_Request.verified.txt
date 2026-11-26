@@ -31,25 +31,6 @@ public partial class CreateOrder
     private static ValueTask<Guid> Handle(Command request, CancellationToken ct) => throw new NotImplementedException();
 }
       }
-    },
-    {
-      Diagnostic: KRX001: Request type 'CreateOrder.Command' has no handler in this assembly,
-      Title: Mark this assembly as a contracts assembly,
-      EquivalenceKey: Keryx.MarkContractsAssembly,
-      After: {
-        Input0.cs:
-using System;
-using Keryx;
-
-[assembly: KeryxContracts]
-
-namespace Sample;
-
-public partial class CreateOrder
-{
-    public sealed record Command(string Sku) : IRequest<Guid>;
-}
-      }
     }
   ]
 }

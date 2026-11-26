@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Keryx.Analyzers.Diagnostics;
 
 /// <summary>
-///     The compilation-wide handler rules: KRX001 (a request without a handler in its assembly) and the same-assembly KRX005 (a request with
-///     more than one handler). Both need the whole compilation, so they are compilation-end diagnostics.
+///     The compilation-wide handler rules: KRX001 (a request without a handler in its assembly, in every assembly, hosts included) and the
+///     same-assembly KRX005 (a request with more than one handler). Both need the whole compilation, so they are compilation-end diagnostics.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MissingHandlerAnalyzer : DiagnosticAnalyzer
@@ -76,11 +76,6 @@ public sealed class MissingHandlerAnalyzer : DiagnosticAnalyzer
             {
                 context.ReportDiagnostic(Diagnostic.Create(Descriptors.DuplicateHandler, handler.Locations.FirstOrDefault(), requestName, names));
             }
-        }
-
-        if (symbols.IsContracts || symbols.IsHost)
-        {
-            return;
         }
 
         foreach (var request in requests)

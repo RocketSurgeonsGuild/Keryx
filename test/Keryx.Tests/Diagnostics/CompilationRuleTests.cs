@@ -15,6 +15,8 @@ public class CompilationRuleTests : AnalyzerTest
     [Arguments("public sealed record Ping : IRequest<int>;")]
     [Arguments("public sealed record Ping : IStreamRequest<int>;")]
     [Arguments("public static partial class Outer { public sealed record Ping : IRequest; }")]
+    [Arguments("[assembly: KeryxHost] public sealed record Ping : IRequest<int>;")]
+    [Arguments("[assembly: KeryxHost] public sealed record Ping : IStreamRequest<int>;")]
     public async Task KRX001_Request_Without_Handler(string source, CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<MissingHandlerAnalyzer>(source, cancellationToken);
@@ -26,8 +28,7 @@ public class CompilationRuleTests : AnalyzerTest
     [Test]
     [Arguments("public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
     [Arguments("public sealed record Ping : IRequest<int>; public class Broken { public string Handle(Ping p) => \"\"; }")]
-    [Arguments("[assembly: KeryxContracts] public sealed record Ping : IRequest<int>;")]
-    [Arguments("[assembly: KeryxHost] public sealed record Ping : IRequest<int>;")]
+    [Arguments("[assembly: KeryxHost] public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
     [Arguments("public abstract record Base : IRequest<int>; public interface IQuery : IRequest<int> { }")]
     [Arguments("public sealed record Happened : INotification;")]
     public async Task KRX001_Handled_Or_Not_Required(string source, CancellationToken cancellationToken)
@@ -164,7 +165,7 @@ public class CompilationRuleTests : AnalyzerTest
                           .AddSources(
                                """
                                using Keryx;
-                               [assembly: ExternallyHandled(typeof(Ping))]
+                               [assembly: ExcludeHandler(typeof(Ping))]
                                public sealed class Ping : IRequest<int> { }
                                public sealed class Both : IRequest<int>, INotification { }
                                public class Handler { public string Handle(Ping request) => ""; }
@@ -179,17 +180,13 @@ public class CompilationRuleTests : AnalyzerTest
     }
 
     [Test]
-    [Arguments("", "ExternallyHandled(typeof(Ping))", "ExternallyHandled")]
-    [Arguments("", "ExcludeHandler(typeof(Ping))", "ExcludeHandler")]
-    [Arguments("", "ExcludeBehavior(typeof(Ping))", "ExcludeBehavior")]
-    [Arguments("[assembly: KeryxContracts]", "ExternallyHandled(typeof(Ping))", "ExternallyHandled")]
-    [Arguments("[assembly: KeryxContracts]", "ExcludeHandler(typeof(Ping))", "ExcludeHandler")]
-    [Arguments("[assembly: KeryxContracts]", "ExcludeBehavior(typeof(Ping))", "ExcludeBehavior")]
-    public async Task KRX043_Host_Only_Attribute_Outside_A_Host(string assemblyKind, string attribute, string name, CancellationToken cancellationToken)
+    [Arguments("ExcludeHandler(typeof(Ping))", "ExcludeHandler")]
+    [Arguments("ExcludeBehavior(typeof(Ping))", "ExcludeBehavior")]
+    public async Task KRX043_Host_Only_Attribute_Outside_A_Host(string attribute, string name, CancellationToken cancellationToken)
     {
-        // A library (no assembly attribute) and a contracts assembly: neither is a host, so the attribute has no effect (OQ-54).
+        // A library is not a host, so the attribute has no effect (OQ-54).
         var diagnostics = await AnalyzeAsync<HostOnlyAttributeAnalyzer>(
-            $"{assemblyKind}\n[assembly: {attribute}]\npublic sealed record Ping : IRequest<int>;",
+            $"[assembly: {attribute}]\npublic sealed record Ping : IRequest<int>;",
             cancellationToken
         );
 
@@ -208,7 +205,6 @@ public class CompilationRuleTests : AnalyzerTest
         var diagnostics = await AnalyzeAsync<HostOnlyAttributeAnalyzer>(
             """
             [assembly: KeryxHost]
-            [assembly: ExternallyHandled(typeof(Ping))]
             [assembly: ExcludeHandler(typeof(Ping))]
             [assembly: ExcludeBehavior(typeof(Ping))]
             public sealed record Ping : IRequest<int>;
@@ -224,9 +220,9 @@ public class CompilationRuleTests : AnalyzerTest
     {
         var diagnostics = await AnalyzeAsync<HostOnlyAttributeAnalyzer>(
             """
-            [assembly: ExternallyHandled(typeof(Ping))]
-            [assembly: ExternallyHandled(typeof(Pong))]
-            [assembly: ExcludeHandler(typeof(Ping)), ExcludeBehavior(typeof(Ping))]
+            [assembly: ExcludeHandler(typeof(Ping))]
+            [assembly: ExcludeBehavior(typeof(Pong))]
+            [assembly: ExcludeHandler(typeof(Pong)), ExcludeBehavior(typeof(Ping))]
             [assembly: System.Reflection.AssemblyMetadata("a", "b")]
             public sealed record Ping : IRequest<int>;
             public sealed record Pong : IRequest<int>;

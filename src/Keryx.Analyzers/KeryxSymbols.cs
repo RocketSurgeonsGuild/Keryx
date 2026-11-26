@@ -27,14 +27,12 @@ internal sealed class KeryxSymbols
         HandlerOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.HandlerOrderAttribute);
         PublishStrategyAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.PublishStrategyAttribute);
         KeryxHostAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHostAttribute);
-        KeryxContractsAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxContractsAttribute);
         KeryxManifestAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxManifestAttribute);
         BehaviorOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.BehaviorOrderAttribute);
         RunsAfterAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttribute);
         RunsBeforeAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttribute);
         ExcludeBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeBehaviorAttribute);
         ExcludeHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeHandlerAttribute);
-        ExternallyHandledAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExternallyHandledAttribute);
         KeryxHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHandlerAttribute);
         RequestBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RequestBehaviorAttribute);
         StreamBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.StreamBehaviorAttribute);
@@ -61,14 +59,12 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? HandlerOrderAttribute { get; }
     public INamedTypeSymbol? PublishStrategyAttribute { get; }
     public INamedTypeSymbol? KeryxHostAttribute { get; }
-    public INamedTypeSymbol? KeryxContractsAttribute { get; }
     public INamedTypeSymbol? KeryxManifestAttribute { get; }
     public INamedTypeSymbol? BehaviorOrderAttribute { get; }
     public INamedTypeSymbol? RunsAfterAttribute { get; }
     public INamedTypeSymbol? RunsBeforeAttribute { get; }
     public INamedTypeSymbol? ExcludeBehaviorAttribute { get; }
     public INamedTypeSymbol? ExcludeHandlerAttribute { get; }
-    public INamedTypeSymbol? ExternallyHandledAttribute { get; }
     public INamedTypeSymbol? KeryxHandlerAttribute { get; }
     public INamedTypeSymbol? RequestBehaviorAttribute { get; }
     public INamedTypeSymbol? StreamBehaviorAttribute { get; }
@@ -97,11 +93,6 @@ internal sealed class KeryxSymbols
     ///     Whether the compilation is a host (<c>[assembly: KeryxHost]</c>).
     /// </summary>
     public bool IsHost => HasAssemblyAttribute(KeryxHostAttribute);
-
-    /// <summary>
-    ///     Whether the compilation is a contracts assembly (<c>[assembly: KeryxContracts]</c>).
-    /// </summary>
-    public bool IsContracts => HasAssemblyAttribute(KeryxContractsAttribute);
 
     /// <summary>
     ///     Whether the compilation's language version is at least <see cref="MinimumLanguageVersion" />.

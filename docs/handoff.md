@@ -43,8 +43,10 @@ question, the interim behavior you are using and a proposal, continue with the s
   then `AggregateException`, notification behaviors (`[NotificationBehavior]`, once per publish, also with zero handlers); handlers are
   called directly, without per-handler pipelines, and `[Behavior]` on a notification handler method is KRX042.
 - Cross-assembly: the host reads `[KeryxHandler]` types, global behavior classes and request types from references with
-  `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache. A host marks request types handled
-  outside it with `[assembly: ExternallyHandled(typeof(X))]`; the host-only assembly attributes outside a host are KRX043.
+  `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache. A request's handler lives in the
+  request's own assembly (KRX001 everywhere, hosts included; KRX023 for a handler of another assembly's request); notifications may be
+  handled anywhere. The host-only assembly attributes outside a host are KRX043. `KeryxContracts` and `ExternallyHandled` were removed in
+  the second rework; their designs are in `docs/future-requirements.md`.
 
 ## Repository layout
 
@@ -109,7 +111,9 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
 - The ADR, this brief, `CONTEXT.md` and `open-questions.md` are the initial commit on `main`, pushed to
   `git@github.com:RocketSurgeonsGuild/Keryx.git`.
 - All phases happen on one feature branch, one commit per phase, each commit passing `mise run build` (build + tests). Commits go through
-  the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit.
+  the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit. The hook's `dotnet-format` step runs
+  `dotnet format whitespace` only (decided 2026-11-26): the style and analyzer passes rewrote code on commit, and the build's analyzers
+  (warnings as errors) enforce style instead.
 - After Phase 0, push the branch and open a **draft** PR to `main`, so CI runs on every later phase. Mark it ready for review after the
   last phase (Phase 8); that step is left to the owner. Never merge it.
 - Continue from one phase to the next without waiting. A failed Phase 4 gate does not stop work (decided 2026-11-26): record the numbers,
@@ -144,15 +148,16 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
   `RequestBehaviorAttribute`, `StreamBehaviorAttribute` and `NotificationBehaviorAttribute`. There are no behavior interfaces and no
   per-handler notification kind. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and `RunsBefore` target classes and methods;
   `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type argument).
-- **Host attributes.** `KeryxHost`, `KeryxContracts`, `ExcludeBehavior`, `ExcludeHandler` and `ExternallyHandledAttribute`
-  (`[assembly: ExternallyHandled(typeof(X))]`, `AllowMultiple`, property `RequestType`).
+- **Host attributes.** `KeryxHost`, `ExcludeBehavior` and `ExcludeHandler`. There is no `KeryxContracts` or `ExternallyHandled`
+  (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`).
 - **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
   for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8). The .NET 11 shared framework carries the
   assembly, so the SDK's package pruning drops the reference for `net11.0` and nothing keeps it (OQ-56). The comment in
   `src/Keryx/build/Keryx.props` gives the C# 14 floor as the reason for the `LangVersion` default.
 
 **Done when:** the abstractions compile for all three TFMs; unit tests cover `Unit` equality and `UnitAdapter` (including a zero-allocation
-test on net10+); the public API snapshot lists the three kind attributes and `ExternallyHandledAttribute` and no behavior interface,
+test on net10+); the public API snapshot lists the three kind attributes and no behavior interface, `KeryxContractsAttribute`,
+`ExternallyHandledAttribute`,
 generic `RunsAfter<T>`/`RunsBefore<T>`, `PublishBehaviorAttribute` or `NotificationHandlerBehaviorAttribute`; the `KnownTypeNames` test
 passes; the packed `Keryx` package lists `Microsoft.Extensions.DependencyInjection.Abstractions` in the `net10.0` and `netstandard2.0`
 dependency groups with the versions above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.csproj` checks
@@ -162,9 +167,11 @@ that in the packed nuspec after every pack.
 
 Handler-candidate selection, handler partial generation (constructor, `InvokeAsync`, return adaptation, keyed/default parameter copying,
 static invoker, `[KeryxHandler]` and `[assembly: KeryxManifest(FormatVersion = 1)]`). Analyzer rules KRX001–KRX007, KRX011–KRX018,
-KRX021 and KRX022, and the shape checks for notification handlers (KRX040, KRX041). KRX022 (language version below C# 14, OQ-52) is
+KRX021, KRX022 and KRX023, and the shape checks for notification handlers (KRX040, KRX041). KRX001 applies in every assembly, hosts
+included; KRX023 (a handler of a request or stream request declared in another assembly, decided in the second rework) is reported on
+the handler's request parameter, and the generators skip that handler like any handler error. KRX022 (language version below C# 14, OQ-52) is
 reported once per compilation from the parse options; with it, the handler generator emits nothing for that project (no manifest, no
-partials), so the only error the user sees is KRX022. Code fixes for KRX001 (both actions), KRX002, KRX004 and KRX014, in
+partials), so the only error the user sees is KRX022. Code fixes for KRX001 (add a handler stub, also in a host), KRX002, KRX004 and KRX014, in
 `src/Keryx.Analyzers/CodeFixes`.
 
 **Done when:** snapshot tests cover every handler shape (nested/top-level, static/instance, every return type, keyed and default
@@ -178,7 +185,8 @@ reported, C# 14 and `latest` are not, in a `netstandard2.0` project as well); ev
 contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic `Send`
 with exact-type dispatch, `Unsafe.As` result reinterpretation, `FrozenDictionary` above the threshold, `KeryxHandlerNotFoundException`,
 `AddKeryx()` with factory registrations (including value-type and keyed optional parameters), host namespace from `RootNamespace` with
-the sanitised assembly-name fallback, KRX030 for the host's own request types. Same-assembly handlers only. Like the handler generator,
+the sanitised assembly-name fallback. The host's own request types are KRX001's (the analyzer runs in hosts too), so the host
+generator does not collect them; KRX030 is Phase 7's, for referenced request types. Same-assembly handlers only. Like the handler generator,
 `HostGenerator` emits nothing when the parse options are below C# 14, so KRX022 stays the only error a host with an old `LangVersion` sees.
 
 **Done when:** runtime tests send through typed and generic paths (value-type and reference-type responses, `IRequest`, struct requests);
@@ -311,16 +319,18 @@ into the Phase 3 model.
 - Host rules KRX005 (cross-assembly), KRX030 for referenced request types, including those declared in another host (OQ-16), KRX032,
   KRX033, and KRX034, which also covers the injected parameter types of a referenced behavior method (OQ-47), per kind: KRX034 names the
   behavior method and its kind, and the class stays in the pipelines of the kinds whose methods resolve (OQ-57). `ExcludeHandler` with KRX036 for `ExcludeHandler`.
-- `[assembly: ExternallyHandled(typeof(X))]` turns KRX030 off for the named type; a type the host handles or that is not a request or
-  stream request is KRX036 (OQ-10). Outside a host, `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` have no effect and the
-  analyzer reports warning KRX043 on each (OQ-54). KRX043 has a descriptor, help link and `AnalyzerReleases.Unshipped.md` entry, and the
+- A request's handler lives in the request's own assembly (second rework): KRX030 is a safety net for referenced request types (an
+  excluded handler, an internal handler of a referenced host); a host's handler of a referenced request is KRX023, so `ExcludeHandler`
+  cannot replace a referenced request handler (OQ-59, open); the host's cross-assembly KRX005 stays as a safety net (OQ-60, open).
+  There is no `ExternallyHandled`. Outside a host, `ExcludeHandler` and `ExcludeBehavior` have no effect and the analyzer reports
+  warning KRX043 on each (OQ-54). KRX023 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries, and the
   `AnalyzerReleases.Unshipped.md` descriptions of KRX034 and KRX036 match the ADR's rows.
 - A `[Behavior]` on a referenced notification type that does not fit the type as the host resolves it is KRX009 on
   `[assembly: KeryxHost]`, naming the notification type and the behavior; the behavior is skipped and the rest of the publish pipeline kept
   (OQ-55).
-- Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/` (a contracts library with
-  `[assembly: KeryxContracts]`, targeting `netstandard2.0`, and a handler library with handlers, a global static behavior and notification
-  handlers). Every open behavior method in the samples constrains its message type parameter; `samples/hosts/README.md` and
+- Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/` (a contracts library with the order
+  notifications, targeting `netstandard2.0`, and a handler library with the order requests next to their handlers, a global static
+  behavior and notification handlers). Every open behavior method in the samples constrains its message type parameter; `samples/hosts/README.md` and
   `samples/libraries/README.md` name the static behavior classes. CI job: publish the sample host with `PublishAot=true`, fail on
   IL2xxx/IL3xxx, run it.
 
@@ -328,8 +338,9 @@ into the Phase 3 model.
 (KRX034), a missing injected parameter type of a referenced behavior method (KRX034; a two-kind class whose other kind still runs and is
 the only kind KRX035 lists, as a global, attached and `[assembly: Behavior]` behavior, reported once), a referenced global behavior that writes `TResponse?` (fits and runs for the same targets as in source), a newer format version (KRX032), a Keryx reference
 without a manifest (KRX033), duplicate handlers (KRX005), exclusion (including KRX036 for `ExcludeHandler`), a referenced global behavior
-marked only on a method, `ExternallyHandled` silencing KRX030 for the named type only and being KRX036 on a handled type and on a
-non-request, KRX043 for each of the three attributes in a library and in a contracts assembly (and not in a host), host KRX009 for a
+marked only on a method, KRX023 for a host's handler of a referenced request (also when the host excludes the referenced handler), KRX030
+for a referenced request without a handler, KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host
+KRX009 for a
 `[Behavior]` on a referenced notification type that no longer fits (the other publish behaviors still run; a fitting one reports nothing),
 and a test host that references an app host (KRX030 for an app request whose handler is internal, nothing for one whose handler is
 public); the incremental test shows downstream steps cached after an unrelated edit and `Modified` after a manifest change, and a
@@ -348,8 +359,8 @@ C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behavio
 wrapping the whole publish, examples with the message constraint, attaching per target on a request or stream handler method or on the
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the scoped mediator
 creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
-`ExternallyHandled`; KRX043), contracts assemblies, testing handlers through `InvokeAsync`, a diagnostics table matching the ADR with help
-links (KRX020 retired, KRX043 included), and benchmark results from a local run with machine details. A short "what is left" note in
+KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023 and KRX043 included), and benchmark results from a local run with machine details. A short "what is left" note in
 `docs/whats-left.md`.
 
 **Done when:** benchmarks run locally and in CI with `--job Dry`, and `Keryx.Benchmarks --verify` passes; the Linux `PipelinePrototype`

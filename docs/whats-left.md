@@ -14,7 +14,7 @@ person and what is left before a release.
 
 - **7d2fd01:** the C# 14 floor (KRX022 below it; both generators emit nothing there; `netstandard2.0` stays supported, OQ-52); the
   `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (OQ-8); `[assembly: ExternallyHandled]`
-  with KRX030 and KRX036 (OQ-10); KRX030 no longer skips request types declared in a referenced host (OQ-16); the host-only assembly
+  with KRX030 and KRX036 (OQ-10; removed again in the second rework, below); KRX030 no longer skips request types declared in a referenced host (OQ-16); the host-only assembly
   attributes outside a host are warning KRX043 (OQ-54).
 - **f54dc49:** behaviors are `static` classes with the three kind attributes (`[RequestBehavior]`, `[StreamBehavior]`,
   `[NotificationBehavior]`) and static `Handle`/`HandleAsync` behavior methods, replacing the five behavior interfaces; an open behavior
@@ -32,9 +32,23 @@ person and what is left before a release.
 
 CI on f54dc49 is green (build, lint, the Native AOT publish and the benchmarks Dry job).
 
+## In progress: the second rework (owner decisions, 2026-11-26)
+
+- **Requests are handled in their own assembly:** `[assembly: KeryxContracts]` and `[assembly: ExternallyHandled]` are removed (designs
+  kept in [future-requirements.md](future-requirements.md)); KRX001 applies in every assembly, hosts included; a handler of a request
+  declared in another assembly is the new error KRX023; host KRX030 covers referenced requests only. The sample order requests moved to
+  `Keryx.Samples.Orders`; `Keryx.Samples.Contracts` keeps the notifications. The pre-commit `dotnet format` step is whitespace only.
+
 ## Decisions for the owner
 
-None open. The three questions raised while implementing the rework were decided by the owner on 2026-11-26 and are implemented;
+Two open questions came up while implementing the second rework ([open-questions.md](adr/open-questions.md), **Open**):
+
+- **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
+  referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
+- **OQ-60:** generated manifests can no longer make two assemblies handle one request, so the host's cross-assembly KRX005 is only a
+  safety net; keep it or remove it?
+
+The three questions raised while implementing the first rework were decided by the owner on 2026-11-26 and are implemented;
 [open-questions.md](adr/open-questions.md) records them under **Decided**, folded into the ADR and the
 brief:
 
@@ -48,7 +62,7 @@ brief:
   nullability, so it fits annotated, oblivious and value type responses and not a non-annotated reference one (skipped as a global
   behavior, KRX009 when attached). A closed method's `next` and return type are checked with nullability the same way.
 
-Every entry is decided and folded into the ADR.
+Every other entry is decided and folded into the ADR.
 
 ## Gates and checks
 

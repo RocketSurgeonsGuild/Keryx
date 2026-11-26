@@ -4,8 +4,7 @@ using Keryx.Analyzers.Diagnostics;
 namespace Keryx.Tests.CodeFixes;
 
 /// <summary>
-///     KRX001, both actions: add a handler stub (nested and top-level requests, every request kind) and mark the assembly as a contracts
-///     assembly. Before/after snapshots.
+///     KRX001: add a handler stub (nested and top-level requests, every request kind, in a library and in a host). Before/after snapshots.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class MissingHandlerCodeFixTests : CodeFixTest
@@ -61,6 +60,26 @@ public class MissingHandlerCodeFixTests : CodeFixTest
 
                 public sealed class ListNamesHandler { }
             }
+            """,
+            cancellationToken
+        );
+
+        await Verify(result);
+    }
+
+    [Test]
+    public async Task Should_Add_A_Handler_Class_In_A_Host(CancellationToken cancellationToken)
+    {
+        // KRX001 applies in a host too (decision 2026-11-26): its own requests are handled in the host.
+        var result = await FixAsync<MissingHandlerAnalyzer, MissingHandlerCodeFixProvider>(
+            """
+            using Keryx;
+
+            [assembly: KeryxHost]
+
+            namespace Sample;
+
+            public sealed record GetName(int Id) : IRequest<string>;
             """,
             cancellationToken
         );

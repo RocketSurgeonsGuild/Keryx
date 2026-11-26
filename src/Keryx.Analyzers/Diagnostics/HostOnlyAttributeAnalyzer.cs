@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Keryx.Analyzers.Diagnostics;
 
 /// <summary>
-///     KRX043: <c>[assembly: ExternallyHandled]</c>, <c>[assembly: ExcludeHandler]</c> or <c>[assembly: ExcludeBehavior]</c> in an assembly
-///     without <c>[assembly: KeryxHost]</c> (OQ-54). Only a host reads them, so elsewhere they have no effect. Reported on each attribute.
+///     KRX043: <c>[assembly: ExcludeHandler]</c> or <c>[assembly: ExcludeBehavior]</c> in an assembly without <c>[assembly: KeryxHost]</c>
+///     (OQ-54). Only a host reads them, so elsewhere they have no effect. Reported on each attribute.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class HostOnlyAttributeAnalyzer : DiagnosticAnalyzer
@@ -44,8 +44,7 @@ public sealed class HostOnlyAttributeAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var name = Is(type, symbols.ExternallyHandledAttribute) ? "ExternallyHandled"
-            : Is(type, symbols.ExcludeHandlerAttribute) ? "ExcludeHandler"
+        var name = Is(type, symbols.ExcludeHandlerAttribute) ? "ExcludeHandler"
             : Is(type, symbols.ExcludeBehaviorAttribute) ? "ExcludeBehavior"
             : null;
         if (name is not null)

@@ -478,7 +478,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
     [Test]
     public async Task KRX008_Is_Checked_Once_Per_Pair_Declared_From_Both_Sides(CancellationToken cancellationToken)
     {
-        // Two referenced behaviors declare the same contradiction from both sides: A runs after B, and B runs before A.
+        // Two referenced behaviors declare the same contradiction from both sides: A runs after B, and B runs before A. The library's handler
+        // attaches both (a request's handler lives in the request's assembly, KRX023); the library is built without its analyzers.
         var library = Library(
             """
             using Keryx;
@@ -503,19 +504,19 @@ public class HostBehaviorDiagnosticsTests : HostTest
             {
                 public static global::System.Threading.Tasks.ValueTask<string> Handle<TNext>(Ping request, TNext next) where TNext : struct, INext<string> => next.InvokeAsync(default);
             }
+
+            public static partial class PingHandler
+            {
+                [Behavior(typeof(A))]
+                [Behavior(typeof(B))]
+                private static string Handle(Ping request) => "";
+            }
             """
         );
         const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
-
-            public static partial class PingHandler
-            {
-                [Behavior(typeof(Lib.A))]
-                [Behavior(typeof(Lib.B))]
-                private static string Handle(Lib.Ping request) => "";
-            }
             """;
 
         var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);

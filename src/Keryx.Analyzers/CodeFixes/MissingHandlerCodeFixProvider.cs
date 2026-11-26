@@ -15,15 +15,14 @@ using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 namespace Keryx.Analyzers.CodeFixes;
 
 /// <summary>
-///     KRX001, two actions (ADR 0001, Code fixes): add a handler stub (next to a nested request, or in a new <c>{RequestName}Handler</c> class
-///     and file for a top-level one), or mark the assembly <c>[assembly: KeryxContracts]</c>.
+///     KRX001 (ADR 0001, Code fixes): add a handler stub, next to a nested request, or in a new <c>{RequestName}Handler</c> class and file for
+///     a top-level one.
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(MissingHandlerCodeFixProvider))]
 [Shared]
 public sealed class MissingHandlerCodeFixProvider : CodeFixProvider
 {
     private const string AddStubKey = "Keryx.AddHandlerStub";
-    private const string MarkContractsKey = "Keryx.MarkContractsAssembly";
 
     private static readonly SymbolDisplayFormat QualifiedFormat = SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(
         SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier
@@ -33,7 +32,7 @@ public sealed class MissingHandlerCodeFixProvider : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } = [Descriptors.MissingHandler.Id];
 
     /// <summary>
-    ///     No fix-all: one action adds documents, and the other edits the assembly once.
+    ///     No fix-all: the action may add a document per request.
     /// </summary>
     public override FixAllProvider? GetFixAllProvider() => null;
 
@@ -69,15 +68,6 @@ public sealed class MissingHandlerCodeFixProvider : CodeFixProvider
                     diagnostic
                 );
             }
-
-            context.RegisterCodeFix(
-                CodeAction.Create(
-                    "Mark this assembly as a contracts assembly",
-                    _ => Task.FromResult(context.Document.WithSyntaxRoot(AddContractsAttribute(root))),
-                    MarkContractsKey
-                ),
-                diagnostic
-            );
         }
     }
 
@@ -172,20 +162,5 @@ public sealed class MissingHandlerCodeFixProvider : CodeFixProvider
                 return name;
             }
         }
-    }
-
-    private static SyntaxNode AddContractsAttribute(SyntaxNode root)
-    {
-        if (root is not CompilationUnitSyntax unit)
-        {
-            return root;
-        }
-
-        var attribute = AttributeList(
-                            AttributeTargetSpecifier(Token(SyntaxKind.AssemblyKeyword)),
-                            SingletonSeparatedList(Attribute(ParseName("global::Keryx.KeryxContracts")))
-                        )
-                       .WithAdditionalAnnotations(Formatter.Annotation, Simplifier.Annotation);
-        return unit.AddAttributeLists(attribute);
     }
 }

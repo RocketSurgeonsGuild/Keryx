@@ -115,28 +115,11 @@ internal static class HostModelFactory
     }
 
     /// <summary>
-    ///     The syntax predicate of the host's request pipeline: a class, struct or record declaration with a base list (a type without one
+    ///     The syntax predicate of the host's notification pipeline: a class, struct or record declaration with a base list (a type without one
     ///     implements no interface).
     /// </summary>
-    public static bool IsRequestCandidateSyntax(SyntaxNode node) =>
+    public static bool IsNotificationCandidateSyntax(SyntaxNode node) =>
         node is TypeDeclarationSyntax { BaseList: not null } and ( ClassDeclarationSyntax or StructDeclarationSyntax or RecordDeclarationSyntax );
-
-    /// <summary>
-    ///     The request or stream request type a declaration declares, for KRX030, or nothing. Uses the same rules as KRX001.
-    /// </summary>
-    public static HostRequestModel? CreateRequest(GeneratorSyntaxContext context, CancellationToken cancellationToken)
-    {
-        return context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is not INamedTypeSymbol type
-         || KeryxSymbols.Create(context.SemanticModel.Compilation) is not { } symbols
-            ? null
-            : MessageType.Classify(type, symbols).IsCoveredRequest
-            ? new(
-                CSharpText.TypeOf(type),
-                type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                LocationInfo.From(type.Locations.FirstOrDefault())
-            )
-            : null;
-    }
 
     /// <summary>
     ///     The metadata name of the concrete notification type a declaration declares, or nothing (ADR 0001, Notifications). The host knows

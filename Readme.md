@@ -126,8 +126,9 @@ public static partial class Orders
 }
 ```
 
-Each request has one handler in the whole application ([KRX005](#krx005)); a request without one is [KRX001](#krx001) in its assembly
-(code fixes: add a handler stub, or mark the assembly as a contracts assembly) and [KRX030](#krx030) in the host.
+Each request has one handler in the whole application ([KRX005](#krx005)), in the request's own assembly: a request without one is
+[KRX001](#krx001) in its assembly, hosts included (code fix: add a handler stub), and a handler of a request declared in another assembly
+is [KRX023](#krx023). Notifications may be handled in any assembly.
 
 **Injected parameters** are resolved by generated code, never by reflection:
 
@@ -152,8 +153,9 @@ var id = await handler.InvokeAsync(new CreateOrder.Command("apple", 3), Cancella
 
 A handler with nothing injected gets a `static InvokeAsync`. To test whole pipelines (behaviors, notification fan-out), make the test
 project a host with `[assembly: KeryxHost]`, call `AddKeryx()` on a `ServiceCollection` and send through the mediator. A test host can
-reference the app host; to replace one of its handlers, exclude it with `[assembly: ExcludeHandler(typeof(TheHandler))]` and write your
-own.
+reference the app host. It can exclude one of its handlers with `[assembly: ExcludeHandler(typeof(TheHandler))]` and, for a
+notification handler, write its own; a request's handler can only be swapped through the services it injects, because a host's handler of
+a referenced request is [KRX023](#krx023) (open question OQ-59).
 
 ## Behaviors
 
@@ -372,20 +374,21 @@ Requests, notifications and handlers can live in any project that references `Ke
 assembly carries a **manifest** in its metadata (`[assembly: KeryxManifest]` and one `[KeryxHandler]` attribute per public handler class),
 which every host that references it reads, whether the reference is a project or a package.
 
-- A **contracts assembly** holds requests whose handlers live elsewhere. Mark it `[assembly: KeryxContracts]` to turn off
-  [KRX001](#krx001) there.
-- A **handler library** contains `public` handler classes, and may declare `[GlobalBehavior]`s that every referencing host applies.
-- In the host, a request handled in two assemblies is [KRX005](#krx005); `[assembly: ExcludeHandler(typeof(X))]` drops a referenced
-  handler. A request the host can see without a handler anywhere is [KRX030](#krx030). A host that references contracts handled out of
-  process names each such request with `[assembly: ExternallyHandled(typeof(X))]`; `.editorconfig` can also lower KRX030 for the whole
-  host.
+- A request or stream request is declared in the same assembly as its handler. KRX001 checks that every request has one there, in
+  libraries and hosts alike, and a handler of a request from another assembly is [KRX023](#krx023).
+- A **contracts assembly** declares notifications (and shared types) that other assemblies handle; a notification may be handled in any
+  assembly. It declares no requests.
+- A **handler library** declares its requests with their `public` handler classes, may handle notifications declared elsewhere, and may
+  declare `[GlobalBehavior]`s that every referencing host applies.
+- In the host, `[assembly: ExcludeHandler(typeof(X))]` drops a referenced handler. A referenced notification handler can be replaced by
+  the host's own; a referenced request handler cannot (the host's handler would be KRX023), so excluding one leaves its request without a
+  handler. A referenced request the host has no handler for is [KRX030](#krx030); `.editorconfig` can lower KRX030 for the whole host.
 - A host referenced by another host (a test project referencing the app) gets only the handlers the referenced host keeps `public`; the
-  referencing host reports KRX030 for every request of the referenced host without such a handler, unless it names it with
-  `ExternallyHandled`.
-- `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` are read only by a host; anywhere else they are [KRX043](#krx043).
+  referencing host reports KRX030 for every request of the referenced host without such a handler.
+- `ExcludeHandler` and `ExcludeBehavior` are read only by a host; anywhere else they are [KRX043](#krx043).
 
-See [samples/libraries](samples/libraries) (a `netstandard2.0` contracts library and a handler library with a global behavior and
-notification handlers) and [samples/hosts](samples/hosts).
+See [samples/libraries](samples/libraries) (a `netstandard2.0` contracts library with the order notifications, and a handler library
+with the order requests, their handlers, a global behavior and notification handlers) and [samples/hosts](samples/hosts).
 
 ## Diagnostics
 
@@ -394,11 +397,11 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 
 | ID                             | Severity | Meaning                                                                                                                                                        |
 | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <a id="krx001"></a>KRX001      | Error    | A request or stream request has no handler in its assembly. Not reported in a contracts assembly or a host. Code fixes: add a handler stub; mark the assembly `[assembly: KeryxContracts]`. |
+| <a id="krx001"></a>KRX001      | Error    | A request or stream request has no handler in its assembly (in every assembly, hosts included). Code fix: add a handler stub.                                                               |
 | <a id="krx002"></a>KRX002      | Error    | A handler is not `private static`, or returns a type its request kind does not allow (including `async void`). Code fix: make it `private static`.           |
 | <a id="krx003"></a>KRX003      | Error    | A handler has no request or notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract request or an interface.        |
 | <a id="krx004"></a>KRX004      | Error    | A handler class or a containing type is not `partial`, is file-local, is not `public` outside a host (narrower than `internal` in a host), or is not a class. Code fix: add `partial` (and `public`). |
-| <a id="krx005"></a>KRX005      | Error    | A request has two handlers (in one assembly, or across the host's assemblies).                                                                                |
+| <a id="krx005"></a>KRX005      | Error    | A request has two handlers (in one assembly, or across the host's assemblies; since KRX023 the host check only guards against manifests Keryx did not generate). |
 | <a id="krx006"></a>KRX006      | Error    | A class directly contains more than one handler.                                                                                                              |
 | <a id="krx007"></a>KRX007      | Error    | A handler class declares an instance or primary constructor, or has injected parameters and is `abstract`, has `required` members, or has a base type without an accessible parameterless constructor. |
 | <a id="krx008"></a>KRX008      | Error    | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order. Reported once per pair of behavior classes (and per kind where a method overrides the class's ordering). |
@@ -414,18 +417,19 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape: not `static` or generic, a kind attribute without a matching behavior method, two methods of one kind, a partially open method or one with other type parameters, an open method whose message type parameter lacks the kind's message constraint (directly or through a derived interface), a `next` without the `struct` and interface constraint, a wrong return type, or a `static` `Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to different kinds. |
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
-| <a id="krx030"></a>KRX030      | Error    | A request the host can see (its own, or a referenced one, including one declared in another host) has no handler anywhere in the host, unless `[assembly: ExternallyHandled(typeof(X))]` names it. Severity can be changed in `.editorconfig`. |
+| <a id="krx023"></a>KRX023      | Error    | A handler takes a request or stream request declared in another assembly. A request's handler lives in the request's own assembly; move the request or the handler. Notifications are not affected. |
+| <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an excluded referenced handler or an internal handler of a referenced host. The host's own requests are KRX001's. Severity can be changed in `.editorconfig`. |
 | <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`. The host generator emits nothing there.                                                    |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
 | <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. For a behavior method it names the method and its kind; the class still applies through its other kinds. |
 | <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies, once per kind, and the assembly it comes from.                                                                   |
-| <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline, or `ExternallyHandled` names a type the host handles or that is not a request or stream request. |
+| <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline.                                                                                                  |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |
 | <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect (including on a notification handler method), or `[GlobalBehavior]` on a class without a behavior kind attribute or on a method that is not a behavior method. |
-| <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`, where it has no effect. |
+| <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`, where it has no effect.                                  |
 
 ## Benchmarks
 

@@ -28,24 +28,6 @@ namespace Sample
     }
 }
       }
-    },
-    {
-      Diagnostic: KRX001: Request type 'ListNames' has no handler in this assembly,
-      Title: Mark this assembly as a contracts assembly,
-      EquivalenceKey: Keryx.MarkContractsAssembly,
-      After: {
-        Input0.cs:
-using Keryx;
-
-[assembly: KeryxContracts]
-
-namespace Sample
-{
-    public sealed record ListNames : IStreamRequest<string>;
-
-    public sealed class ListNamesHandler { }
-}
-      }
     }
   ]
 }

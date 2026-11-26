@@ -11,7 +11,6 @@ public class AttributeTests
 
     [Test]
     [Arguments(typeof(KeryxHostAttribute), AttributeTargets.Assembly, false)]
-    [Arguments(typeof(KeryxContractsAttribute), AttributeTargets.Assembly, false)]
     [Arguments(typeof(BehaviorAttribute), BehaviorTargets, true)]
     [Arguments(typeof(RequestBehaviorAttribute), AttributeTargets.Class, false)]
     [Arguments(typeof(StreamBehaviorAttribute), AttributeTargets.Class, false)]
@@ -22,7 +21,6 @@ public class AttributeTests
     [Arguments(typeof(RunsBeforeAttribute), AttributeTargets.Class | AttributeTargets.Method, true)]
     [Arguments(typeof(ExcludeBehaviorAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(ExcludeHandlerAttribute), AttributeTargets.Assembly, true)]
-    [Arguments(typeof(ExternallyHandledAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(PublishStrategyAttribute), AttributeTargets.Class | AttributeTargets.Struct, false)]
     [Arguments(typeof(HandlerOrderAttribute), AttributeTargets.Method, false)]
     [Arguments(typeof(KeryxHandlerAttribute), AttributeTargets.Class, false)]
@@ -55,10 +53,8 @@ public class AttributeTests
                              "BehaviorOrderAttribute",
                              "ExcludeBehaviorAttribute",
                              "ExcludeHandlerAttribute",
-                             "ExternallyHandledAttribute",
                              "GlobalBehaviorAttribute",
                              "HandlerOrderAttribute",
-                             "KeryxContractsAttribute",
                              "KeryxHandlerAttribute",
                              "KeryxHostAttribute",
                              "KeryxManifestAttribute",
@@ -92,7 +88,6 @@ public class AttributeTests
         await Assert.That(new BehaviorAttribute(typeof(Dictionary<,>)).BehaviorType).IsEqualTo(typeof(Dictionary<,>));
         await Assert.That(new ExcludeBehaviorAttribute(typeof(int)).BehaviorType).IsEqualTo(typeof(int));
         await Assert.That(new ExcludeHandlerAttribute(typeof(object)).HandlerType).IsEqualTo(typeof(object));
-        await Assert.That(new ExternallyHandledAttribute(typeof(Unit)).RequestType).IsEqualTo(typeof(Unit));
         await Assert.That(new PublishStrategyAttribute(PublishStrategy.Parallel).Strategy).IsEqualTo(PublishStrategy.Parallel);
         await Assert.That(new HandlerOrderAttribute(7).Order).IsEqualTo(7);
     }

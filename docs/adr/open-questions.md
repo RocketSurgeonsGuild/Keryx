@@ -12,11 +12,45 @@ decision directly. Where the two disagree, the Decision line and the ADR win. En
 whole design follow the "Static behaviors" and "Stream hook behaviors removed" entries; the owner's second round of decisions the same
 day added "One notification behavior kind" and "Message constraint on open behavior methods" after those two, and decided OQ-52 to
 OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end). OQ-56 to OQ-58 were
-raised while implementing the static-behavior rework and decided by the owner the same day (at the end).
+raised while implementing the static-behavior rework and decided by the owner the same day (at the end). The owner's decisions for the
+second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
+raised while implementing it and are open.
 
 ## Open
 
-None.
+### OQ-59: A host replacing an excluded referenced request handler
+
+Before the second rework, a host (typically a test host) replaced a referenced handler by excluding it with
+`[assembly: ExcludeHandler(typeof(X))]` and handling the request itself (ADR, Host control; OQ-45). With "Requests are handled in their own
+assembly" (below), a host's handler of a request declared in a referenced assembly is KRX023, hosts included, and the generators skip it
+like any handler error. So a host can still exclude a referenced request handler (the request is then KRX030), but it cannot provide its
+own; a test host that cannot resolve a handler's infrastructure (the case OQ-45 describes) is left with KRX030. Notification handlers
+are unaffected: a host may exclude a referenced notification handler and handle the notification itself.
+
+- **Interim:** KRX023 applies in a host as in any assembly, as decided. The host's handler of a referenced request is reported and
+  skipped; it counts as handling the request, so KRX030 is not added on top, and nothing dispatches the request. The ADR (Host control)
+  and the README say that `ExcludeHandler` can no longer replace a referenced request handler. Tests:
+  `CrossAssemblyTests.ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler` and
+  `ExcludeHandler_Skips_A_Referenced_Handler_The_Host_Cannot_Resolve` (now KRX030).
+- **Proposal:** allow it as the one exception to KRX023: in a host, a handler of a request declared in another assembly is allowed when
+  the host excludes that request's referenced handler with `ExcludeHandler` (KRX023 is still reported otherwise, and KRX036 still covers
+  an exclusion that names nothing). This keeps test hosts able to replace handlers that need infrastructure they do not have.
+  Alternative: keep the interim and document replacing through DI (a handler's injected services) as the way to swap behavior in tests.
+  Needs a decision.
+
+### OQ-60: KRX005 across assemblies once KRX023 exists
+
+The host reports KRX005 when a request or stream request has handlers in more than one assembly of its composed set (OQ-49). With
+KRX023, every request handler lives in its request's assembly: the handler generator skips a handler of another assembly's request, so no
+generated manifest describes one, and the host skips its own such handlers. Two assemblies of the composed set can then no longer handle
+one request, and the host check is reachable only through a manifest that Keryx did not generate (written by hand, or by a Keryx build
+from before KRX023).
+
+- **Interim:** keep the host's cross-assembly KRX005 unchanged as a safety net. Its test
+  (`CrossAssemblyTests.KRX005_For_Two_Referenced_Assemblies_That_Handle_One_Request`) now builds the two libraries with hand-written
+  manifests. The ADR's KRX005 row says the host check is a safety net.
+- **Proposal:** keep it (cheap, and it guards against manifests built with another rule). Alternative: remove the host's KRX005 and the
+  `DuplicateHandlerInHost` descriptor, leaving KRX005 to the analyzer within one assembly. Needs a decision.
 
 ## Decided
 
@@ -208,6 +242,8 @@ of decisions the same day:
 - C# does not allow two methods that differ only in their constraints (CS0111), so a class holding two kinds with the same parameter
   list names one method `Handle` and the other `HandleAsync`.
 - `ExternallyHandledAttribute` exposes the type as a property named `RequestType`.
+    - **Amended (2026-11-26):** `KeryxContracts` and `ExternallyHandled` are removed ("Requests are handled in their own assembly", at
+      the end); their designs are kept in [future-requirements.md](../future-requirements.md).
 
 Folded into the ADR (Status, Handlers, Injected parameters, Diagnostics and code fixes, Behaviors, Ordering, Streaming, Notifications,
 Generated host, Cross-assembly discovery, Attribute reference, Performance contract, Phase 4 gate, Alternatives considered,
@@ -325,6 +361,8 @@ contracts assembly handled out of process, and another it does handle, cannot ke
   (`AllowMultiple`) turns KRX030 off for `X`; naming a type the host does handle, or a type that is not a request or stream request, has no
   effect and is KRX036. `KeryxIgnoreUnhandledFrom` is not added. Folded into the ADR (Host control, Diagnostics, Attribute reference,
   Alternatives considered); implemented in the static-behavior rework (7d2fd01).
+- **Superseded (2026-11-26):** `ExternallyHandled` is removed ("Requests are handled in their own assembly", at the end); its design is
+  kept in [future-requirements.md](../future-requirements.md).
 
 ### OQ-11: Behavior constructors (2026-11-26)
 
@@ -347,6 +385,9 @@ Not in the original ADR, added while writing it:
 - **Interim:** both code fixes are implemented.
 - **Proposal:** confirm.
 - **Decision:** Accepted as proposed: both code fixes stay. Folded into the ADR (Code fixes).
+- **Superseded (2026-11-26):** the "Mark this assembly as a contracts assembly" action is removed with `[assembly: KeryxContracts]`
+  ("Requests are handled in their own assembly", at the end; design in [future-requirements.md](../future-requirements.md)); the KRX002
+  fix stays.
 
 ### OQ-14: Host namespace and target framework source (2026-11-26)
 
@@ -453,6 +494,8 @@ public API snapshot.
 - **Decision:** Accepted as proposed (`Inherited` keeps its default). The declarations are in the ADR's Attribute reference, together with
   the behavior kind attributes and `ExternallyHandled`; with static behaviors, `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and
   `RunsBefore` also target methods. Folded into the ADR (Attribute reference, Ordering).
+- **Amended (2026-11-26):** `KeryxContracts` and `ExternallyHandled` are removed ("Requests are handled in their own assembly", at the
+  end); their designs are kept in [future-requirements.md](../future-requirements.md).
 
 ### OQ-21: Hook behaviors and exceptions raised outside their fused segment (2026-11-26)
 
@@ -925,6 +968,7 @@ which is part of a pipeline.
 - **Proposal:** confirm, and say "a referenced handler class" in the KRX036 row. Alternative: let `ExcludeHandler` remove the host's own
   handlers too (deleting the handler does the same).
 - **Decision:** Accepted as proposed. Folded into the ADR (Host control, KRX036 row).
+- **Amended (2026-11-26):** with KRX023, a host can no longer provide its own handler for a referenced request it excludes (OQ-59, open).
 
 ### OQ-46: Where the host composes its pipelines once references take part (2026-11-26)
 
@@ -996,6 +1040,8 @@ KRX005 in the host names "both handlers and assemblies"; the ADR does not give t
   assembly's analyzer reported them).
 - **Proposal:** confirm and give the message in the KRX005 row.
 - **Decision:** Accepted as proposed. Folded into the ADR (KRX005 row).
+- **Amended (2026-11-26):** with KRX023, generated manifests can no longer make two assemblies handle one request, and the host skips
+  its own handlers of referenced requests; whether the host check stays is OQ-60 (open).
 
 ### OQ-50: KRX009 in the host (2026-11-26)
 
@@ -1099,6 +1145,8 @@ did not say what happens when a library or contracts assembly carries it; the KR
 - **Decision:** Accepted as proposed. KRX043 (warning, analyzer) is reported on `[assembly: ExternallyHandled]`,
   `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`. Folded into the ADR
   (Host control, Diagnostics, Attribute reference, Alternatives considered); implemented in the static-behavior rework (7d2fd01).
+- **Amended (2026-11-26):** `ExternallyHandled` is removed ("Requests are handled in their own assembly", at the end); KRX043 covers
+  `ExcludeHandler` and `ExcludeBehavior`.
 
 ### OQ-55: An attached behavior on a referenced notification type that does not fit (2026-11-26)
 
@@ -1192,3 +1240,51 @@ behavior, it breaks every host it reaches.
   called between `#nullable disable warnings` and `#nullable restore warnings`, so generated code compiles without warnings for every
   fit. A closed method's `next` and return type are checked with nullability the same way (an annotated position over an oblivious
   response fits with the pragma; `ValueTask<string?>` over a `string` response does not fit). Folded into the ADR (Behavior methods, Generic shape; KRX019; Matching) and the brief (Phases 4 and 7).
+
+### Requests are handled in their own assembly (2026-11-26)
+
+Owner decision 1 of the second rework. `KeryxContractsAttribute` and `ExternallyHandledAttribute` are removed, with everything tied to
+them: their `KnownTypeNames` and `KeryxSymbols` entries, `KeryxSymbols.IsContracts`, the KRX001 code-fix action "Mark this assembly as a
+contracts assembly", the host's `ExternallyHandled` model and KRX030 filtering, the `ExternallyHandled` reasons of KRX036 (whose title is
+now "An exclusion has no effect") and its mention in KRX043, and the `AnalyzerReleases.Unshipped.md` notes. Their designs (and OQ-10 and
+OQ-54, which shaped them) are kept in [future-requirements.md](../future-requirements.md).
+
+- A request's or stream request's handler lives in the request's own assembly. KRX001 applies in every assembly, hosts included.
+- A handler of a request or stream request declared in another assembly is the new error **KRX023** ("Handler 'H.Handle(Ping)' handles
+  'Ping', which is declared in assembly 'Messages'; a request or stream request is handled in the assembly that declares it"), reported
+  by `HandlerAnalyzer` on the handler's request parameter, in libraries and hosts. Like every handler error, the generators skip the
+  handler (no partial, no manifest entry, not composed by a host); in a host it still counts as handling its request, so KRX030 is not
+  added on top. KRX023 is the next free ID in the per-assembly range (KRX010 and KRX020 are retired).
+- Notifications are unaffected: declared anywhere, handled in any assembly.
+- Host KRX030 stays as a safety net for **referenced** requests (a referenced handler the host excludes, an internal handler of a
+  referenced host, a library built with KRX001 suppressed). The host's own request types are KRX001's, so the host's syntax pipeline for
+  them (`HostModelFactory.CreateRequest` and the `Keryx.Host.Request*` and `Keryx.Host.DiagnosticsInputs` tracking names) is removed and
+  a request without a handler in a host is reported once. Without `ExternallyHandled`, the only relief for KRX030 is its severity in
+  `.editorconfig`; a test host that references an app host with internal handlers gets KRX030 for those requests (OQ-16).
+- Consequences raised while implementing it: a host can no longer replace an excluded referenced request handler with its own (OQ-59,
+  open), and the host's cross-assembly KRX005 can no longer be reached from generated manifests (OQ-60, open).
+
+Folded into the ADR (status; Package and assemblies; Handlers; Diagnostics and code fixes: KRX001, KRX005, KRX023, KRX030, KRX031, KRX036,
+KRX043 and the KRX001 code fix; How the host reads it; Host control; Attribute reference; Alternatives considered; Consequences;
+Answered open questions), the brief (Phases 1, 2, 3, 7 and 8), CONTEXT.md (Contracts assembly) and the README. Tests: KRX023 positive
+(library and host, request and stream request) and negative (own request, a notification declared in another assembly, an own request
+whose request interface comes from another assembly); KRX001 in a host; the code fix in a host; KRX030 for a referenced request only;
+cross-assembly tests with the request types moved into the handler library.
+
+### Sample order requests next to their handlers (2026-11-26)
+
+Owner decision 2 of the second rework. `PlaceOrder`, `GetOrder`, `CancelOrder` and `ListOrders` (with their `OrderSummary` response) move
+from `Keryx.Samples.Contracts` to `Keryx.Samples.Orders` (`Requests.cs`, namespace `Keryx.Samples.Orders`), next to their handlers.
+`Keryx.Samples.Contracts` stays `netstandard2.0` and keeps the order notifications (`IOrderEvent`, `OrderPlaced`, `OrderCancelled`,
+now in `OrderEvents.cs`), without `[assembly: KeryxContracts]`. Folded into the sample project files, `samples/libraries/README.md`, the
+brief (Phase 7) and the README. The AOT job (`.github/workflows/aot.yml`) publishes every host under `samples/hosts/` and names no
+library, so it is unchanged; the sample host builds and runs ("every check passed").
+
+### Pre-commit formatting is whitespace only (2026-11-26)
+
+Owner decision 12 of the second rework. The `dotnet-format` step of `.config/hk.pkl` runs `dotnet format whitespace` (check:
+`--verify-no-changes`), not `dotnet format` with its style and analyzer passes, whose code fixes had rewritten code on commit four times
+(conflict markers, `NotImplementedException` switch arms, a rewritten conditional, a stray `case ...: break;` that skipped a nullability
+mismatch in `BehaviorMatching.PositionsFit`). The `--exclude-diagnostics` list, which only those passes read, is gone. The build's
+analyzers, with warnings as errors, enforce style. The same config serves the CI lint job (`hk check`/`hk fix`). Verified by running the
+hook on a staged change. Folded into the ADR (Repository layout) and the brief (Git workflow).

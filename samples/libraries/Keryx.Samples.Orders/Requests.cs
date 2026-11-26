@@ -1,8 +1,7 @@
-using Keryx;
+namespace Keryx.Samples.Orders;
 
-[assembly: KeryxContracts]
-
-namespace Keryx.Samples.Contracts;
+// A request's handler lives in the request's own assembly (KRX023), so the order requests are declared here, next to their handlers
+// (Handlers.cs). The order notifications stay in Keryx.Samples.Contracts: a notification may be handled in any assembly.
 
 /// <summary>Places an order; the response is the new order's number.</summary>
 public sealed class PlaceOrder(string sku, int quantity) : IRequest<int>
@@ -37,24 +36,4 @@ public sealed class OrderSummary(int number, string sku, int quantity)
     public int Quantity { get; } = quantity;
 
     public override string ToString() => $"#{Number} {Quantity} x {Sku}";
-}
-
-/// <summary>Something that happened to an order. Handlers typed with this interface receive every order event (polymorphic handlers).</summary>
-public interface IOrderEvent : INotification
-{
-    int Number { get; }
-}
-
-/// <summary>Published when an order is placed.</summary>
-public sealed class OrderPlaced(int number, string sku) : IOrderEvent
-{
-    public int Number { get; } = number;
-
-    public string Sku { get; } = sku;
-}
-
-/// <summary>Published when an order is cancelled.</summary>
-public sealed class OrderCancelled(int number) : IOrderEvent
-{
-    public int Number { get; } = number;
 }

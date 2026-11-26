@@ -57,18 +57,6 @@ internal static class TrackingNames
     /// <summary><see cref="HostHandlers" />, collected.</summary>
     public const string HostHandlerList = "Keryx.Host.HandlerList";
 
-    /// <summary>Every type declaration with a base list projected to a request or stream request model, or nothing.</summary>
-    public const string HostRequestCandidates = "Keryx.Host.RequestCandidates";
-
-    /// <summary>The <see cref="HostRequestCandidates" /> that are requests or stream requests (still typed as nullable).</summary>
-    public const string HostRequestModels = "Keryx.Host.RequestModels";
-
-    /// <summary>The request and stream request types declared in the host.</summary>
-    public const string HostRequests = "Keryx.Host.Requests";
-
-    /// <summary><see cref="HostRequests" />, collected.</summary>
-    public const string HostRequestList = "Keryx.Host.RequestList";
-
     /// <summary>Every type declaration with a base list projected to the metadata name of a concrete notification type, or nothing.</summary>
     public const string HostNotificationCandidates = "Keryx.Host.NotificationCandidates";
 
@@ -105,10 +93,7 @@ internal static class TrackingNames
     /// <summary>The composed host (own and referenced handlers, notifications, behaviors): the input of the host's source output.</summary>
     public const string HostSources = "Keryx.Host.Sources";
 
-    /// <summary>The composed host combined with <see cref="HostRequestList" />, before the diagnostics are computed.</summary>
-    public const string HostDiagnosticsInputs = "Keryx.Host.DiagnosticsInputs";
-
-    /// <summary>The host diagnostics (KRX005, KRX008, KRX030 to KRX037), computed from <see cref="HostDiagnosticsInputs" />.</summary>
+    /// <summary>The host diagnostics (KRX005, KRX008, KRX030 to KRX037), computed from <see cref="HostSources" />.</summary>
     public const string HostDiagnostics = "Keryx.Host.Diagnostics";
 
     /// <summary><see cref="HostDiagnostics" /> combined with the compilation, to report them on their syntax trees (fed by the compilation).</summary>

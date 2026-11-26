@@ -1,5 +1,3 @@
-using Keryx.Samples.Contracts;
-
 namespace Keryx.Samples.Orders;
 
 /// <summary>

@@ -1,0 +1,31 @@
+﻿{
+  Before: [
+    using Keryx;
+
+[assembly: KeryxHost]
+
+namespace Sample;
+
+public sealed record GetName(int Id) : IRequest<string>;
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX001: Request type 'GetName' has no handler in this assembly,
+      Title: Add a handler for 'GetName',
+      EquivalenceKey: Keryx.AddHandlerStub,
+      After: {
+        GetNameHandler.cs:
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Sample;
+
+public partial class GetNameHandler
+{
+    private static ValueTask<string> Handle(GetName request, CancellationToken ct) => throw new NotImplementedException();
+}
+      }
+    }
+  ]
+}

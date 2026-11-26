@@ -25,12 +25,6 @@
         public ExcludeHandlerAttribute(System.Type handlerType) { }
         public System.Type HandlerType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=true)]
-    public sealed class ExternallyHandledAttribute : System.Attribute
-    {
-        public ExternallyHandledAttribute(System.Type requestType) { }
-        public System.Type RequestType { get; }
-    }
     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method)]
     public sealed class GlobalBehaviorAttribute : System.Attribute
     {
@@ -69,11 +63,6 @@
         System.Collections.Generic.IAsyncEnumerable<TItem> InvokeAsync(System.Threading.CancellationToken cancellationToken);
     }
     public interface IStreamRequest<TItem> { }
-    [System.AttributeUsage(System.AttributeTargets.Assembly)]
-    public sealed class KeryxContractsAttribute : System.Attribute
-    {
-        public KeryxContractsAttribute() { }
-    }
     public sealed class KeryxHandlerNotFoundException : System.InvalidOperationException
     {
         public KeryxHandlerNotFoundException(System.Type requestType) { }

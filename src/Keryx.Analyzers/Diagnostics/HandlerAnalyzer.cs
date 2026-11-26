@@ -7,7 +7,7 @@ namespace Keryx.Analyzers.Diagnostics;
 
 /// <summary>
 ///     The rules on handlers and handler classes: KRX002, KRX003, KRX004, KRX006, KRX007, KRX012 (handler classes), KRX013, KRX014, KRX015,
-///     KRX016 (handler parameters and attached behaviors outside a host), KRX017, KRX018 and KRX040.
+///     KRX016 (handler parameters and attached behaviors outside a host), KRX017, KRX018, KRX023 and KRX040.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class HandlerAnalyzer : DiagnosticAnalyzer
@@ -27,6 +27,7 @@ public sealed class HandlerAnalyzer : DiagnosticAnalyzer
         Descriptors.NotEffectivelyPublic,
         Descriptors.ResponseNullabilityMismatch,
         Descriptors.InvalidServiceKey,
+        Descriptors.ForeignRequestHandler,
         Descriptors.MisplacedHandlerOrder,
     ];
 

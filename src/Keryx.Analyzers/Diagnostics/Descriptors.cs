@@ -32,7 +32,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Every request and stream request needs exactly one handler. Add one, or mark the assembly [assembly: KeryxContracts] when the handlers live in another assembly.",
+        description: "Every request and stream request needs exactly one handler, in the assembly that declares it (hosts included). A request whose handler lives elsewhere is not supported: move the request next to its handler.",
         helpLinkUri: HelpLinkBase + "krx001",
         customTags: WellKnownDiagnosticTags.CompilationEnd
     );
@@ -279,6 +279,17 @@ internal static class Descriptors
         customTags: WellKnownDiagnosticTags.CompilationEnd
     );
 
+    public static readonly DiagnosticDescriptor ForeignRequestHandler = new(
+        "KRX023",
+        "Handler of a request declared in another assembly",
+        "Handler '{0}' handles '{1}', which is declared in assembly '{2}'; a request or stream request is handled in the assembly that declares it",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A request's or stream request's one handler lives in the request's own assembly, so the assembly that declares a request can check it is handled (KRX001) and every host that references it composes the same handler. Move the request into this assembly, or the handler into the request's. Notifications are not affected: they may be handled in any assembly.",
+        helpLinkUri: HelpLinkBase + "krx023"
+    );
+
     public static readonly DiagnosticDescriptor UnhandledRequestInHost = new(
         "KRX030",
         "Request has no handler in the host",
@@ -286,7 +297,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Every request and stream request type a host can see, including those declared in a referenced host, needs exactly one handler in the host's composed set: the host's own handlers and the handlers of the assemblies it references. A request handled outside the host is named with [assembly: ExternallyHandled(typeof(X))], which turns the rule off for that type; the severity can also be changed in .editorconfig.",
+        description: "Every request and stream request type a host references, including those declared in a referenced host, needs exactly one handler in the host's composed set. Each assembly checks its own requests (KRX001), so this is a safety net: it catches a referenced request whose handler the host excluded (ExcludeHandler) or cannot see (an internal handler of a referenced host), or whose assembly was built with KRX001 suppressed. The severity can be changed in .editorconfig.",
         helpLinkUri: HelpLinkBase + "krx030"
     );
 
@@ -360,7 +371,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A referenced handler's manifest entry names types that resolve in the host, but not to the shapes the handler was built against (for example a request that became a stream request in a newer contracts assembly). The handler is left out of the host until its assembly is rebuilt against the same references.",
+        description: "A referenced handler's manifest entry names types that resolve in the host, but not to the shapes the handler was built against (for example a notification type that is no longer a notification in a newer contracts assembly). The handler is left out of the host until its assembly is rebuilt against the same references.",
         helpLinkUri: HelpLinkBase + "krx034"
     );
 
@@ -377,12 +388,12 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor UnusedExclusion = new(
         "KRX036",
-        "An exclusion or ExternallyHandled has no effect",
+        "An exclusion has no effect",
         "[assembly: {0}(typeof({1}))] has no effect, because {2}",
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "An exclusion removes a handler or behavior the host would otherwise use, and ExternallyHandled turns KRX030 off for a request the host does not handle. One that names nothing the host uses, a request the host handles, or a type that is not a request or stream request is probably a mistake.",
+        description: "An exclusion removes a handler or behavior the host would otherwise use. One that names nothing the host uses is probably a mistake.",
         helpLinkUri: HelpLinkBase + "krx036"
     );
 
@@ -437,16 +448,10 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "[assembly: ExternallyHandled], [assembly: ExcludeHandler] and [assembly: ExcludeBehavior] are read only by a host. In an assembly without [assembly: KeryxHost] they do nothing.",
+        description: "[assembly: ExcludeHandler] and [assembly: ExcludeBehavior] are read only by a host. In an assembly without [assembly: KeryxHost] they do nothing.",
         helpLinkUri: HelpLinkBase + "krx043"
     );
 
     /// <summary>The KRX036 reason for an exclusion that removes nothing.</summary>
     public static string NotPartOfAnyPipeline(string display) => $"'{display}' is not part of any pipeline in this host";
-
-    /// <summary>The KRX036 reason for <c>ExternallyHandled</c> naming a request the host handles.</summary>
-    public static string HandledByThisHost(string display) => $"'{display}' has a handler in this host";
-
-    /// <summary>The KRX036 reason for <c>ExternallyHandled</c> naming a type that is not a request or stream request.</summary>
-    public static string NotARequest(string display) => $"'{display}' is not a request or stream request";
 }
