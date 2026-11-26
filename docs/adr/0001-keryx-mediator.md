@@ -1123,8 +1123,9 @@ pipelines run to Tier 1 (`Keryx.Benchmarks --prototype-disasm`) is equivalent ev
 prototype (`--filter *PipelinePrototype*`) on a Linux runner with `DisassemblyDiagnoser`.
 
 The gate passed on all three criteria with the instance behaviors of Phases 4 to 8 (open-questions OQ-36), and criterion 1 also held for
-the generated pipelines. It is re-run after the static-behavior rework, with the prototype's behaviors written as static
-behavior methods; static calls are expected to inline at least as well.
+the generated pipelines. It was re-run after the static-behavior rework, with the prototype's behaviors written as static
+behavior methods, and passed on all three criteria again (OQ-36): 0 B at every depth, every behavior method and link inlined with no
+generic-virtual-method lookup, and depth 3 at 0.66× the baseline. Static calls inline at least as well as the instance behaviors did.
 
 A failed gate does **not** stop implementation (decided 2026-11-26). The measured numbers and the disassembly findings are recorded in
 `docs/adr/open-questions.md`, the work is committed with the struct-based pipeline as designed, and work continues. The ADR's fallback

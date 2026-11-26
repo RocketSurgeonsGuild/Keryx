@@ -240,7 +240,7 @@ Replaces OQ-11 and the interface-based behavior model of Phases 4 to 8.
   "Generic `RunsAfter<T>`/`RunsBefore<T>`" above; and the closed forms that matched one closing only (closed `ExcludeBehavior`, closed
   `RunsAfter` edges): every reference names the whole class.
 - KRX020 (exactly one public behavior constructor) is retired.
-- The Phase 4 gate is re-run after the rework.
+- The Phase 4 gate is re-run after the rework. (Done 2026-11-26: it passed on all three criteria; numbers and disassembly in OQ-36.)
 
 Details added while folding these decisions into the ADR, which follow from them and were confirmed by the owner in the second round
 of decisions the same day:
@@ -528,7 +528,7 @@ as errors and CI Phase 4 cannot be committed. How the tests behave in that case 
 - **Proposal:** re-enable the skipped tests once the allocation is fixed, and keep the Performance contract at 0 B. Alternative: record
   the measured allocation as a documented exception in the Performance contract and assert that value instead.
 - **Decision:** Moot. The Phase 4 gate passed criterion 1 (OQ-36) and the generated pipelines allocate 0 B, so no test was skipped. The
-  gate must be re-checked after the static-behavior rework; if criterion 1 then fails, this question reopens.
+  gate was re-run after the static-behavior rework and passed criterion 1 again (0 B at depths 1, 3 and 8; OQ-36), so it stays moot.
 
 ### OQ-23: Hint name of a nested handler class (2026-11-26)
 
@@ -719,9 +719,10 @@ validation rejects the run ("Only Windows and Linux are supported in Disassembly
 
 - **Interim:** `PipelinePrototypeBenchmarks` adds the diagnoser through a config only on Windows and Linux. Elsewhere the same pipelines are
   run to Tier 1 by `Keryx.Benchmarks --prototype-disasm` (an unoptimized delegate loop, so the benchmark methods tier up on their own as under
-  BenchmarkDotNet) with `DOTNET_JitDisasm` set, and the gate is judged from that listing. The gate **passed** on all three criteria
-  (re-run 2026-11-26 after a review found the first baseline handicapped; BenchmarkDotNet 0.15.8 default job, .NET 10.0.15 Arm64 RyuJIT,
-  Apple M4 Max, macOS 27.2, Dynamic PGO on; `test/Keryx.Benchmarks/Prototype`, `--filter *PipelinePrototype*`):
+  BenchmarkDotNet) with `DOTNET_JitDisasm` set, and the gate is judged from that listing. With the instance behaviors of Phases 4 to 8
+  the gate **passed** on all three criteria (re-run 2026-11-26 after a review found the first baseline handicapped; BenchmarkDotNet
+  0.15.8 default job, .NET 10.0.15 Arm64 RyuJIT, Apple M4 Max, macOS 27.2, Dynamic PGO on; `test/Keryx.Benchmarks/Prototype`,
+  `--filter *PipelinePrototype*`):
 
     | Depth | Nested-call baseline | Struct pipeline | Ratio | Allocated (both) |
     | ----- | -------------------- | --------------- | ----- | ---------------- |
@@ -743,6 +744,38 @@ validation rejects the run ("Only Windows and Linux are supported in Disassembly
     previous one (a dependent load per level), the likely reason the struct pipeline is faster at depth 3. At depth 1 the struct pipeline pays the
     lazy pipeline-context read (a `Volatile.Read` and a null check) that the baseline does not have; depth 1 is not a gate criterion.
     Criterion 1 (0 B at depths 1, 3 and 8) also holds for the generated pipelines (`PipelineAllocationTests`), so OQ-22 does not apply.
+
+    **Static design (re-run 2026-11-26 after the static-behavior rework, f54dc49): passed on all three criteria.** Same machine, job and
+    filter as above; the machine ran nothing else during the run. The prototype now has eight `static` behavior classes (`Behavior1` to
+    `Behavior8`), each with one open, message-constrained static method `Handle<TRequest, TResponse, TNext>(request, next, counter, ct)`
+    (`TNext : struct, INext<TResponse>`), no behavior instance and no interface; a lazily created sealed pipeline context per depth holds
+    the handler and each behavior method's injected `CallCounter`; each flat `readonly struct` link calls the next behavior method with
+    explicit type arguments (`Behavior2.Handle<Ping, int, Link2>(...)`) and the last calls `PingHandler.InvokeAsync`. The baselines are
+    unchanged.
+
+    | Depth | Nested-call baseline | Struct pipeline, static behaviors | Ratio | Allocated (both) | Instance behaviors (above) |
+    | ----- | -------------------- | --------------------------------- | ----- | ---------------- | -------------------------- |
+    | 1     | 0.52 ns              | 0.70 ns                           | 1.35  | 0 B              | 0.67 ns (1.28)             |
+    | 3     | 1.63 ns              | 1.08 ns                           | 0.66  | 0 B              | 1.09 ns (0.66)             |
+    | 8     | 2.07 ns              | 2.33 ns                           | 1.13  | 0 B              | 2.09 ns (1.00)             |
+
+    Disassembly (`DOTNET_JitDisasm`, Tier 1, "optimized using Synthesized PGO", Arm64): in `StructPipeline_Depth3` (164 bytes) and
+    `StructPipeline_Depth8` (244 bytes) every static behavior method (`BehaviorN.Handle<Ping, int, LinkN>`) and every `LinkN.InvokeAsync`,
+    down to `PingHandler.InvokeAsync`, is inlined into the benchmark loop (the JIT reports 16 and 31 single-block inlinees); depth 1 (132
+    bytes) is the same with one behavior. The loop body is one load of the lazy context and, per behavior, a load of its injected
+    `CallCounter` from the context and the increment, then the handler's body. The only call is the cold `CreateDepthN()`. No
+    generic-virtual-method lookup, runtime generic dictionary lookup or interface dispatch appears: at Tier 0 the behavior methods are
+    shared canonical code because `Ping` is a reference type, but the struct `TNext` argument is exact, so `next.InvokeAsync` is a direct
+    constrained call that inlines at Tier 1. The baselines inline completely too (`NestedCalls_Depth3`, 116 bytes), and the load shape
+    explains depth 3 as before (independent loads from the context against a dependent load per level). The listing does not explain the
+    depth-8 ratio of 1.13 (0.26 ns per send): the struct pipeline touches nine objects (the context and eight counters) where the
+    baseline touches eight behaviors (244 bytes against 196, neither with a call); depth 8 is not a timing criterion. Static calls inline at
+    least as well as the instance behaviors did, as the ADR expected.
+
+    Criteria: (1) 0 B at depths 1, 3 and 8, pass, so OQ-22 stays moot; (2) behavior method and `next.InvokeAsync` called directly, pass
+    on the `DOTNET_JitDisasm` listing; (3) depth 3 at 0.66x the baseline (1.08 ns against 1.63 ns), pass. The Linux run with
+    `DisassemblyDiagnoser` is the `prototype-disassembly` job of `.github/workflows/benchmarks.yml` (artifact
+    `pipeline-prototype-disassembly`); its output is to be added here after the job's first CI run.
 
 - **Proposal:** accept a `DOTNET_JitDisasm` listing as equivalent evidence for criterion 2, and when the gate is re-run in CI, run it on a
   Linux runner so `DisassemblyDiagnoser` output is available too.

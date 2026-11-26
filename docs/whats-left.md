@@ -3,11 +3,12 @@
 Nov 26, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework.
 
 Phases 0 to 7 are implemented for the static design on `feature/v1` (draft pull request #1): abstractions, handlers, the host, request,
-stream and notification pipelines, cross-assembly discovery, and the samples with the Native AOT job. Phase 8's benchmark suite exists and
-uses static behaviors; its other static-design items (the README rewrite, the Linux `PipelinePrototype` job, the gate re-run and the
-comparison re-run) are in progress and listed under Before a first release. The design review of 2026-11-26 replaced the behavior model,
-and that rework is implemented in two commits; the brief's phases now describe the static design as what they build, so there is no
-separate rework phase. This note lists what still needs a person and what is left before a release.
+stream and notification pipelines, cross-assembly discovery, and the samples with the Native AOT job. Phase 8 is done for the static
+design too: the benchmark suite uses static behaviors, the README is rewritten, the Phase 4 gate and the comparison benchmarks were
+re-run, and the benchmarks workflow has a Linux `PipelinePrototype` job (its first `DisassemblyDiagnoser` output is still to be
+recorded). The design review of 2026-11-26 replaced the behavior model, and that rework is implemented in two commits; the brief's
+phases now describe the static design as what they build, so there is no separate rework phase. This note lists what still needs a
+person and what is left before a release.
 
 ## Done: the static-behavior rework
 
@@ -25,6 +26,9 @@ separate rework phase. This note lists what still needs a person and what is lef
   KRX034 for unresolvable injected parameter types of referenced behavior methods (OQ-47); `ProjectionDataVersion` is 2; the samples, the
   gate prototype and the Keryx comparison subject use static behaviors, and the hook-behavior stream variant of the comparison benchmarks
   is gone (OQ-51).
+- **a2f0ff6:** the Phase 4 gate re-run on the static-behavior prototype and the comparison benchmarks re-run, with the README's
+  behavior, lifetime and diagnostics sections and its comparison tables rewritten for static behaviors; the benchmarks workflow gains
+  the Linux `prototype-disassembly` job (`--filter *PipelinePrototype*` with `DisassemblyDiagnoser`).
 
 CI on f54dc49 is green (build, lint, the Native AOT publish and the benchmarks Dry job).
 
@@ -50,15 +54,18 @@ Every other entry is decided and folded into the ADR.
 
 - **Phase 4 gate, instance behaviors:** passed on all three criteria (OQ-36). Criterion 2 (the behavior method and `next.InvokeAsync`
   called directly) was judged from a `DOTNET_JitDisasm` listing, accepted as equivalent evidence because BenchmarkDotNet's
-  `DisassemblyDiagnoser` does not run on macOS. Phase 8 adds a Linux `--filter *PipelinePrototype*` job with `DisassemblyDiagnoser` to
-  the benchmarks workflow (OQ-36; see Before a first release).
-- Phase 4 gate re-run on the static design: <GATE-RESULT>
+  `DisassemblyDiagnoser` does not run on macOS.
+- **Phase 4 gate, static design:** passed on all three criteria again (OQ-36): 0 B at depths 1, 3 and 8; every static behavior method
+  and `next.InvokeAsync` inlined with no generic-virtual-method lookup (`DOTNET_JitDisasm`); depth 3 at 0.66x the nested-call baseline
+  (1.08 ns against 1.63 ns). OQ-22 stays moot. The Linux `DisassemblyDiagnoser` evidence comes from the benchmarks workflow's
+  `prototype-disassembly` job; its first output is still to be added to OQ-36.
 - **Phase checks:** the tests, allocation tests (now on an optimized test host for `async` behaviors), incremental tests and the AOT job
   pass.
 - **Benchmarks in CI:** `.github/workflows/benchmarks.yml` builds the suite, runs `--verify` and every benchmark with `--job Dry` on the
-  pull request.
-- **Performance contract against the comparison run** (README, Benchmarks; measured with the instance behaviors, to be re-measured with
-  the static ones): Keryx allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per
+  pull request, and the `prototype-disassembly` job runs `--filter *PipelinePrototype*` on Linux with `DisassemblyDiagnoser` and uploads
+  the `pipeline-prototype-disassembly` artifact.
+- **Performance contract against the comparison run** (README, Benchmarks; re-measured with static behaviors on
+  2026-11-26): Keryx allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per
   sequential `Publish` to 1 and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the
   handler's state machine); a `Stream` with no behaviors allocates what the handler's iterator allocates, and with behaviors one iterator
   per stream behavior (there are no hook behaviors). The one generated async path, `UnitAdapter.ToUnit`, is checked by
@@ -68,14 +75,11 @@ Every other entry is decided and folded into the ADR.
   them.
 - **Publish baseline:** the direct call used to be an `async` method, which made it slower than Keryx's typed overload (ratio below 1).
   It is now non-async with an `async` fallback for handlers that do not complete synchronously, and the README's Publish table was
-  re-run: 0.00 ns (inlined) and 0.64 ns for 1 and 5 handlers, against Keryx typed at 0.68 ns and 0.74 ns.
+  re-run with static behaviors: 0.04 ns (inlined) and 0.67 ns for 1 and 5 handlers, against Keryx typed at 0.65 ns and 0.84 ns.
 
 ## Before a first release
 
-- Finish Phase 8 for the static design: the README rewritten to the ADR (static behaviors, the three kind attributes, no hook or
-  per-handler behaviors, `ExternallyHandled`, KRX043, the DI dependency, the C# 14 floor, the diagnostics table), the Linux
-  `PipelinePrototype` job with `DisassemblyDiagnoser`, the gate re-run recorded in `open-questions.md`, and the comparison benchmarks
-  re-run locally with the README's tables updated.
+- Add the `DisassemblyDiagnoser` findings from the first CI run of the `prototype-disassembly` job to OQ-36.
 - Decide OQ-56, OQ-57 and OQ-58.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`
