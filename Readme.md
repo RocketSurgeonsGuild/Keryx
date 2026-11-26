@@ -35,13 +35,16 @@ analyzers and code fixes (`analyzers/dotnet/cs`).
 - **The .NET 10 SDK (Roslyn 5.0) or later**, whatever framework your project targets. The generator does not load in older compilers.
 - **C# 14 or later** (the .NET 10 SDK's default) in every project that references Keryx, whatever framework it targets. The package sets
   `LangVersion` to `latest` when your project leaves it empty; a `LangVersion` below 14 that you set yourself is error [KRX022](#krx022).
-- Requests, notifications and handler libraries may target `netstandard2.0`. A **host** (the project with the mediator) targets
-  `net10.0` or later ([KRX031](#krx031)).
+- Requests, notifications and handler libraries may target `netstandard2.0`. A **host** (the project with the mediator: by default an
+  executable or a test project, see [Hosts](#hosts)) targets `net10.0` or later ([KRX031](#krx031)).
 - The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (8.0.x for `netstandard2.0`, 10.0.x for
   `net10.0`), which the generated host code uses. On `net11.0` the assembly comes from the shared framework, so that target lists no
   package dependency.
-- Analyzers do not flow through a `ProjectReference`: every project that declares requests or handlers, and every host, references the
-  `Keryx` package directly.
+- Reference the `Keryx` package directly from every project that declares requests or handlers, and from every host. A project that
+  gets the package only transitively behaves differently by route. Through a `ProjectReference` to a project that references Keryx, the
+  generators and analyzers still run unless that reference sets `PrivateAssets`. Through a package that depends on Keryx, they do not
+  flow (NuGet packs the dependency with `exclude="Build,Analyzers"`). In both cases the package's `buildTransitive` files apply the
+  same build defaults (`LangVersion`, `KeryxHost`).
 
 ## Quick start
 
@@ -51,8 +54,7 @@ using Keryx;
 using Microsoft.Extensions.DependencyInjection;
 using MyApp; // the host's root namespace, where AddKeryx() is generated
 
-[assembly: KeryxHost] // this project gets the generated KeryxMediator and AddKeryx()
-
+// An executable that references Keryx is a host: it gets the generated KeryxMediator and AddKeryx().
 var services = new ServiceCollection();
 services.AddSingleton<IOrderRepository, InMemoryOrderRepository>();
 services.AddKeryx();
@@ -151,8 +153,9 @@ var handler = new CreateOrder(new FakeOrderRepository());
 var id = await handler.InvokeAsync(new CreateOrder.Command("apple", 3), CancellationToken.None);
 ```
 
-A handler with nothing injected gets a `static InvokeAsync`. To test whole pipelines (behaviors, notification fan-out), make the test
-project a host with `[assembly: KeryxHost]`, call `AddKeryx()` on a `ServiceCollection` and send through the mediator. A test host can
+A handler with nothing injected gets a `static InvokeAsync`. To test whole pipelines (behaviors, notification fan-out), reference Keryx
+from the test project, which makes it a host (a test project is one by default), call `AddKeryx()` on a `ServiceCollection` and send
+through the mediator. A test host can
 reference the app host. It can exclude one of its handlers with `[assembly: ExcludeHandler(typeof(TheHandler))]` and, for a
 notification handler, write its own; a request's handler can only be swapped through the services it injects, because a host's handler of
 a referenced request is [KRX023](#krx023) (open question OQ-59).
@@ -346,7 +349,33 @@ public sealed record OrderShipped(Guid Id) : INotification;
 
 ## Hosts
 
-`[assembly: KeryxHost]` turns a project (`net10.0` or later) into a **host**. The host composes every pipeline at compile time from its
+A project (`net10.0` or later) is a **host** when its `KeryxHost` MSBuild property is `true`. The package sets it for you when the
+project leaves it empty: executables (`OutputType` `Exe` or `WinExe`) and test projects are hosts, everything else, class libraries
+included, is not. Set it yourself to change that:
+
+```xml
+<PropertyGroup>
+    <!-- A class library that hosts the mediator; or false in an executable or test project that is not a host. -->
+    <KeryxHost>true</KeryxHost>
+</PropertyGroup>
+```
+
+An executable or test project that runs the Keryx generators, through its own package reference or through a `ProjectReference` to a
+project that has one, is a host whatever framework it targets. One that targets a framework older than `net10.0` (`net8.0`, .NET
+Framework) gets [KRX031](#krx031) until it sets `<KeryxHost>false</KeryxHost>` (open question OQ-62). A test project that multi-targets
+sets it for the older frameworks only:
+
+```xml
+<PropertyGroup>
+    <KeryxHost Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">false</KeryxHost>
+</PropertyGroup>
+```
+
+Host diagnostics about something without a source location (a referenced
+type, the target framework) are reported without a location, so their severity is set for the whole project (a `.globalconfig` or
+`<NoWarn>`), not in an `.editorconfig` section.
+
+The host composes every pipeline at compile time from its
 own handlers and from the handlers, behaviors and notification types of every assembly it references, and generates, in its root
 namespace:
 
@@ -382,7 +411,7 @@ which every host that references it reads, whether the reference is a project or
   declare `[GlobalBehavior]`s that every referencing host applies.
 - In the host, `[assembly: ExcludeHandler(typeof(X))]` drops a referenced handler. A referenced notification handler can be replaced by
   the host's own; a referenced request handler cannot (the host's handler would be KRX023), so excluding one leaves its request without a
-  handler. A referenced request the host has no handler for is [KRX030](#krx030); `.editorconfig` can lower KRX030 for the whole host.
+  handler. A referenced request the host has no handler for is [KRX030](#krx030); a `.globalconfig` (or `<NoWarn>`) can lower KRX030 for the whole host.
 - A host referenced by another host (a test project referencing the app) gets only the handlers the referenced host keeps `public`; the
   referencing host reports KRX030 for every request of the referenced host without such a handler.
 - `ExcludeHandler` and `ExcludeBehavior` are read only by a host; anywhere else they are [KRX043](#krx043).
@@ -418,8 +447,8 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
 | <a id="krx023"></a>KRX023      | Error    | A handler takes a request or stream request declared in another assembly. A request's handler lives in the request's own assembly; move the request or the handler. Notifications are not affected. |
-| <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an excluded referenced handler or an internal handler of a referenced host. The host's own requests are KRX001's. Severity can be changed in `.editorconfig`. |
-| <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`. The host generator emits nothing there.                                                    |
+| <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an excluded referenced handler or an internal handler of a referenced host. The host's own requests are KRX001's. Reported without a location: change its severity in a `.globalconfig` or with `<NoWarn>`. |
+| <a id="krx031"></a>KRX031      | Error    | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. The host generator emits nothing there. An executable or test project is a host by default, whatever it targets: set `<KeryxHost>false</KeryxHost>` in one that is not meant to be a host, per target framework when it multi-targets ([Hosts](#hosts), OQ-62). |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
 | <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. For a behavior method it names the method and its kind; the class still applies through its other kinds. |
@@ -429,7 +458,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |
 | <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect (including on a notification handler method), or `[GlobalBehavior]` on a class without a behavior kind attribute or on a method that is not a behavior method. |
-| <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`, where it has no effect.                                  |
+| <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in a project that is not a host (`KeryxHost` is not `true`), where it has no effect.                                  |
 
 ## Benchmarks
 

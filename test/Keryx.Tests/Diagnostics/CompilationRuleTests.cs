@@ -12,28 +12,28 @@ namespace Keryx.Tests.Diagnostics;
 public class CompilationRuleTests : AnalyzerTest
 {
     [Test]
-    [Arguments("public sealed record Ping : IRequest<int>;")]
-    [Arguments("public sealed record Ping : IStreamRequest<int>;")]
-    [Arguments("public static partial class Outer { public sealed record Ping : IRequest; }")]
-    [Arguments("[assembly: KeryxHost] public sealed record Ping : IRequest<int>;")]
-    [Arguments("[assembly: KeryxHost] public sealed record Ping : IStreamRequest<int>;")]
-    public async Task KRX001_Request_Without_Handler(string source, CancellationToken cancellationToken)
+    [Arguments(false, "public sealed record Ping : IRequest<int>;")]
+    [Arguments(false, "public sealed record Ping : IStreamRequest<int>;")]
+    [Arguments(false, "public static partial class Outer { public sealed record Ping : IRequest; }")]
+    [Arguments(true, "public sealed record Ping : IRequest<int>;")]
+    [Arguments(true, "public sealed record Ping : IStreamRequest<int>;")]
+    public async Task KRX001_Request_Without_Handler(bool host, string source, CancellationToken cancellationToken)
     {
-        var diagnostics = await AnalyzeAsync<MissingHandlerAnalyzer>(source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<MissingHandlerAnalyzer>(source, cancellationToken, host: host);
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX001"]);
         await Assert.That(diagnostics[0].Descriptor.CustomTags).Contains("CompilationEnd");
     }
 
     [Test]
-    [Arguments("public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
-    [Arguments("public sealed record Ping : IRequest<int>; public class Broken { public string Handle(Ping p) => \"\"; }")]
-    [Arguments("[assembly: KeryxHost] public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
-    [Arguments("public abstract record Base : IRequest<int>; public interface IQuery : IRequest<int> { }")]
-    [Arguments("public sealed record Happened : INotification;")]
-    public async Task KRX001_Handled_Or_Not_Required(string source, CancellationToken cancellationToken)
+    [Arguments(false, "public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
+    [Arguments(false, "public sealed record Ping : IRequest<int>; public class Broken { public string Handle(Ping p) => \"\"; }")]
+    [Arguments(true, "public sealed record Ping : IRequest<int>; public static partial class H { private static int Handle(Ping p) => 1; }")]
+    [Arguments(false, "public abstract record Base : IRequest<int>; public interface IQuery : IRequest<int> { }")]
+    [Arguments(false, "public sealed record Happened : INotification;")]
+    public async Task KRX001_Handled_Or_Not_Required(bool host, string source, CancellationToken cancellationToken)
     {
-        var diagnostics = await AnalyzeAsync<MissingHandlerAnalyzer>(source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<MissingHandlerAnalyzer>(source, cancellationToken, host: host);
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
     }
@@ -180,19 +180,23 @@ public class CompilationRuleTests : AnalyzerTest
     }
 
     [Test]
-    [Arguments("ExcludeHandler(typeof(Ping))", "ExcludeHandler")]
-    [Arguments("ExcludeBehavior(typeof(Ping))", "ExcludeBehavior")]
-    public async Task KRX043_Host_Only_Attribute_Outside_A_Host(string attribute, string name, CancellationToken cancellationToken)
+    [Arguments("ExcludeHandler(typeof(Ping))", "ExcludeHandler", null)]
+    [Arguments("ExcludeBehavior(typeof(Ping))", "ExcludeBehavior", null)]
+    [Arguments("ExcludeHandler(typeof(Ping))", "ExcludeHandler", false)]
+    [Arguments("ExcludeBehavior(typeof(Ping))", "ExcludeBehavior", false)]
+    public async Task KRX043_Host_Only_Attribute_Outside_A_Host(string attribute, string name, bool? keryxHost, CancellationToken cancellationToken)
     {
-        // A library is not a host, so the attribute has no effect (OQ-54).
+        // A library (KeryxHost false, the default for a class library, or unset without the Keryx build files) is not a host, so the
+        // attribute has no effect (OQ-54).
         var diagnostics = await AnalyzeAsync<HostOnlyAttributeAnalyzer>(
             $"[assembly: {attribute}]\npublic sealed record Ping : IRequest<int>;",
-            cancellationToken
+            cancellationToken,
+            host: keryxHost
         );
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX043"]);
         await Assert.That(Messages(diagnostics, "KRX043"))
-                    .IsEquivalentTo([$"[assembly: {name}] has no effect, because this assembly is not a host ([assembly: KeryxHost])"]);
+                    .IsEquivalentTo([$"[assembly: {name}] has no effect, because this assembly is not a host (its KeryxHost MSBuild property is not true)"]);
         var diagnostic = diagnostics.Single();
         await Assert.That(diagnostic.Severity).IsEqualTo(DiagnosticSeverity.Warning);
         await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo(attribute);
@@ -204,12 +208,12 @@ public class CompilationRuleTests : AnalyzerTest
     {
         var diagnostics = await AnalyzeAsync<HostOnlyAttributeAnalyzer>(
             """
-            [assembly: KeryxHost]
             [assembly: ExcludeHandler(typeof(Ping))]
             [assembly: ExcludeBehavior(typeof(Ping))]
             public sealed record Ping : IRequest<int>;
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();

@@ -114,7 +114,7 @@ public class InterfaceShapeTests
         await Assert.That(exception).IsAssignableTo<InvalidOperationException>();
         await Assert.That(exception.RequestType).IsEqualTo(typeof(StringRequest));
         await Assert.That(exception.Message).Contains(typeof(StringRequest).FullName!);
-        await Assert.That(exception.Message).Contains("KeryxHost");
+        await Assert.That(exception.Message).Contains("KeryxHost MSBuild property");
         await Assert.That(typeof(KeryxHandlerNotFoundException).IsSealed).IsTrue();
     }
 

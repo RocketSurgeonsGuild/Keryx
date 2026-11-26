@@ -1,7 +1,4 @@
-using Keryx;
 using Microsoft.Extensions.DependencyInjection;
-
-[assembly: KeryxHost]
 
 namespace Keryx.Benchmarks.KeryxHost;
 

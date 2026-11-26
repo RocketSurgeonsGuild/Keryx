@@ -12,8 +12,6 @@ namespace Keryx.Tests.Hosts;
 public class HostRuntimeTests : HostTest
 {
     internal const string Source = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public interface IGreeter { string Greet(string name); }
@@ -187,7 +185,7 @@ public class HostRuntimeTests : HostTest
         // A request type from another assembly the host knows nothing about.
         var foreign = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => Ignore(mediator.Send(new ForeignRequest(), cancellationToken)));
         await Assert.That(foreign.RequestType).IsEqualTo(typeof(ForeignRequest));
-        await Assert.That(foreign.Message).Contains("[assembly: KeryxHost]");
+        await Assert.That(foreign.Message).Contains("KeryxHost MSBuild property");
     }
 
     [Test]

@@ -1,0 +1,4 @@
+<Project>
+    <!-- See Keryx.props: a transitive consumer gets the same KeryxHost default and scan cache wiring as a direct one. -->
+    <Import Project="..\build\$(MSBuildThisFile)" />
+</Project>

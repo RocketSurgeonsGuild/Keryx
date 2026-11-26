@@ -50,6 +50,8 @@ public class HandlerGeneratorIncrementalTests
     [
         TrackingNames.LanguageVersion,
         TrackingNames.CompilationSettings,
+        TrackingNames.HostProperty,
+        TrackingNames.HandlerCompilationAndHost,
         TrackingNames.HandlerSettingsInputs,
         TrackingNames.HandlerSettings,
         TrackingNames.HandlerCandidates,

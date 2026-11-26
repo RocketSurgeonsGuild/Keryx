@@ -7,6 +7,8 @@ namespace Keryx.Tests.Diagnostics;
 
 /// <summary>
 ///     Runs one analyzer, with the handler generator, over a source through the source generator testing helpers, and returns what it reports.
+///     <c>host</c> sets <c>build_property.KeryxHost</c> (<see langword="true" />: a host, <see langword="false" />: a project that opts out);
+///     without it the option is unset, which is not a host either.
 /// </summary>
 public abstract class AnalyzerTest : GeneratorTest
 {
@@ -25,11 +27,13 @@ public abstract class AnalyzerTest : GeneratorTest
         string source,
         CancellationToken cancellationToken,
         LanguageVersion languageVersion = LanguageVersion.Latest,
-        string? projectName = null
+        string? projectName = null,
+        bool? host = null
     )
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
         var builder = projectName is null ? Builder : Builder.WithProjectName(projectName);
+        builder = host is { } isHost ? builder.WithKeryxHost(isHost) : builder;
         var result = await builder
                           .WithLanguageVersion(languageVersion)
                           .WithAnalyzer<TAnalyzer>()

@@ -44,7 +44,7 @@ public sealed class HandlerAnalyzer : DiagnosticAnalyzer
                     return;
                 }
 
-                var isHost = symbols.IsHost;
+                var isHost = KeryxBuildProperties.IsHost(startContext.Options.AnalyzerConfigOptionsProvider.GlobalOptions);
                 startContext.RegisterSymbolAction(symbolContext => AnalyzeType(symbolContext, symbols, isHost), SymbolKind.NamedType);
                 if (symbols.HandlerOrderAttribute is not null)
                 {

@@ -11,19 +11,21 @@ namespace Keryx.Tests.CodeFixes;
 ///     Runs an analyzer and a code fix through the source generator testing helpers, applies every offered code action, and snapshots the
 ///     source before and every changed or added document after each action. Each fixed solution is compiled with the handler generator and
 ///     analyzed again: the fixed diagnostic must be gone and the result must have no compiler errors. The diagnostics the analyzer still
-///     reports are part of the snapshot.
+///     reports are part of the snapshot. With <c>host</c>, the project is a host (<c>build_property.KeryxHost</c> = <c>true</c>), for the fix and
+///     for the re-verification.
 /// </summary>
 public abstract class CodeFixTest : GeneratorTest
 {
     protected async Task<CodeFixSnapshot> FixAsync<TAnalyzer, TCodeFix>(
         string source,
         CancellationToken cancellationToken,
+        bool host = false,
         params string[] additionalSources
     )
         where TAnalyzer : DiagnosticAnalyzer, new()
         where TCodeFix : CodeFixProvider, new()
     {
-        var result = await Builder
+        var result = await ( host ? Builder.WithKeryxHost() : Builder )
                           .WithLanguageVersion(LanguageVersion.Latest)
                           .WithAnalyzer<TAnalyzer>()
                           .WithCodeFix<TCodeFix>()
@@ -50,7 +52,7 @@ public abstract class CodeFixTest : GeneratorTest
                             documents[document.Name] = ( await document.GetTextAsync(cancellationToken) ).ToString();
                         }
 
-                        var diagnostics = await AnalyzeFixedProjectAsync<TAnalyzer>(change.NewProject, cancellationToken);
+                        var diagnostics = await AnalyzeFixedProjectAsync<TAnalyzer>(change.NewProject, host, cancellationToken);
                         var title = action.CodeAction.Title;
                         await Assert.That(diagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && !d.Id.StartsWith("KRX", StringComparison.Ordinal)).Select(static d => d.ToString()))
                                     .IsEmpty()
@@ -82,18 +84,19 @@ public abstract class CodeFixTest : GeneratorTest
     ///     Compiles a fixed project with the handler generator (unless the workspace already ran it) and returns the compiler diagnostics and
     ///     what <typeparamref name="TAnalyzer" /> reports on the result.
     /// </summary>
-    private static async Task<IReadOnlyList<Diagnostic>> AnalyzeFixedProjectAsync<TAnalyzer>(Project project, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<Diagnostic>> AnalyzeFixedProjectAsync<TAnalyzer>(Project project, bool host, CancellationToken cancellationToken)
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
+        var options = host ? BuildProperties.Host : BuildProperties.Provider();
         var compilation = ( await project.GetCompilationAsync(cancellationToken) )!;
         if (!compilation.SyntaxTrees.Any(static t => t.FilePath.EndsWith("KeryxManifest.g.cs", StringComparison.Ordinal)))
         {
             _ = CSharpGeneratorDriver
-               .Create([new HandlerGenerator().AsSourceGenerator()], parseOptions: (CSharpParseOptions?)project.ParseOptions)
+               .Create([new HandlerGenerator().AsSourceGenerator()], parseOptions: (CSharpParseOptions?)project.ParseOptions, optionsProvider: options)
                .RunGeneratorsAndUpdateCompilation(compilation, out compilation, out _, cancellationToken);
         }
 
-        var analyzerDiagnostics = await compilation.WithAnalyzers([new TAnalyzer()]).GetAnalyzerDiagnosticsAsync(cancellationToken);
+        var analyzerDiagnostics = await compilation.WithAnalyzers([new TAnalyzer()], new AnalyzerOptions([], options)).GetAnalyzerDiagnosticsAsync(cancellationToken);
         return [.. compilation.GetDiagnostics(cancellationToken), .. analyzerDiagnostics];
     }
 

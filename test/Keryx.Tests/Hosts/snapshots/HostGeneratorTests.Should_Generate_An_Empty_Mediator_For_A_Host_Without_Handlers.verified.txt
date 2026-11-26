@@ -5,6 +5,7 @@
     Keryx.Analyzers.HostGenerator: []
   },
   GlobalOptions: {
+    build_property.KeryxHost: true,
     build_property.RootNamespace: Sample
   },
   References: [

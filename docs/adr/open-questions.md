@@ -14,7 +14,7 @@ day added "One notification behavior kind" and "Message constraint on open behav
 OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end). OQ-56 to OQ-58 were
 raised while implementing the static-behavior rework and decided by the owner the same day (at the end). The owner's decisions for the
 second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
-raised while implementing it and are open.
+raised while implementing it and are open, and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and are open.
 
 ## Open
 
@@ -51,6 +51,39 @@ from before KRX023).
   manifests. The ADR's KRX005 row says the host check is a safety net.
 - **Proposal:** keep it (cheap, and it guards against manifests built with another rule). Alternative: remove the host's KRX005 and the
   `DuplicateHandlerInHost` descriptor, leaving KRX005 to the analyzer within one assembly. Needs a decision.
+
+### OQ-61: Apps whose `OutputType` is not `Exe` or `WinExe`
+
+"A host is an MSBuild property" (below) defaults `KeryxHost` to `true` for `OutputType` `Exe` or `WinExe` and for test projects. Some app
+models build an application without either: the .NET for Android SDK rewrites an app's `OutputType` from `Exe` to `Library` and marks it
+with `AndroidApplication` (Dovetail, whose pattern this follows, checks `AndroidApplication` for that reason), and other workloads may do
+the same. Such an app is not a host by default.
+
+- **Interim:** the rule as decided: only `Exe`, `WinExe` and `IsTestProject`. An app that needs the mediator sets
+  `<KeryxHost>true</KeryxHost>`; without it, `AddKeryx()` is missing (a compile error in the app, not a silent failure). The README's Hosts
+  section says how to set it.
+- **Proposal:** also default `KeryxHost` to `true` when `AndroidApplication` is `true`, as Dovetail does, and list further app models
+  when they are found. Alternative: keep the interim and document Android in the README.
+
+### OQ-62: Executables and test projects below `net10.0`
+
+"A host is an MSBuild property" (below) defaults `KeryxHost` to `true` for every `Exe`, `WinExe` or test project, whatever it targets,
+and the package's new `buildTransitive/` files apply that default to projects that get Keryx transitively. KRX031 is an error, so a
+`net8.0` or .NET Framework executable or test project that runs the Keryx generators (its own reference, or a `ProjectReference` to a
+project that references Keryx) now fails to build although it never asked to be a host. Before the change it built, because it had no
+`[assembly: KeryxHost]`. Reproduced in review with the packed package: a `netstandard2.0` library with a request and handler, and a
+`net8.0` console app that only references that library, fails with KRX031. The common library-author setup is hit too: a
+`netstandard2.0` Keryx library whose test project multi-targets `net8.0;net10.0` (or `net48`) fails in every inner build below
+`net10.0`. OQ-61 covers only app models whose `OutputType` is not `Exe`.
+
+- **Interim:** the rule as decided. The README's Hosts section and KRX031 row tell such a project to set `<KeryxHost>false</KeryxHost>`,
+  per target framework in a multi-targeting test project:
+  `<KeryxHost Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)','net10.0'))">false</KeryxHost>`.
+- **Proposal:** in `build/Keryx.targets`, default to `true` only when the target framework can host. `TargetFrameworkIdentifier` and
+  `TargetFrameworkVersion` are already inferred before `nuget.g.targets` is imported, so the condition becomes
+  `('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(IsTestProject)' == 'true') and '$(TargetFrameworkIdentifier)' == '.NETCoreApp' and $([MSBuild]::VersionGreaterThanOrEquals('$(TargetFrameworkVersion.TrimStart(vV))', '10.0'))`.
+  KRX031 then fires only for an explicit `<KeryxHost>true</KeryxHost>`. If adopted, `KeryxHostPropertyTests` gains rows for a `net8.0`
+  `Exe` (false), a `net10.0` `Exe` (true) and a `net8.0` project with `<KeryxHost>true</KeryxHost>` (true). Needs a decision.
 
 ## Decided
 
@@ -1288,3 +1321,46 @@ Owner decision 12 of the second rework. The `dotnet-format` step of `.config/hk.
 mismatch in `BehaviorMatching.PositionsFit`). The `--exclude-diagnostics` list, which only those passes read, is gone. The build's
 analyzers, with warnings as errors, enforce style. The same config serves the CI lint job (`hk check`/`hk fix`). Verified by running the
 hook on a staged change. Folded into the ADR (Repository layout) and the brief (Git workflow).
+
+### A host is an MSBuild property (2026-11-26)
+
+Owner decision 3 of the second rework. `KeryxHostAttribute` is removed (with its `KnownTypeNames` and `KeryxSymbols` entries and
+`KeryxSymbols.IsHost`). A project is a host when its `KeryxHost` MSBuild property is `true`, the pattern Dovetail uses:
+
+- `build/Keryx.targets` sets `KeryxHost` when the project leaves it empty, after the project body (NuGet imports it from
+  `nuget.g.targets`, so `OutputType` and `IsTestProject` are known): `true` for `OutputType` `Exe` or `WinExe` and for `IsTestProject`,
+  else `false`. A value the project or its `Directory.Build.props` sets wins. `build/Keryx.props` adds it to `CompilerVisibleProperty`
+  (with `RootNamespace`, `TargetFrameworkIdentifier`, `TargetFrameworkVersion`). The package now ships `buildTransitive/Keryx.props` and
+  `.targets`, which import `build/`, so a project that gets Keryx transitively gets the same defaults; `buildMultiTargeting/` stays.
+- Every generator and analyzer reads `build_property.KeryxHost` (`KeryxBuildProperties.IsHost`; `true`, case-insensitive and trimmed, is
+  a host; unset or anything else is not): `HandlerGenerator` (a new `Keryx.HostProperty` step), `HostGenerator` (`HostBuildProperties.IsHost`;
+  the scan requests now combine the compilation with the build properties, a new `Keryx.Host.ScanInputs` step), `HandlerAnalyzer`,
+  `MessageTypeAnalyzer`, `BehaviorAnalyzer` and `HostOnlyAttributeAnalyzer` (KRX043 keys on the property).
+- Host diagnostics that fell back to the attribute's location are reported with `Location.None`: KRX031, KRX030 (a referenced request),
+  KRX032, KRX033, KRX034, KRX005 across assemblies, KRX009 for a referenced target, KRX008 without an in-source edge, KRX035 for a
+  referenced global, KRX037 for a referenced notification type, and KRX036 when its attribute has no location. Consequence: their severity follows only project-wide configuration (a global AnalyzerConfig such as `.globalconfig`,
+  `<NoWarn>`, `<WarningsAsErrors>`); a per-file `.editorconfig` section, which applied on the attribute's file (OQ-35), no longer does.
+- KRX031's message names the property and suggests `<KeryxHost>false</KeryxHost>`; KRX043's and `KeryxHandlerNotFoundException`'s
+  messages name the property.
+- `ReferenceScan` no longer projects whether a referenced assembly is a host (the composition never read it; a host is not visible in
+  metadata any more), and `ProjectionDataVersion` is 3.
+- In the repository: the sample host is an `Exe` (default); `test/benchmark-subjects/Keryx.Benchmarks.KeryxHost`, a class library, sets
+  `<KeryxHost>true</KeryxHost>`. `Keryx.Tests` and `Keryx.Benchmarks` are an `Exe`/test project but reference the analyzers as an
+  assembly (or not at all) and import none of the package's build files, so `KeryxHost` is never set there and neither is a host; no
+  `<KeryxHost>false</KeryxHost>` is needed (their project files say why).
+
+Folded into the ADR (status; Which projects may target what; Repository layout; Diagnostics and code fixes: KRX005, KRX009, KRX030, KRX031,
+KRX034, KRX035, KRX043; Opting in; How the host reads it; Host control; Attribute reference; Alternatives considered; Consequences), the
+brief (Summary, Repository layout, Phases 1, 3 and 7), CONTEXT.md (host), the README (Requirements, Quick start, testing, Hosts,
+Contracts and handler libraries, KRX030, KRX031, KRX043) and `samples/hosts/README.md`. Tests: every `[assembly: KeryxHost]` in test
+sources became the `build_property.KeryxHost` option (`BuildProperties.WithKeryxHost()`, `BuildProperties.Host` for direct Roslyn
+drivers, `host:` parameters on the analyzer and code-fix helpers); host generator off for unset, `false`, empty and non-boolean values and
+on for `true` in any case; `HostModelFactory.CreateSettings` keyed on the property; KRX043 with the property unset and `false`, and not
+in a host; KRX031 and referenced-host diagnostics with `Location.None`; KRX030 severity from a global option but not a per-file one;
+MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`) of the defaults through `build/` and `buildTransitive/`, the project's
+own and `Directory.Build.props` values, and the compiler-visible property. `dotnet pack` lists `build/`, `buildMultiTargeting/` and
+`buildTransitive/`, and a target in `Keryx.csproj` (`_KeryxCheckPackedBuildFiles`, after `GenerateNuspec`) fails the pack if any of
+their `Keryx.props`/`Keryx.targets` is missing from the nuspec. Checked by hand: a consumer solution from the packed package (an `Exe` that references a class library
+that references Keryx) generates the mediator in the `Exe` only (`KeryxHost` true there through `buildTransitive/`, false in the
+library) and runs. Gaps raised: OQ-61 (apps whose `OutputType` is not `Exe`) and OQ-62 (executables and test projects below `net10.0` are hosts by
+default and fail with KRX031).

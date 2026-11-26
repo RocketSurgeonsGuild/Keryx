@@ -29,7 +29,7 @@ internal static class HostComposer
             return HostModel.Empty(settings);
         }
 
-        var context = new Context(settings, symbols);
+        var context = new Context(symbols);
 
         // ExcludeHandler: the host ignores a referenced handler class (ADR 0001, Host control). Matched against the manifest's name of the
         // class before anything else of the entry is resolved, so an excluded handler whose types the host cannot resolve (typically in a
@@ -435,7 +435,7 @@ internal static class HostComposer
     );
 
     /// <summary>Resolves manifest names in the compilation and collects the diagnostics of one composition.</summary>
-    private sealed class Context(HostSettings settings, KeryxSymbols symbols)
+    private sealed class Context(KeryxSymbols symbols)
     {
         private readonly TypeReferenceResolver _resolver = new(symbols.Compilation, ReferenceScan.ReferencedAssemblies(symbols.Compilation));
         private readonly HashSet<string> _reported = [with(StringComparer.Ordinal)];
@@ -444,12 +444,12 @@ internal static class HostComposer
 
         private Compilation Compilation => symbols.Compilation;
 
-        /// <summary>Reports a diagnostic once, at <paramref name="location" /> or, without one, on <c>[assembly: KeryxHost]</c>.</summary>
+        /// <summary>Reports a diagnostic once, at <paramref name="location" /> or, without one, with no location.</summary>
         public void Report(DiagnosticDescriptor descriptor, LocationInfo? location, params string[] arguments)
         {
             if (_reported.Add(descriptor.Id + "|" + string.Join("|", arguments)))
             {
-                Diagnostics.Add(new(descriptor, location ?? settings.HostAttribute, ImmutableArray.Create(arguments)));
+                Diagnostics.Add(new(descriptor, location, ImmutableArray.Create(arguments)));
             }
         }
 

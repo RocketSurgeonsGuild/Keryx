@@ -15,8 +15,6 @@ public class HostGeneratorTests : HostTest
 {
     /// <summary>Every request shape Phase 3 dispatches, and every kind of injected parameter.</summary>
     internal const string Requests = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public interface IClock { DateTimeOffset Now { get; } }
@@ -116,22 +114,40 @@ public class HostGeneratorTests : HostTest
     [Test]
     public async Task Should_Generate_An_Empty_Mediator_For_A_Host_Without_Handlers(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddSources(Usings).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         await Verify(result);
     }
 
     [Test]
-    public async Task Should_Generate_Nothing_Outside_A_Host(CancellationToken cancellationToken)
+    [Arguments(null)]
+    [Arguments("false")]
+    [Arguments("")]
+    [Arguments("yes")]
+    public async Task Should_Generate_Nothing_Outside_A_Host(string? keryxHost, CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + Requests.Replace("[assembly: KeryxHost]", "", StringComparison.Ordinal).Replace("internal partial class", "public partial class", StringComparison.Ordinal))
-                                      .Build()
-                                      .GenerateAsync(cancellationToken);
+        // Unset (no Keryx build files), false (a class library, or a project that opts out) and anything that is not a boolean.
+        var builder = keryxHost is null ? HostGenerators : HostGenerators.AddGlobalOption(BuildProperties.KeryxHost, keryxHost);
+        var result = await builder.AddSources(Usings + Requests.Replace("internal partial class", "public partial class", StringComparison.Ordinal))
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
 
         var host = result.Results[typeof(HostGenerator)];
         await Assert.That(host.SyntaxTrees).IsEmpty();
         await Assert.That(host.Diagnostics).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("true")]
+    [Arguments("True")]
+    [Arguments(" TRUE ")]
+    public async Task Should_Read_KeryxHost_As_A_Boolean(string keryxHost, CancellationToken cancellationToken)
+    {
+        var result = await HostGenerators.AddGlobalOption(BuildProperties.KeryxHost, keryxHost).AddSources(Usings).Build().GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(MediatorSource(result)).Contains("class KeryxMediator");
     }
 
     [Test]
@@ -140,8 +156,9 @@ public class HostGeneratorTests : HostTest
     public async Task Should_Use_The_Root_Namespace(string rootNamespace, string expected, CancellationToken cancellationToken)
     {
         var result = await Builder.WithGenerator<HostGenerator>()
+                                  .WithKeryxHost()
                                   .AddGlobalOption("build_property.RootNamespace", rootNamespace)
-                                  .AddSources(Usings + "[assembly: KeryxHost]")
+                                  .AddSources(Usings)
                                   .Build()
                                   .GenerateAsync(cancellationToken);
 
@@ -153,8 +170,9 @@ public class HostGeneratorTests : HostTest
     public async Task Should_Fall_Back_To_The_Sanitised_Assembly_Name(CancellationToken cancellationToken)
     {
         var result = await Builder.WithGenerator<HostGenerator>()
+                                  .WithKeryxHost()
                                   .WithProjectName("My-App.2nd.class")
-                                  .AddSources(Usings + "[assembly: KeryxHost]")
+                                  .AddSources(Usings)
                                   .Build()
                                   .GenerateAsync(cancellationToken);
 
@@ -163,7 +181,7 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
-    public async Task KRX031_Is_Reported_On_The_Host_Attribute_And_Nothing_Is_Generated(CancellationToken cancellationToken)
+    public async Task KRX031_Is_Reported_Without_A_Location_And_Nothing_Is_Generated(CancellationToken cancellationToken)
     {
         var result = await HostBuilder.AddGlobalOption("build_property.TargetFrameworkIdentifier", ".NETStandard")
                                       .AddGlobalOption("build_property.TargetFrameworkVersion", "v2.0")
@@ -179,10 +197,12 @@ public class HostGeneratorTests : HostTest
         await Assert.That(host.Diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX030", "KRX031"]);
         var diagnostic = host.Diagnostics.Single(static d => d.Id == "KRX031");
         await Assert.That(diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
-                    .IsEqualTo("'Legacy.Host' is a Keryx host ([assembly: KeryxHost]), so it must target net10.0 or newer, but it targets .NETStandard,Version=v2.0");
-        // Host diagnostics carry an equatable LocationInfo, turned back into a file location when reported (ADR 0001, Diagnostics).
-        var input = result.InputSyntaxTrees.Single(t => t.FilePath == diagnostic.Location.GetLineSpan().Path);
-        await Assert.That(input.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("KeryxHost");
+                    .IsEqualTo(
+                         "'Legacy.Host' is a Keryx host (its KeryxHost MSBuild property is true), so it must target net10.0 or newer, but it targets "
+                       + ".NETStandard,Version=v2.0; set <KeryxHost>false</KeryxHost> if it is not meant to be one"
+                     );
+        // A host is an MSBuild property, so the project-wide diagnostic has no source location (ADR 0001, Diagnostics).
+        await Assert.That(diagnostic.Location).IsEqualTo(Location.None);
     }
 
     [Test]
@@ -236,8 +256,6 @@ public class HostGeneratorTests : HostTest
                                       .AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
-
                                            namespace Sample;
 
                                            public sealed record Orphan : IRequest<int>;
@@ -275,7 +293,7 @@ public class HostGeneratorTests : HostTest
     [Arguments("public sealed record Happened : INotification;")]
     public async Task KRX030_Handled_Or_Not_A_Request(string source, CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;\n" + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddSources(Usings + "namespace Sample;\n" + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
     }
@@ -287,26 +305,34 @@ public class HostGeneratorTests : HostTest
     public async Task KRX030_Severity_Can_Be_Changed(ReportDiagnostic option, DiagnosticSeverity? expected, CancellationToken cancellationToken)
     {
         // What dotnet_diagnostic.KRX030.severity in .editorconfig becomes; the testing helpers do not pass severity options on.
-        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;").AddReferences(OrphanLibrary);
+        var compilation = DirectCompilation.Create(Usings + "namespace Sample;").AddReferences(OrphanLibrary);
         compilation = compilation.WithOptions(compilation.Options.WithSpecificDiagnosticOptions([new("KRX030", option)]));
 
-        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions)
+        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions, optionsProvider: BuildProperties.Host)
                              .RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics, cancellationToken);
 
         await Assert.That(diagnostics.Where(static d => d.Id == "KRX030").Select(static d => (DiagnosticSeverity?)d.Severity).SingleOrDefault()).IsEqualTo(expected);
     }
 
     [Test]
-    [Arguments(ReportDiagnostic.Suppress, null)]
-    [Arguments(ReportDiagnostic.Warn, DiagnosticSeverity.Warning)]
-    public async Task KRX030_Severity_Can_Be_Changed_Per_File(ReportDiagnostic option, DiagnosticSeverity? expected, CancellationToken cancellationToken)
+    [Arguments(ReportDiagnostic.Suppress, false, DiagnosticSeverity.Error)]
+    [Arguments(ReportDiagnostic.Warn, false, DiagnosticSeverity.Error)]
+    [Arguments(ReportDiagnostic.Suppress, true, null)]
+    [Arguments(ReportDiagnostic.Warn, true, DiagnosticSeverity.Warning)]
+    public async Task KRX030_Without_A_Location_Takes_Only_The_Global_Severity(
+        ReportDiagnostic option,
+        bool global,
+        DiagnosticSeverity? expected,
+        CancellationToken cancellationToken
+    )
     {
-        // What `[*.cs] dotnet_diagnostic.KRX030.severity` in an .editorconfig becomes: a per-tree option, which applies only to a diagnostic
-        // reported on the tree itself (OQ-35), not on a file location without one. A referenced request's KRX030 is on [assembly: KeryxHost].
-        var compilation = DirectCompilation.Create(Usings + "[assembly: KeryxHost]\nnamespace Sample;").AddReferences(OrphanLibrary);
-        compilation = compilation.WithOptions(compilation.Options.WithSyntaxTreeOptionsProvider(new TreeOptions(compilation.SyntaxTrees.Single(), "KRX030", option)));
+        // A referenced request's KRX030 has no source location (a host is an MSBuild property, not an attribute to report on). A per-tree
+        // option, what `[*.cs] dotnet_diagnostic.KRX030.severity` in an .editorconfig becomes, applies only to a diagnostic reported on the
+        // tree itself (OQ-35); a global one, what a global AnalyzerConfig (.globalconfig) becomes, applies to it.
+        var compilation = DirectCompilation.Create(Usings + "namespace Sample;").AddReferences(OrphanLibrary);
+        compilation = compilation.WithOptions(compilation.Options.WithSyntaxTreeOptionsProvider(new TreeOptions(compilation.SyntaxTrees.Single(), "KRX030", option, global)));
 
-        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions)
+        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions, optionsProvider: BuildProperties.Host)
                              .RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics, cancellationToken);
 
         await Assert.That(diagnostics.Where(static d => d.Id == "KRX030").Select(static d => (DiagnosticSeverity?)d.Severity).SingleOrDefault()).IsEqualTo(expected);
@@ -318,7 +344,6 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            namespace Sample;
                                            public interface IClock { }
                                            public sealed record A1 : IRequest<int>;
@@ -348,7 +373,7 @@ public class HostGeneratorTests : HostTest
     {
         // OQ-34: without KRX007, `new Constructed(...)` in AddKeryx would fail with CS0144 or CS9035 in generated code.
         var result = await HostBuilder.WithAnalyzer<HandlerAnalyzer>()
-                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;\npublic interface IClock { }\npublic sealed record A1 : IRequest<int>;\n" + handler)
+                                      .AddSources(Usings + "namespace Sample;\npublic interface IClock { }\npublic sealed record A1 : IRequest<int>;\n" + handler)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -367,7 +392,7 @@ public class HostGeneratorTests : HostTest
     public async Task A_Handler_Whose_Signature_Is_Narrower_Than_Internal_Is_KRX016_In_A_Host(string handler, CancellationToken cancellationToken)
     {
         var result = await HostBuilder.WithAnalyzer<HandlerAnalyzer>()
-                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;\n" + handler)
+                                      .AddSources(Usings + "namespace Sample;\n" + handler)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -386,7 +411,6 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            namespace Sample;
                                            public sealed record Ping : IRequest<int>;
                                            public static partial class First { private static int Handle(Ping p) => 1; }
@@ -409,7 +433,7 @@ public class HostGeneratorTests : HostTest
 
     internal static string ManyRequests(int count)
     {
-        var builder = new System.Text.StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\n");
+        var builder = new System.Text.StringBuilder("namespace Sample;\n\n");
         for (var i = 0; i < count; i++)
         {
             builder.Append(System.Globalization.CultureInfo.InvariantCulture, $"public sealed record R{i:00}(int Value) : IRequest<int>;\n");
@@ -423,20 +447,21 @@ public class HostGeneratorTests : HostTest
         result.Results[typeof(HostGenerator)].SyntaxTrees.Single(static t => t.FilePath.EndsWith(HostEmitter.MediatorHintName, StringComparison.Ordinal)).ToString();
 
     /// <summary>Per-tree diagnostic options, as the compiler builds them from an <c>.editorconfig</c> section.</summary>
-    private sealed class TreeOptions(SyntaxTree optionsTree, string optionsDiagnosticId, ReportDiagnostic optionsValue) : SyntaxTreeOptionsProvider
+    /// <summary>One severity option, for <paramref name="optionsTree" /> (a per-file option) or, with <paramref name="global" />, global.</summary>
+    private sealed class TreeOptions(SyntaxTree optionsTree, string optionsDiagnosticId, ReportDiagnostic optionsValue, bool global = false) : SyntaxTreeOptionsProvider
     {
         public override GeneratedKind IsGenerated(SyntaxTree tree, CancellationToken cancellationToken) => GeneratedKind.Unknown;
 
         public override bool TryGetDiagnosticValue(SyntaxTree tree, string diagnosticId, CancellationToken cancellationToken, out ReportDiagnostic severity)
         {
             severity = optionsValue;
-            return tree == optionsTree && diagnosticId == optionsDiagnosticId;
+            return !global && tree == optionsTree && diagnosticId == optionsDiagnosticId;
         }
 
         public override bool TryGetGlobalDiagnosticValue(string diagnosticId, CancellationToken cancellationToken, out ReportDiagnostic severity)
         {
-            severity = default;
-            return false;
+            severity = optionsValue;
+            return global && diagnosticId == optionsDiagnosticId;
         }
     }
 }

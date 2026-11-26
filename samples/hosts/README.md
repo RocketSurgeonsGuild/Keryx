@@ -1,6 +1,6 @@
 # Sample hosts
 
-Applications marked `[assembly: KeryxHost]` that compose the sample libraries (ADR 0001, Cross-assembly discovery).
+Applications (executables, so Keryx makes them hosts: their `KeryxHost` MSBuild property defaults to `true`) that compose the sample libraries (ADR 0001, Cross-assembly discovery).
 
 - `Keryx.Samples.Host`: a console host over `Keryx.Samples.Orders` and `Keryx.Samples.Contracts`. Its generated `KeryxMediator` and
   `AddKeryx()` compose the library's handlers, its global `Logging` behavior and its notification handlers with the host's own `Ping`

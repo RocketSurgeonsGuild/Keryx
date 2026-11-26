@@ -17,8 +17,6 @@ namespace Keryx.Tests.Behaviors;
 public class DerivedMessageConstraintTests : HostTest
 {
     private const string Source = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public static class Log
@@ -130,7 +128,7 @@ public class DerivedMessageConstraintTests : HostTest
     [Test]
     public async Task The_Analyzer_Accepts_A_Message_Constraint_Through_A_Derived_Interface(CancellationToken cancellationToken)
     {
-        var result = await Builder.WithAnalyzer<BehaviorAnalyzer>().AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
+        var result = await Builder.WithKeryxHost().WithAnalyzer<BehaviorAnalyzer>().AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.AnalyzerResults[typeof(BehaviorAnalyzer)].Diagnostics).IsEmpty();
     }

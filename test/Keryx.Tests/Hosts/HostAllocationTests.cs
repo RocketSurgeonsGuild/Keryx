@@ -100,8 +100,6 @@ public class HostAllocationTests : HostTest
         """;
 
     private const string Requests = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public sealed class Clock { }

@@ -68,11 +68,6 @@
         public KeryxHandlerNotFoundException(System.Type requestType) { }
         public System.Type RequestType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Assembly)]
-    public sealed class KeryxHostAttribute : System.Attribute
-    {
-        public KeryxHostAttribute() { }
-    }
     [System.AttributeUsage(System.AttributeTargets.Class)]
     public sealed class NotificationBehaviorAttribute : System.Attribute
     {

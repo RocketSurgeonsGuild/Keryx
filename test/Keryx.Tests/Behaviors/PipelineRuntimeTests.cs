@@ -14,7 +14,6 @@ namespace Keryx.Tests.Behaviors;
 public class PipelineRuntimeTests : HostTest
 {
     internal const string Source = """
-        [assembly: KeryxHost]
         [assembly: Behavior(typeof(Sample.AssemblyWide))]
         [assembly: Behavior(typeof(Sample.OnlyForCommands))]
         [assembly: ExcludeBehavior(typeof(Sample.Excluded))]

@@ -9,8 +9,8 @@ namespace Keryx.Tests.Hosts;
 /// <summary>
 ///     Compiles the class libraries a test host references, the way a project that references the Keryx package compiles: the handler
 ///     generator runs, so the library carries its manifest (<c>[assembly: KeryxManifest]</c> and a <c>[KeryxHandler]</c> per public handler),
-///     and with <c>host</c> the host generator runs too (an app host that a test host references; its generated types are in the namespace of
-///     its assembly name).
+///     and with <c>host</c> the project is a host (<c>build_property.KeryxHost</c> = <c>true</c>) and the host generator runs too (an app host
+///     that a test host references; its generated types are in the namespace of its assembly name).
 /// </summary>
 internal static class TestLibraries
 {
@@ -47,7 +47,7 @@ internal static class TestLibraries
                 ? [new HandlerGenerator().AsSourceGenerator(), new HostGenerator().AsSourceGenerator()]
                 : [new HandlerGenerator().AsSourceGenerator()];
             _ = CSharpGeneratorDriver
-               .Create(generators, parseOptions: ParseOptions)
+               .Create(generators, parseOptions: ParseOptions, optionsProvider: host ? BuildProperties.Host : null)
                .RunGeneratorsAndUpdateCompilation(compilation, out compilation, out var generatorDiagnostics);
             if (generatorDiagnostics.Any(static d => d.Severity == DiagnosticSeverity.Error))
             {

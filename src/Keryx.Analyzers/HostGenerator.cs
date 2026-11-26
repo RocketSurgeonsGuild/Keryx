@@ -11,8 +11,8 @@ namespace Keryx.Analyzers;
 
 /// <summary>
 ///     Generates a host's mediator and <c>AddKeryx()</c> (ADR 0001, Generated host) from its own handlers and those of its references (ADR
-///     0001, Cross-assembly discovery), and reports the host-only rules. Active only with
-///     <c>[assembly: KeryxHost]</c>; it emits and reports nothing below C# 14, so KRX022 stays the only error there, and it emits nothing in
+///     0001, Cross-assembly discovery), and reports the host-only rules. Active only in a host (<c>build_property.KeryxHost</c> is
+///     <c>true</c>, ADR 0001, Opting in); it emits and reports nothing below C# 14, so KRX022 stays the only error there, and it emits nothing in
 ///     a host that targets a framework older than <c>net10.0</c>, where it reports KRX031 (OQ-32). Diagnostics are reported on the syntax
 ///     tree of their source location, so per-file analyzer config (<c>.editorconfig</c>) applies to them (OQ-35).
 /// </summary>
@@ -66,7 +66,9 @@ public sealed class HostGenerator : IIncrementalGenerator
         // The references, read with one Scan call (ADR 0001, How the host reads it): the three requests are built from the compilation, and
         // the transform projects each referenced assembly's manifest, cached per assembly in Specular's ScanCache.
         var scanRequests = context
-                          .CompilationProvider.Select(static (compilation, _) => ReferenceScan.CreateRequests(compilation))
+                          .CompilationProvider.Combine(buildProperties)
+                          .WithTrackingName(TrackingNames.HostScanInputs)
+                          .Select(static (inputs, _) => ReferenceScan.CreateRequests(inputs.Left, inputs.Right.IsHost))
                           .WithTrackingName(TrackingNames.HostScanRequests)
                           .SelectMany(static (requests, _) => requests.AsImmutableArray())
                           .WithTrackingName(TrackingNames.HostScanRequest);
@@ -146,24 +148,24 @@ public sealed class HostGenerator : IIncrementalGenerator
         {
             if (!handled.Contains(request.Type))
             {
-                diagnostics.Add(new(Descriptors.UnhandledRequestInHost, request.Location ?? settings.HostAttribute, ImmutableArray.Create(request.DisplayName)));
+                diagnostics.Add(new(Descriptors.UnhandledRequestInHost, request.Location, ImmutableArray.Create(request.DisplayName)));
             }
         }
 
         if (settings.UnsupportedTargetFramework is { } framework)
         {
-            diagnostics.Add(new(Descriptors.HostTargetFrameworkTooOld, settings.HostAttribute, ImmutableArray.Create(settings.AssemblyName, framework)));
+            diagnostics.Add(new(Descriptors.HostTargetFrameworkTooOld, null, ImmutableArray.Create(settings.AssemblyName, framework)));
         }
 
         diagnostics.AddRange(model.Diagnostics);
 
         var models = model.Handlers;
         var composition = HostComposition.Create(models, model.Notifications);
-        diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(settings, composition));
+        diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(composition));
 
         foreach (var global in model.GlobalBehaviors)
         {
-            diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(BehaviorShapes.KindName(global.Kind), global.Name, global.Assembly)));
+            diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location, ImmutableArray.Create(BehaviorShapes.KindName(global.Kind), global.Name, global.Assembly)));
         }
 
         var used = new HashSet<string>(
@@ -179,7 +181,7 @@ public sealed class HostGenerator : IIncrementalGenerator
                 diagnostics.Add(
                     new(
                         Descriptors.UnusedExclusion,
-                        exclusion.Location ?? settings.HostAttribute,
+                        exclusion.Location,
                         ImmutableArray.Create("ExcludeBehavior", exclusion.Display, Descriptors.NotPartOfAnyPipeline(exclusion.Display))
                     )
                 );
@@ -203,7 +205,7 @@ public sealed class HostGenerator : IIncrementalGenerator
                 diagnostics.Add(
                     new(
                         Descriptors.BoxedStructNotification,
-                        notification.Notification.Location ?? settings.HostAttribute,
+                        notification.Notification.Location,
                         ImmutableArray.Create(notification.Notification.DisplayName, string.Join(", ", boxed))
                     )
                 );

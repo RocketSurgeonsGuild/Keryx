@@ -18,7 +18,6 @@ namespace Keryx.Tests.Notifications;
 public class NotificationGeneratorTests : HostTest
 {
     internal const string HostSource = """
-        [assembly: KeryxHost]
         [assembly: Behavior(typeof(Sample.Logged))]
 
         namespace Sample;
@@ -134,7 +133,7 @@ public class NotificationGeneratorTests : HostTest
     [Arguments(8)]
     public async Task Should_Generate_A_Publish_Pipeline_Of_Depth(int depth, CancellationToken cancellationToken)
     {
-        var source = new System.Text.StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\npublic interface IClock { }\n\n");
+        var source = new System.Text.StringBuilder("namespace Sample;\n\npublic interface IClock { }\n\n");
         for (var k = 1; k <= depth; k++)
         {
             var clock = k % 2 == 1 ? "IClock clock, " : "";
@@ -187,7 +186,7 @@ public class NotificationGeneratorTests : HostTest
                               )
                        )
         );
-        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;\n" + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddSources(Usings + "namespace Sample;\n" + source).Build().GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         var mediator = Source(result, HostEmitter.MediatorHintName);
@@ -213,7 +212,6 @@ public class NotificationGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            namespace Sample;
                                            public interface IMarker { }
                                            public readonly record struct Tick(int Value) : INotification, IMarker;
@@ -234,7 +232,6 @@ public class NotificationGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            [assembly: ExcludeBehavior(typeof(Sample.Everywhere))]
                                            [assembly: ExcludeBehavior(typeof(Sample.OnType))]
                                            [assembly: ExcludeBehavior(typeof(Sample.Nowhere))]
@@ -289,7 +286,6 @@ public class NotificationGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            namespace Sample;
 
                                            file sealed record Hidden : INotification;
@@ -343,7 +339,6 @@ public class NotificationGeneratorTests : HostTest
                                       .AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            [assembly: Behavior(typeof(Sample.HostPublish))]
                                            namespace Sample;
 

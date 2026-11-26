@@ -17,7 +17,6 @@ namespace Keryx.Tests.Notifications;
 public class NotificationBehaviorTests : HostTest
 {
     internal const string Source = """
-        [assembly: KeryxHost]
         [assembly: Behavior(typeof(Sample.AssemblyPublish))]
         [assembly: ExcludeBehavior(typeof(Sample.ExcludedGlobal))]
 
@@ -403,8 +402,6 @@ public class NotificationBehaviorTests : HostTest
         var handlersImage = TestLibraries.Image("Handlers", handlers, [MetadataReference.CreateFromImage(contractsImage)]);
         var host = await CompileHostAsync(
             """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public static class Probe

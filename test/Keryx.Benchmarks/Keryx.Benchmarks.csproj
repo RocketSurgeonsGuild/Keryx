@@ -3,7 +3,8 @@
         BenchmarkDotNet suite (ADR 0001, Benchmarks): Keryx against a hand-written baseline and the other mediators (Comparison/), each library
         in its own small project under test/benchmark-subjects; the Phase 4 gate prototype (Prototype/); the Phase 3 dispatch measurements
         (Host/). Not a test project: CI builds it, checks the comparison subjects with its verify mode and runs it with the Dry job; numbers from
-        shared runners are never published.
+        shared runners are never published. An Exe, but not a Keryx host: it neither runs the analyzers nor imports the package's build files,
+        so KeryxHost is never set here; the host it measures is test/benchmark-subjects/Keryx.Benchmarks.KeryxHost.
     -->
     <PropertyGroup>
         <OutputType>Exe</OutputType>

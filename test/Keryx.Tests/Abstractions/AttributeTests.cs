@@ -10,7 +10,6 @@ public class AttributeTests
         AttributeTargets.Method | AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Assembly;
 
     [Test]
-    [Arguments(typeof(KeryxHostAttribute), AttributeTargets.Assembly, false)]
     [Arguments(typeof(BehaviorAttribute), BehaviorTargets, true)]
     [Arguments(typeof(RequestBehaviorAttribute), AttributeTargets.Class, false)]
     [Arguments(typeof(StreamBehaviorAttribute), AttributeTargets.Class, false)]
@@ -56,7 +55,6 @@ public class AttributeTests
                              "GlobalBehaviorAttribute",
                              "HandlerOrderAttribute",
                              "KeryxHandlerAttribute",
-                             "KeryxHostAttribute",
                              "KeryxManifestAttribute",
                              "NotificationBehaviorAttribute",
                              "PublishStrategyAttribute",

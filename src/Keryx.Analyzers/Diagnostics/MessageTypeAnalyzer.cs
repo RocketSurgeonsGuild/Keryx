@@ -37,7 +37,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                     return;
                 }
 
-                var isHost = symbols.IsHost;
+                var isHost = KeryxBuildProperties.IsHost(startContext.Options.AnalyzerConfigOptionsProvider.GlobalOptions);
                 startContext.RegisterSymbolAction(symbolContext => Analyze(symbolContext, symbols, isHost), SymbolKind.NamedType);
                 if (isHost)
                 {

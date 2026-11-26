@@ -148,7 +148,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
     public async Task KRX004_Internal_Handler_Class_Is_Fine_In_A_Host(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
-            "[assembly: KeryxHost]\n" + Ping + """
+            Ping + """
             internal static partial class Outer
             {
                 internal static partial class Inner
@@ -162,7 +162,8 @@ public class HandlerAnalyzerTests : AnalyzerTest
                 }
             }
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
@@ -175,7 +176,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
     [Arguments("public partial class Outer { private partial class Middle { internal static partial class H { private static string Handle(Ping request) => \"\"; } } }")]
     public async Task KRX004_Private_Or_Protected_Handler_Class_In_A_Host(string source, CancellationToken cancellationToken)
     {
-        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>("[assembly: KeryxHost]\n" + Ping + source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken, host: true);
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
         await Assert.That(diagnostics[0].Properties.ContainsKey("MakePublic")).IsTrue();
@@ -209,7 +210,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
     public async Task KRX004_File_Local_Type_In_The_Containing_Chain(string handler, CancellationToken cancellationToken)
     {
         // In a host, so only the file-local rule applies (outside a host the type is also not public).
-        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>("[assembly: KeryxHost]\n" + Ping + handler, cancellationToken);
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + handler, cancellationToken, host: true);
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
         await Assert.That(Messages(diagnostics, "KRX004").Single()).Contains("cannot be file-local");
@@ -480,9 +481,9 @@ public class HandlerAnalyzerTests : AnalyzerTest
     public async Task KRX016_Internal_Types_Are_Fine_In_A_Host(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
-            "[assembly: KeryxHost]\n" + Ping
-                                      + "internal interface IHidden { } public partial class H { private static string Handle(Ping request, IHidden hidden) => \"\"; }",
-            cancellationToken
+            Ping + "internal interface IHidden { } public partial class H { private static string Handle(Ping request, IHidden hidden) => \"\"; }",
+            cancellationToken,
+            host: true
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
@@ -500,7 +501,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
     public async Task KRX016_Signature_Type_Narrower_Than_Internal_In_A_Host(string source, string message, CancellationToken cancellationToken)
     {
         // OQ-24: the host skips such a handler, so the analyzer must say why.
-        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>("[assembly: KeryxHost]\n" + source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(source, cancellationToken, host: true);
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
         await Assert.That(Messages(diagnostics, "KRX016")).IsEquivalentTo([message]);
@@ -565,21 +566,21 @@ public class HandlerAnalyzerTests : AnalyzerTest
         """;
 
     [Test]
-    [Arguments("", "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
-    [Arguments("", "private static async IAsyncEnumerable<int> Handle(Messages.Numbers request) { yield return 1; await Task.Yield(); }", "Numbers")]
-    [Arguments("[assembly: KeryxHost]", "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    [Arguments(false, "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    [Arguments(false, "private static async IAsyncEnumerable<int> Handle(Messages.Numbers request) { yield return 1; await Task.Yield(); }", "Numbers")]
+    [Arguments(true, "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
     public async Task KRX023_Handler_Of_A_Request_Declared_In_Another_Assembly(
-        string assemblyAttribute,
+        bool host,
         string handler,
         string request,
         CancellationToken cancellationToken
     )
     {
         // A library and a host alike: a request's handler lives in the request's own assembly (decision 2026-11-26, KeryxContracts removed).
-        var result = await Builder
+        var result = await ( host ? Builder.WithKeryxHost() : Builder )
                           .AddReferences(Hosts.TestLibraries.Reference("Messages", MessagesLibrary))
                           .WithAnalyzer<HandlerAnalyzer>()
-                          .AddSources(Usings + assemblyAttribute + "\npublic static partial class H { " + handler + " }")
+                          .AddSources(Usings + "public static partial class H { " + handler + " }")
                           .Build()
                           .GenerateAsync(cancellationToken);
         var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;

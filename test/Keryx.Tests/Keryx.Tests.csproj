@@ -29,6 +29,17 @@
             </AssemblyAttribute>
         </ItemGroup>
     </Target>
+    <!--
+        The directory of the Keryx package's build files (src/Keryx: build/, buildTransitive/), which BuildFiles/KeryxHostPropertyTests
+        evaluate with MSBuild. The tests reference the analyzers as an assembly and import none of those files, so this project, an Exe and
+        a test project, is not a host itself: KeryxHost only exists in projects that import build/Keryx.targets.
+    -->
+    <ItemGroup>
+        <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+            <_Parameter1>KeryxPackageDirectory</_Parameter1>
+            <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../src/Keryx'))</_Parameter2>
+        </AssemblyAttribute>
+    </ItemGroup>
     <ItemGroup>
         <!-- The source generator testing helpers need Roslyn 5.9 or later; the analyzers themselves build against 5.0. -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="5.12.0" />

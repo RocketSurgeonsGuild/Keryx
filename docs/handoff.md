@@ -28,7 +28,7 @@ question, the interim behavior you are using and a proposal, continue with the s
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
   attribute.
-- `[assembly: KeryxHost]` (net10.0+) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
+- A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables and test projects) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
   lambdas (nothing for behaviors).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
@@ -65,8 +65,10 @@ build/Build.cs                  ModularPipelines file-based build, `mise run bui
 .github/workflows/              hand-written (build, lint, release-drafting, aot, benchmarks), modelled on Specular's
 Keryx.slnx
 src/Keryx/                      Keryx.dll + packaging; packs Keryx.Analyzers (its GetKeryxPackageFiles target) into analyzers/dotnet/cs
-src/Keryx/build/Keryx.props      LangVersion default (latest), CompilerVisibleProperty RootNamespace;TargetFrameworkIdentifier;
-                                TargetFrameworkVersion, packed to build/
+src/Keryx/build/Keryx.props      LangVersion default (latest), CompilerVisibleProperty KeryxHost;RootNamespace;
+                                TargetFrameworkIdentifier;TargetFrameworkVersion, packed to build/
+src/Keryx/build/Keryx.targets    KeryxHost default (Exe/WinExe or IsTestProject: true, else false; the project's value wins), the
+                                Specular.Scanning scan cache wiring; buildTransitive/ and buildMultiTargeting/ import build/
 src/Keryx.Analyzers/            generators + DiagnosticAnalyzers + CodeFixProviders (CodeFixes/; Workspaces, RS1038 suppressed),
                                 AnalyzerReleases.*.md
 test/Keryx.Tests/               TUnit, TUnit.Assertions.Should, Verify.TUnit, Rocket.Surgery.Extensions.Testing.SourceGenerators
@@ -91,7 +93,7 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
 - Behaviors are never instantiated and never registered in DI. The generated pipeline context resolves each behavior method's injected
   services (with the handler parameter rules) in its constructor, and links call the static method with explicit type arguments.
 - Two generators: `HandlerGenerator` (every project; never reports diagnostics, silently skips malformed input) and `HostGenerator`
-  (only with `[assembly: KeryxHost]`; reports the host-only rules, carrying an equatable `LocationInfo` instead of `Location`).
+  (only when `build_property.KeryxHost` is `true`; reports the host-only rules, carrying an equatable `LocationInfo` instead of `Location`).
   Per-assembly rules come from `DiagnosticAnalyzer`s; KRX001, same-assembly KRX005 and in-source KRX008 are compilation-end diagnostics
   (tagged `CompilationEnd`). Both generators emit nothing when the parse options are below C# 14
   (`KeryxSymbols.MinimumLanguageVersion`), so KRX022 is the only error such a project sees.
@@ -148,8 +150,9 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
   `RequestBehaviorAttribute`, `StreamBehaviorAttribute` and `NotificationBehaviorAttribute`. There are no behavior interfaces and no
   per-handler notification kind. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and `RunsBefore` target classes and methods;
   `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type argument).
-- **Host attributes.** `KeryxHost`, `ExcludeBehavior` and `ExcludeHandler`. There is no `KeryxContracts` or `ExternallyHandled`
-  (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`).
+- **Host attributes.** `ExcludeBehavior` and `ExcludeHandler`. There is no `KeryxContracts` or `ExternallyHandled`
+  (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`), and no `KeryxHost` attribute: a host is the `KeryxHost`
+  MSBuild property (Phase 3).
 - **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
   for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8). The .NET 11 shared framework carries the
   assembly, so the SDK's package pruning drops the reference for `net11.0` and nothing keeps it (OQ-56). The comment in
@@ -181,7 +184,11 @@ reported, C# 14 and `latest` are not, in a `netstandard2.0` project as well); ev
 
 ### Phase 3: host, request/response, no behaviors
 
-`[assembly: KeryxHost]`, KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped, lazy pipeline
+The `KeryxHost` MSBuild property (ADR, Opting in): `build/Keryx.targets` defaults it after the project body (`true` for `OutputType`
+`Exe`/`WinExe` and for `IsTestProject`, else `false`; a value the project sets wins), `build/Keryx.props` makes it a
+`CompilerVisibleProperty`, `buildTransitive/` imports `build/` for transitive consumers, and every generator and analyzer reads
+`build_property.KeryxHost` (unset is not a host; tests set it with the `WithKeryxHost()` builder helper). Host diagnostics without a
+source location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped, lazy pipeline
 contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic `Send`
 with exact-type dispatch, `Unsafe.As` result reinterpretation, `FrozenDictionary` above the threshold, `KeryxHandlerNotFoundException`,
 `AddKeryx()` with factory registrations (including value-type and keyed optional parameters), host namespace from `RootNamespace` with
@@ -193,7 +200,10 @@ generator does not collect them; KRX030 is Phase 7's, for referenced request typ
 allocation tests show 0 B after warm-up for synchronous handlers (class requests on both paths; struct requests on the typed path); a
 concurrency test covers concurrent first use in one scope; a micro-benchmark compares lazy pipeline contexts against
 `GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15); a host with
-`LangVersion` 13 reports KRX022 and generates no host sources.
+`LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`) cover the
+`KeryxHost` defaults through `build/` and `buildTransitive/`, the project's own value, and the compiler-visible property; `dotnet pack`
+ships `build/`, `buildMultiTargeting/` and `buildTransitive/` (the `_KeryxCheckPackedBuildFiles` target in `Keryx.csproj` fails the pack
+otherwise).
 
 ### Phase 4: behaviors
 
@@ -325,8 +335,8 @@ into the Phase 3 model.
   There is no `ExternallyHandled`. Outside a host, `ExcludeHandler` and `ExcludeBehavior` have no effect and the analyzer reports
   warning KRX043 on each (OQ-54). KRX023 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries, and the
   `AnalyzerReleases.Unshipped.md` descriptions of KRX034 and KRX036 match the ADR's rows.
-- A `[Behavior]` on a referenced notification type that does not fit the type as the host resolves it is KRX009 on
-  `[assembly: KeryxHost]`, naming the notification type and the behavior; the behavior is skipped and the rest of the publish pipeline kept
+- A `[Behavior]` on a referenced notification type that does not fit the type as the host resolves it is KRX009 without a location,
+  naming the notification type and the behavior; the behavior is skipped and the rest of the publish pipeline kept
   (OQ-55).
 - Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/` (a contracts library with the order
   notifications, targeting `netstandard2.0`, and a handler library with the order requests next to their handlers, a global static

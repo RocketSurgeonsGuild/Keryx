@@ -107,7 +107,7 @@ public class StreamGeneratorTests : HostTest
     [Arguments(8)]
     public async Task Should_Generate_A_Stream_Pipeline_Of_Depth(int depth, CancellationToken cancellationToken)
     {
-        var builder = new StringBuilder("using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\npublic interface IClock { }\n\n");
+        var builder = new StringBuilder("using System.Runtime.CompilerServices;\n\nnamespace Sample;\n\npublic interface IClock { }\n\n");
         for (var k = 1; k <= depth; k++)
         {
             var clock = k % 2 == 1 ? "IClock clock, " : "";
@@ -147,7 +147,7 @@ public class StreamGeneratorTests : HostTest
     [Test]
     public async Task Should_Dispatch_Streams_Through_A_FrozenDictionary_Above_The_Threshold(CancellationToken cancellationToken)
     {
-        var builder = new StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\n");
+        var builder = new StringBuilder("namespace Sample;\n\n");
         for (var i = 0; i <= HostEmitter.DispatchThreshold; i++)
         {
             builder.Append(
@@ -168,7 +168,7 @@ public class StreamGeneratorTests : HostTest
 
     private async Task VerifyHost(string handlers, CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + "using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\n" + Behaviors + handlers)
+        var result = await HostBuilder.AddSources(Usings + "using System.Runtime.CompilerServices;\n\nnamespace Sample;\n\n" + Behaviors + handlers)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 

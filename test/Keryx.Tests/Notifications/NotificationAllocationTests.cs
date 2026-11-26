@@ -16,8 +16,6 @@ namespace Keryx.Tests.Notifications;
 public class NotificationAllocationTests : HostTest
 {
     private const string Source = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public interface IMarker : INotification { }

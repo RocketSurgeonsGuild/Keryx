@@ -19,18 +19,21 @@ public sealed class HandlerGenerator : IIncrementalGenerator
                              .ParseOptionsProvider.Select(static (options, _) => options is CSharpParseOptions { LanguageVersion: >= KeryxSymbols.MinimumLanguageVersion })
                              .WithTrackingName(TrackingNames.LanguageVersion);
 
+        // Whether the compilation references a Keryx that has the manifest attributes.
         var compilationSettings = context
-                                 .CompilationProvider.Select(
-                                      static (compilation, _) => KeryxSymbols.Create(compilation) is { } symbols
-                                          ? new HandlerGeneratorSettings(symbols.KeryxManifestAttribute is not null, symbols.IsHost)
-                                          : new HandlerGeneratorSettings(false, false)
-                                  )
+                                 .CompilationProvider.Select(static (compilation, _) => KeryxSymbols.Create(compilation) is { KeryxManifestAttribute: not null })
                                  .WithTrackingName(TrackingNames.CompilationSettings);
 
+        var isHost = context
+                    .AnalyzerConfigOptionsProvider.Select(static (options, _) => KeryxBuildProperties.IsHost(options.GlobalOptions))
+                    .WithTrackingName(TrackingNames.HostProperty);
+
         var settings = compilationSettings
+                      .Combine(isHost)
+                      .WithTrackingName(TrackingNames.HandlerCompilationAndHost)
                       .Combine(languageVersion)
                       .WithTrackingName(TrackingNames.HandlerSettingsInputs)
-                      .Select(static (pair, _) => pair.Left with { Enabled = pair.Left.Enabled && pair.Right })
+                      .Select(static (inputs, _) => new HandlerGeneratorSettings(inputs.Left.Left && inputs.Right, inputs.Left.Right))
                       .WithTrackingName(TrackingNames.HandlerSettings);
 
         var handlers = context

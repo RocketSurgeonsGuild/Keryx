@@ -383,8 +383,6 @@ public class HandlerGeneratorTests : GeneratorTest
     {
         var result = await Generate(
             """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record PublicRequest : IRequest<int>;
@@ -420,7 +418,8 @@ public class HandlerGeneratorTests : GeneratorTest
                 }
             }
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Verify(result);
@@ -431,8 +430,6 @@ public class HandlerGeneratorTests : GeneratorTest
     {
         var result = await Generate(
             """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<int>;
@@ -447,7 +444,8 @@ public class HandlerGeneratorTests : GeneratorTest
                 }
             }
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Assert.That(result.Results.Values.Single().SyntaxTrees.Select(static t => Path.GetFileName(t.FilePath))).IsEquivalentTo(["KeryxManifest.g.cs"]);
@@ -697,6 +695,7 @@ public class HandlerGeneratorTests : GeneratorTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
     }
 
-    private Task<Rocket.Surgery.Extensions.Testing.SourceGenerators.GeneratorTestResults> Generate(string source, CancellationToken cancellationToken) =>
-        Builder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+    /// <summary>Runs the handler generator over the source, in a host (<c>build_property.KeryxHost</c> = <c>true</c>) with <paramref name="host" />.</summary>
+    private Task<Rocket.Surgery.Extensions.Testing.SourceGenerators.GeneratorTestResults> Generate(string source, CancellationToken cancellationToken, bool host = false) =>
+        ( host ? Builder.WithKeryxHost() : Builder ).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 }

@@ -66,7 +66,6 @@ public class StreamAllocationTests : HostTest
     private const string Source = """
         using System.Runtime.CompilerServices;
 
-        [assembly: KeryxHost]
 
         namespace Sample;
 

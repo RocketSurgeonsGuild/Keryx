@@ -43,7 +43,7 @@ public class PipelineAllocationTests : HostTest
     /// </summary>
     private static string Source(int depth)
     {
-        var builder = new StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\n");
+        var builder = new StringBuilder("namespace Sample;\n\n");
         for (var k = 1; k <= depth; k++)
         {
             builder.Append(

@@ -21,8 +21,6 @@ public class HostGeneratorIncrementalTests
         using System.Threading.Tasks;
         using Keryx;
 
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public interface IClock { }
@@ -55,6 +53,7 @@ public class HostGeneratorIncrementalTests
     private static readonly string[] CompilationFedSteps =
     [
         TrackingNames.HostCompilation,
+        TrackingNames.HostScanInputs,
         TrackingNames.HostScanRequests,
         TrackingNames.HostCompositionAndCompilation,
         TrackingNames.HostDiagnosticsAndCompilation,
@@ -75,6 +74,7 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostNotificationModels,
         TrackingNames.HostNotifications,
         TrackingNames.HostNotificationList,
+        TrackingNames.HostScanInputs,
         TrackingNames.HostScanRequests,
         TrackingNames.HostScanRequest,
         TrackingNames.HostSettingsAndHandlers,
@@ -297,6 +297,7 @@ public class HostGeneratorIncrementalTests
            .Create(
                 [new HostGenerator().AsSourceGenerator()],
                 parseOptions: ParseOptions,
+                optionsProvider: BuildProperties.Host,
                 driverOptions: new(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true)
             )
            .RunGenerators(compilation, cancellationToken);

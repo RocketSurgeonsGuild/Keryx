@@ -63,8 +63,6 @@ public class PipelineOrderingTests : HostTest
     {
         var builder = new StringBuilder(
             """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public static class Log

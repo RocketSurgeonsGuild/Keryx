@@ -26,7 +26,6 @@ internal sealed class KeryxSymbols
         GlobalBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.GlobalBehaviorAttribute);
         HandlerOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.HandlerOrderAttribute);
         PublishStrategyAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.PublishStrategyAttribute);
-        KeryxHostAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHostAttribute);
         KeryxManifestAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxManifestAttribute);
         BehaviorOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.BehaviorOrderAttribute);
         RunsAfterAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttribute);
@@ -58,7 +57,6 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? GlobalBehaviorAttribute { get; }
     public INamedTypeSymbol? HandlerOrderAttribute { get; }
     public INamedTypeSymbol? PublishStrategyAttribute { get; }
-    public INamedTypeSymbol? KeryxHostAttribute { get; }
     public INamedTypeSymbol? KeryxManifestAttribute { get; }
     public INamedTypeSymbol? BehaviorOrderAttribute { get; }
     public INamedTypeSymbol? RunsAfterAttribute { get; }
@@ -90,11 +88,6 @@ internal sealed class KeryxSymbols
             : null;
 
     /// <summary>
-    ///     Whether the compilation is a host (<c>[assembly: KeryxHost]</c>).
-    /// </summary>
-    public bool IsHost => HasAssemblyAttribute(KeryxHostAttribute);
-
-    /// <summary>
     ///     Whether the compilation's language version is at least <see cref="MinimumLanguageVersion" />.
     /// </summary>
     public static bool SupportsLanguageVersion(Compilation compilation) =>
@@ -120,7 +113,4 @@ internal sealed class KeryxSymbols
         member.GetAttributes()
               .Any(static a => a.AttributeClass?.ToDisplayString() == WellKnownTypeNames.GeneratedCodeAttribute
                             && a.ConstructorArguments is [{ Value: "Keryx" }, ..]);
-
-    private bool HasAssemblyAttribute(INamedTypeSymbol? attributeType) =>
-        attributeType is not null && Compilation.Assembly.GetAttributes().Any(a => IsAttribute(a, attributeType));
 }

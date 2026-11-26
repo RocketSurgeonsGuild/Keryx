@@ -41,7 +41,7 @@ public sealed class BehaviorAnalyzer : DiagnosticAnalyzer
                     return;
                 }
 
-                var isHost = symbols.IsHost;
+                var isHost = KeryxBuildProperties.IsHost(startContext.Options.AnalyzerConfigOptionsProvider.GlobalOptions);
                 var behaviors = new ConcurrentBag<INamedTypeSymbol>();
                 startContext.RegisterSymbolAction(symbolContext => AnalyzeType(symbolContext, symbols, isHost, behaviors), SymbolKind.NamedType);
                 startContext.RegisterSymbolAction(symbolContext => AnalyzeMethod(symbolContext, symbols, isHost), SymbolKind.Method);

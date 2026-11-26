@@ -75,13 +75,12 @@ public class MissingHandlerCodeFixTests : CodeFixTest
             """
             using Keryx;
 
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record GetName(int Id) : IRequest<string>;
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Verify(result);

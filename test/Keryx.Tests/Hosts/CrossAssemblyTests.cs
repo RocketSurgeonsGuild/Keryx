@@ -112,8 +112,6 @@ public class CrossAssemblyTests : HostTest
 
     /// <summary>A host over both libraries, with a notification type and a polymorphic handler of its own.</summary>
     private const string Host = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public sealed class Journal : Orders.IJournal
@@ -204,8 +202,8 @@ public class CrossAssemblyTests : HostTest
 
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(["KRX035: Global request behavior 'Journaled' from assembly 'Orders' applies in this host"]);
-        // The referenced global has no source location, so it is reported on [assembly: KeryxHost].
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        // The referenced global has no source location, so it is reported without one.
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
     }
 
     [Test]
@@ -310,7 +308,8 @@ public class CrossAssemblyTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.All(static d => d.Location.IsInSource)).IsTrue();
+        // Each on its attribute (the referenced global's KRX035 has no source location, so it has none).
+        await Assert.That(HostDiagnostics(result).Where(static d => d.Id == "KRX036").All(static d => d.Location.IsInSource)).IsTrue();
     }
 
     [Test]
@@ -331,7 +330,7 @@ public class CrossAssemblyTests : HostTest
             """
         );
 
-        var result = await HostBuilder.AddReferences(contracts, unhandled).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contracts, unhandled).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result).Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
@@ -342,8 +341,8 @@ public class CrossAssemblyTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        // Reported on [assembly: KeryxHost], so per-file .editorconfig severity applies (OQ-35).
-        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.All(static d => d.Location.IsInSource)).IsTrue();
+        // The referenced requests have no source location, so they are reported without one: only the compilation-wide severity applies.
+        await AssertWithoutLocationAsync(result.Results[typeof(HostGenerator)].Diagnostics);
         // The referenced notification type is known: it gets a typed overload, although nothing handles it.
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("Publish(global::Contracts.OrderPlaced notification");
     }
@@ -356,7 +355,7 @@ public class CrossAssemblyTests : HostTest
         var contracts = TestLibraries.Reference("Contracts", Contracts);
         var orders = TestLibraries.Reference("Orders", Orders, [contracts]);
 
-        var result = await HostBuilder.AddReferences(orders).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(orders).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // The handlers are left out, so the generated code compiles: KRX034 is the only error.
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id).Distinct()).IsEquivalentTo(["KRX034"]);
@@ -367,7 +366,7 @@ public class CrossAssemblyTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        await AssertWithoutLocationAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).DoesNotContain("Contracts");
         await Assert.That(mediator).Contains("Send(global::Orders.CreateOrder request");
@@ -394,13 +393,13 @@ public class CrossAssemblyTests : HostTest
             [services]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var diagnostics = Diagnostics(result).ToArray();
         await Assert.That(diagnostics.Where(static d => d.StartsWith("KRX030", StringComparison.Ordinal) && d.Contains("GetName", StringComparison.Ordinal))).IsEmpty();
         await Assert.That(diagnostics.Single(static d => d.StartsWith("KRX034", StringComparison.Ordinal)))
                     .Contains("which the Keryx manifest of 'Lib' needs, cannot be resolved or is not accessible from this host; reference assembly 'Services'");
-        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        await AssertWithoutLocationAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("GetNameHandler");
     }
 
@@ -409,14 +408,14 @@ public class CrossAssemblyTests : HostTest
     {
         var future = TestLibraries.Reference("Future", FutureLibrary, generate: false);
 
-        var result = await HostBuilder.AddReferences(future).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(future).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // Nothing of the assembly is read, so its request is not reported as unhandled either.
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(
                          ["KRX032: Assembly 'Future' carries a Keryx manifest of format version 2, but the Keryx in this project reads format versions up to 1; upgrade Keryx in this project"]
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
     }
 
     [Test]
@@ -424,7 +423,7 @@ public class CrossAssemblyTests : HostTest
     {
         var plain = TestLibraries.Reference("Plain", "namespace Plain; public sealed record Ping : Keryx.IRequest<int>;", generate: false);
 
-        var result = await HostBuilder.AddReferences(plain).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(plain).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(
@@ -433,14 +432,12 @@ public class CrossAssemblyTests : HostTest
                          ]
                      );
         await Assert.That(HostDiagnostics(result).Single().Severity).IsEqualTo(DiagnosticSeverity.Warning);
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
     }
 
     /// <summary>An app host: one request whose handler is internal (no manifest entry), one whose handler is public.</summary>
     private const string AppHost = """
         using Keryx;
-
-        [assembly: KeryxHost]
 
         namespace App;
 
@@ -458,10 +455,10 @@ public class CrossAssemblyTests : HostTest
         // the test host dispatches that request; its internal handler is invisible, so the test host reports KRX030 for that request.
         var app = TestLibraries.Reference("App", AppHost, host: true);
 
-        var result = await HostBuilder.AddReferences(app).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(app).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Hidden' has no handler in this host"]);
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("Send(global::App.Visible request");
         await Assert.That(mediator).DoesNotContain("Hidden");
@@ -477,13 +474,13 @@ public class CrossAssemblyTests : HostTest
         var libA = TestLibraries.Reference("LibA", HandWrittenManifest("LibA", "NameA"), [contracts], generate: false);
         var libB = TestLibraries.Reference("LibB", HandWrittenManifest("LibB", "NameB"), [contracts], generate: false);
 
-        var result = await HostBuilder.AddReferences(contracts, libA, libB).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contracts, libA, libB).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var duplicates = HostDiagnostics(result).Where(static d => d.Id == "KRX005").ToArray();
         await Assert.That(duplicates.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
                     .IsEquivalentTo(["Request type 'Contracts.GetName' has more than one handler in this host: 'NameA' (assembly 'LibA'), 'NameB' (assembly 'LibB')"]);
-        // Neither handler is in source, so it is reported on [assembly: KeryxHost] (OQ-49), and neither is dispatched.
-        await AssertOnHostAttributeAsync(duplicates);
+        // Neither handler is in source, so it is reported without a location (OQ-49), and neither is dispatched.
+        await AssertWithoutLocationAsync(duplicates);
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Send(global::Contracts.GetName request");
     }
 
@@ -518,7 +515,7 @@ public class CrossAssemblyTests : HostTest
             """
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(HostDiagnostics(result).Where(static d => d.Id == "KRX005")).IsEmpty();
     }
@@ -576,7 +573,7 @@ public class CrossAssemblyTests : HostTest
         var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface IDb { }");
         var library = TestLibraries.Image("Lib", ExcludedLibrary, [infra]);
 
-        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library)).AddSources(Usings + "[assembly: KeryxHost]\n" + ExcludingHost).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library)).AddSources(Usings + ExcludingHost).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Ping' has no handler in this host"]);
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Ping");
@@ -623,7 +620,7 @@ public class CrossAssemblyTests : HostTest
             [infra]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -632,7 +629,7 @@ public class CrossAssemblyTests : HostTest
                              "KRX034: Type 'Infra.ILog', which the request behavior method 'Logged.Handle' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
                          ]
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Logged");
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("Send(global::Lib.Ping request");
     }
@@ -697,7 +694,7 @@ public class CrossAssemblyTests : HostTest
         var library = TestLibraries.Image("Lib", librarySource, [MetadataReference.CreateFromImage(infra)]);
 
         var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
-                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -710,7 +707,7 @@ public class CrossAssemblyTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).DoesNotContain("global::Lib.Split.Handle<");
         await Assert.That(mediator).Contains("global::Lib.Split.HandleAsync<global::Lib.Numbers, int, ");
@@ -805,13 +802,13 @@ public class CrossAssemblyTests : HostTest
         var library = TestLibraries.Image("Lib", SplitLibrary("", "[Behavior(typeof(Split))]"), [MetadataReference.CreateFromImage(infra)]);
 
         var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
-                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result).Where(static d => d.StartsWith("KRX034", StringComparison.Ordinal))).IsEquivalentTo([SplitKrx034]);
-        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        await AssertWithoutLocationAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Lib.Split.Handle<global::Lib.Ping, int, ");
         await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
@@ -836,13 +833,13 @@ public class CrossAssemblyTests : HostTest
         var library = TestLibraries.Image("Lib", SplitLibrary("[assembly: Behavior(typeof(Lib.Split))]", ""), [MetadataReference.CreateFromImage(infra)]);
 
         var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
-                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result).Where(static d => d.StartsWith("KRX034", StringComparison.Ordinal))).IsEquivalentTo([SplitKrx034]);
-        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        await AssertWithoutLocationAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Lib.Split.Handle<global::Lib.Ping, int, ");
         await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
@@ -894,7 +891,7 @@ public class CrossAssemblyTests : HostTest
             [infra]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -903,7 +900,7 @@ public class CrossAssemblyTests : HostTest
                              "KRX034: Type 'Infra.ILog', which the notification behavior method 'Audited.Handle' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
                          ]
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("Publish(global::Lib.Placed notification");
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Audited");
     }
@@ -921,7 +918,7 @@ public class CrossAssemblyTests : HostTest
             [contractsV1]
         );
 
-        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // The handler is left out with an error of its own (OQ-47).
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
@@ -931,7 +928,7 @@ public class CrossAssemblyTests : HostTest
                              "KRX034: Handler 'CountedHandler' in the Keryx manifest of 'Lib' does not fit the types this host resolves: the manifest describes a notification handler of 'Contracts.Counted', but that type is not a notification this host can dispatch; build 'Lib' against the assemblies this host references",
                          ]
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("CountedHandler");
     }
 
@@ -972,7 +969,7 @@ public class CrossAssemblyTests : HostTest
             [contractsV1]
         );
 
-        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var diagnostics = HostDiagnostics(result).ToArray();
         await Assert.That(diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX009"]);
@@ -980,7 +977,7 @@ public class CrossAssemblyTests : HostTest
                     .IsEqualTo("Behavior 'Tagged' does not fit 'NameHandler.Handle': 'GetName' does not satisfy the constraint 'TRequest : ITagged'");
         await Assert.That(diagnostics[0].GetMessage(CultureInfo.InvariantCulture)).Contains("does not fit 'NameHandler.Handle': ");
         await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
-        await AssertOnHostAttributeAsync(diagnostics);
+        await AssertWithoutLocationAsync(diagnostics);
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX009"]);
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Tagged");
     }
@@ -989,7 +986,7 @@ public class CrossAssemblyTests : HostTest
     public async Task KRX009_For_A_Behavior_On_A_Referenced_Notification_Type_That_No_Longer_Fits(CancellationToken cancellationToken)
     {
         // OQ-55: Contracts was built against a Behaviors assembly whose Tagged fit every notification; the Behaviors assembly the host
-        // references constrains it to IUrgent, which Placed is not. Tagged is skipped with KRX009 on [assembly: KeryxHost]; Kept still runs.
+        // references constrains it to IUrgent, which Placed is not. Tagged is skipped with KRX009 (without a location); Kept still runs.
         const string behaviorsV1 = """
             using System.Threading.Tasks;
             using Keryx;
@@ -1026,13 +1023,13 @@ public class CrossAssemblyTests : HostTest
             [behaviors1]
         );
 
-        var result = await HostBuilder.AddReferences(behaviors2, contracts).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(behaviors2, contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && d.Id != "KRX009")).IsEmpty();
         var diagnostics = HostDiagnostics(result).ToArray();
         await Assert.That(diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
                     .IsEquivalentTo(["Behavior 'Tagged' does not fit 'Placed': 'Placed' does not satisfy the constraint 'T : IUrgent'"]);
-        await AssertOnHostAttributeAsync(diagnostics);
+        await AssertWithoutLocationAsync(diagnostics);
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Behaviors.Kept.Handle<global::Contracts.Placed, ");
         await Assert.That(mediator).DoesNotContain("Tagged");
@@ -1079,7 +1076,7 @@ public class CrossAssemblyTests : HostTest
             [behaviors]
         );
 
-        var result = await HostBuilder.AddReferences(contracts).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -1088,7 +1085,7 @@ public class CrossAssemblyTests : HostTest
                              "KRX034: Type 'Behaviors.Tagged', which the Keryx manifest of 'Contracts' needs, cannot be resolved or is not accessible from this host; reference assembly 'Behaviors'",
                          ]
                      );
-        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Contracts.Kept.Handle<global::Contracts.Placed, ");
         await Assert.That(mediator).DoesNotContain("Tagged");
@@ -1116,7 +1113,7 @@ public class CrossAssemblyTests : HostTest
             """
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(Diagnostics(result)).IsEmpty();
@@ -1163,7 +1160,6 @@ public class CrossAssemblyTests : HostTest
                                       .AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            namespace Sample;
 
                                            public sealed record Names : IStreamRequest<string>;
@@ -1190,7 +1186,7 @@ public class CrossAssemblyTests : HostTest
         var directory = Path.Combine(Path.GetTempPath(), "keryx-tests", Guid.NewGuid().ToString("N"));
         try
         {
-            var options = new IntermediateOutputOptions(directory + Path.DirectorySeparatorChar);
+            var options = HostOptions(directory + Path.DirectorySeparatorChar);
             var first = Driver(options).RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken).GetRunResult();
             await Assert.That(first.Diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX032"]);
 
@@ -1226,7 +1222,7 @@ public class CrossAssemblyTests : HostTest
         var directory = Path.Combine(Path.GetTempPath(), "keryx-tests", Guid.NewGuid().ToString("N"));
         try
         {
-            var options = new IntermediateOutputOptions(directory + Path.DirectorySeparatorChar);
+            var options = HostOptions(directory + Path.DirectorySeparatorChar);
             _ = Driver(options).RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken).GetRunResult();
 
             var file = Path.Combine(directory, "ctp", "Keryx.ctpjson");
@@ -1266,7 +1262,6 @@ public class CrossAssemblyTests : HostTest
         var model = new ReferencedAssemblyModel(
             "Lib",
             1,
-            true,
             Array(new ReferencedHandlerModel(reference, ping, Analyzers.Handlers.HandlerKind.Notification, Array(audit), 3, true)),
             Array(audit),
             Array(ping),
@@ -1326,15 +1321,17 @@ public class CrossAssemblyTests : HostTest
 
     private static IEnumerable<Diagnostic> HostDiagnostics(GeneratorTestResults result) => result.Results[typeof(HostGenerator)].Diagnostics;
 
-    /// <summary>Asserts that each diagnostic is reported on the <c>[assembly: KeryxHost]</c> attribute (ADR 0001, Diagnostics; OQ-35).</summary>
-    private static async Task AssertOnHostAttributeAsync(IEnumerable<Diagnostic> diagnostics)
+    /// <summary>
+    ///     Asserts that each diagnostic is reported without a location (<see cref="Location.None" />): a host diagnostic about something with
+    ///     no source location of its own has nowhere else to go, since a host is an MSBuild property (ADR 0001, Diagnostics).
+    /// </summary>
+    private static async Task AssertWithoutLocationAsync(IEnumerable<Diagnostic> diagnostics)
     {
         var all = diagnostics.ToArray();
         await Assert.That(all).IsNotEmpty();
         foreach (var diagnostic in all)
         {
-            await Assert.That(diagnostic.Location.IsInSource).IsTrue();
-            await Assert.That(diagnostic.Location.SourceTree!.GetText().ToString(diagnostic.Location.SourceSpan)).StartsWith("KeryxHost");
+            await Assert.That(diagnostic.Location).IsEqualTo(Location.None);
         }
     }
 
@@ -1350,12 +1347,12 @@ public class CrossAssemblyTests : HostTest
     private static Microsoft.CodeAnalysis.CSharp.CSharpCompilation HostCompilation(MetadataReference library) =>
         Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
             "Host",
-            [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText("[assembly: Keryx.KeryxHost]", TestLibraries.ParseOptions, "Host.cs")],
+            [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText("namespace Host;", TestLibraries.ParseOptions, "Host.cs")],
             [.. TestLibraries.References, library],
             new(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable)
         );
 
-    private static GeneratorDriver Driver(IntermediateOutputOptions options, params AdditionalText[] additionalTexts) =>
+    private static GeneratorDriver Driver(Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider options, params AdditionalText[] additionalTexts) =>
         Microsoft.CodeAnalysis.CSharp.CSharpGeneratorDriver.Create(
             [new HostGenerator().AsSourceGenerator()],
             additionalTexts,
@@ -1372,28 +1369,7 @@ public class CrossAssemblyTests : HostTest
             Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(Path));
     }
 
-    /// <summary>The build properties the scan cache is written with: <c>IntermediateOutputPath</c>, absolute.</summary>
-    private sealed class IntermediateOutputOptions(string intermediateOutputPath) : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider
-    {
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GlobalOptions { get; } = new Options(intermediateOutputPath);
-
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(SyntaxTree tree) => Options.Empty;
-
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(AdditionalText textFile) => Options.Empty;
-
-        private sealed class Options(string? intermediateOutputPath) : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions
-        {
-            public static Options Empty { get; } = new(null);
-
-            // The base method's out parameter is [NotNullWhen(true)]; that attribute is ambiguous here (the analyzers' Polyfill copy is
-            // visible through InternalsVisibleTo), so the override leaves it off.
-#pragma warning disable CS8765
-            public override bool TryGetValue(string key, out string? value)
-#pragma warning restore CS8765
-            {
-                value = key == "build_property.IntermediateOutputPath" ? intermediateOutputPath : null;
-                return value is not null;
-            }
-        }
-    }
+    /// <summary>The build properties of a host whose scan cache is written to <c>IntermediateOutputPath</c> (absolute).</summary>
+    private static Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider HostOptions(string intermediateOutputPath) =>
+        BuildProperties.Provider((BuildProperties.KeryxHost, "true"), ("build_property.IntermediateOutputPath", intermediateOutputPath));
 }

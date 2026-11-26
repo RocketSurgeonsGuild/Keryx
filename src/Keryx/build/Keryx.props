@@ -10,14 +10,15 @@
         <LangVersion Condition="'$(LangVersion)' == ''">latest</LangVersion>
     </PropertyGroup>
     <!--
-        MSBuild properties the host generator reads as build_property.*: RootNamespace for the namespace of the generated mediator and
-        AddKeryx(), TargetFrameworkIdentifier and TargetFrameworkVersion for KRX031 (a host targets net10.0 or newer). Added just before the
-        generated .editorconfig is written, when every other CompilerVisibleProperty is known: the .NET SDK's analyzers already ask for the
-        target framework ones, and a property listed twice is written to the file twice.
+        MSBuild properties the generators and analyzers read as build_property.*: KeryxHost for whether the project is a host (defaulted in
+        build/Keryx.targets), RootNamespace for the namespace of the generated mediator and AddKeryx(), TargetFrameworkIdentifier and
+        TargetFrameworkVersion for KRX031 (a host targets net10.0 or newer). Added just before the generated .editorconfig is written, when
+        every other CompilerVisibleProperty is known: the .NET SDK's analyzers already ask for the target framework ones, and a property
+        listed twice is written to the file twice.
     -->
     <Target Name="_KeryxAddCompilerVisibleProperties" BeforeTargets="GenerateMSBuildEditorConfigFileShouldRun">
         <ItemGroup>
-            <CompilerVisibleProperty Include="RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion" Exclude="@(CompilerVisibleProperty)" />
+            <CompilerVisibleProperty Include="KeryxHost;RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion" Exclude="@(CompilerVisibleProperty)" />
         </ItemGroup>
     </Target>
 </Project>

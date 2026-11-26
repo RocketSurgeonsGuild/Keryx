@@ -38,15 +38,27 @@ CI on f54dc49 is green (build, lint, the Native AOT publish and the benchmarks D
   kept in [future-requirements.md](future-requirements.md)); KRX001 applies in every assembly, hosts included; a handler of a request
   declared in another assembly is the new error KRX023; host KRX030 covers referenced requests only. The sample order requests moved to
   `Keryx.Samples.Orders`; `Keryx.Samples.Contracts` keeps the notifications. The pre-commit `dotnet format` step is whitespace only.
+- **A host is an MSBuild property:** `KeryxHostAttribute` is removed; `build/Keryx.targets` defaults `KeryxHost` to `true` for
+  `OutputType` `Exe`/`WinExe` and `IsTestProject` (else `false`; the project's own value wins), and the generators and analyzers read
+  `build_property.KeryxHost`; the package ships `buildTransitive/` (and keeps `buildMultiTargeting/`), and a pack-time check fails if any
+  of the three build folders is missing; host diagnostics without a source location use `Location.None`; KRX031, KRX043 and
+  `KeryxHandlerNotFoundException` name the property; `ReferenceScan` drops the referenced-host flag (`ProjectionDataVersion` 3).
 
 ## Decisions for the owner
 
-Two open questions came up while implementing the second rework ([open-questions.md](adr/open-questions.md), **Open**):
+Four open questions came up while implementing the second rework ([open-questions.md](adr/open-questions.md), **Open**):
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
   referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
 - **OQ-60:** generated manifests can no longer make two assemblies handle one request, so the host's cross-assembly KRX005 is only a
   safety net; keep it or remove it?
+- **OQ-61:** app models whose `OutputType` is not `Exe`/`WinExe` (the .NET for Android SDK sets `Library` plus `AndroidApplication`) are
+  not hosts by default; default `KeryxHost` to `true` for `AndroidApplication` and other app models, or keep the interim (set
+  `<KeryxHost>true</KeryxHost>`) and document it?
+- **OQ-62:** every `Exe`, `WinExe` or test project that runs the Keryx generators is a host whatever it targets, so one below `net10.0`
+  (including a multi-targeting test project's older inner builds, and transitively through a `ProjectReference`) fails with KRX031;
+  default `KeryxHost` to `true` only for `.NETCoreApp` 10.0 or later, or keep the interim (set `<KeryxHost>false</KeryxHost>`, per target
+  framework)?
 
 The three questions raised while implementing the first rework were decided by the owner on 2026-11-26 and are implemented;
 [open-questions.md](adr/open-questions.md) records them under **Decided**, folded into the ADR and the

@@ -2,8 +2,6 @@ using Keryx;
 using Keryx.Samples.Contracts;
 using Keryx.Samples.Orders;
 
-[assembly: KeryxHost]
-
 namespace Keryx.Samples.Host;
 
 /// <summary>A request of the host itself, handled next to it.</summary>

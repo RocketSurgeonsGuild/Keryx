@@ -258,7 +258,7 @@ public class StreamRuntimeTests : HostTest
     private static ISender Sender(AsyncServiceScope scope) => scope.ServiceProvider.GetRequiredService<ISender>();
 
     private static string BuildSource() =>
-        "using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\n"
+        "using System.Runtime.CompilerServices;\n\nnamespace Sample;\n\n"
       + Support
       + Wrap("WrapA", 10)
       + Wrap("WrapB", 20)

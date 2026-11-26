@@ -17,7 +17,6 @@ public class StreamScopeTests : HostTest
 {
     private static readonly string Source =
         "using System.Runtime.CompilerServices;\n\n"
-      + "[assembly: KeryxHost]\n"
       + "[assembly: Behavior(typeof(Sample.AsmWrap))]\n"
       + "[assembly: Behavior(typeof(Sample.AsmAudit))]\n"
       + "[assembly: ExcludeBehavior(typeof(Sample.Excluded))]\n\n"

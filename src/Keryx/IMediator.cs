@@ -55,7 +55,7 @@ public interface IPublisher
 ///     Sends requests and stream requests (<see cref="ISender" />) and publishes notifications (<see cref="IPublisher" />).
 /// </summary>
 /// <remarks>
-///     A host (<c>[assembly: KeryxHost]</c>) gets a generated, scoped implementation and registers it with its generated <c>AddKeryx()</c>.
+///     A host (a project whose <c>KeryxHost</c> MSBuild property is <c>true</c>) gets a generated, scoped implementation and registers it with its generated <c>AddKeryx()</c>.
 /// </remarks>
 [SuppressMessage("Design", "CA1040:Avoid empty interfaces", Justification = "Combines ISender and IPublisher.")]
 public interface IMediator : ISender, IPublisher;

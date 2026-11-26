@@ -67,5 +67,5 @@ internal sealed record HandlerModel(
 ///     The compilation-wide inputs of the handler generator.
 /// </summary>
 /// <param name="Enabled">Keryx is referenced and the language version is C# 14 or later (KRX022).</param>
-/// <param name="IsHost">The compilation has <c>[assembly: KeryxHost]</c>.</param>
+/// <param name="IsHost">The project is a host (<c>build_property.KeryxHost</c> is <c>true</c>).</param>
 internal sealed record HandlerGeneratorSettings(bool Enabled, bool IsHost);

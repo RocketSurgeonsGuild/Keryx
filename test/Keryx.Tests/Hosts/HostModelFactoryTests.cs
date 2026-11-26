@@ -26,8 +26,8 @@ public class HostModelFactoryTests
     public async Task Target_Framework_Properties_Decide_KRX031(string identifier, string version, string? expected) =>
         await Assert.That(
                          HostModelFactory.UnsupportedTargetFramework(
-                             new(null, identifier, version),
-                             new(true, "Host", null, "System.Runtime", new(11, 0, 0, 0))
+                             new(true, null, identifier, version),
+                             new(true, "Host", "System.Runtime", new(11, 0, 0, 0))
                          )
                      )
                     .IsEqualTo(expected);
@@ -39,6 +39,23 @@ public class HostModelFactoryTests
     [Arguments("netstandard", "2.0.0.0", "a framework whose netstandard is version 2.0")]
     [Arguments("mscorlib", "4.0.0.0", "a framework whose mscorlib is version 4.0")]
     public async Task The_Runtime_Assembly_Decides_KRX031_Without_Properties(string assembly, string version, string? expected) =>
-        await Assert.That(HostModelFactory.UnsupportedTargetFramework(new(null, null, null), new(true, "Host", null, assembly, Version.Parse(version))))
+        await Assert.That(HostModelFactory.UnsupportedTargetFramework(new(true, null, null, null), new(true, "Host", assembly, Version.Parse(version))))
                     .IsEqualTo(expected);
+
+    [Test]
+    [Arguments(true, true, true, true)]
+    [Arguments(false, true, true, false)]
+    [Arguments(true, false, true, false)]
+    [Arguments(true, true, false, false)]
+    public async Task The_Host_Generator_Is_Enabled_Only_In_A_Host(bool isHost, bool referencesKeryx, bool languageVersionSupported, bool expected)
+    {
+        // A host is the KeryxHost build property (ADR 0001, Opting in), in a compilation that references Keryx, at C# 14 or later (KRX022).
+        var settings = HostModelFactory.CreateSettings(
+            new(referencesKeryx, "Host", "System.Runtime", new(10, 0, 0, 0)),
+            new(isHost, null, null, null),
+            languageVersionSupported
+        );
+
+        await Assert.That(settings.Enabled).IsEqualTo(expected);
+    }
 }

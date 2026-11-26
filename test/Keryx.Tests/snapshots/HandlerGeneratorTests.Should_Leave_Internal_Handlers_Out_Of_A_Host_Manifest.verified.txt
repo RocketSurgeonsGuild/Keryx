@@ -3,6 +3,9 @@
   GeneratorDiagnostics: {
     Keryx.Analyzers.HandlerGenerator: []
   },
+  GlobalOptions: {
+    build_property.KeryxHost: true
+  },
   References: [
     Keryx.dll,
     Microsoft.Extensions.DependencyInjection.Abstractions.dll,

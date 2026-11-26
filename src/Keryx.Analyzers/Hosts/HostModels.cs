@@ -184,7 +184,7 @@ internal sealed record HostHandlerEntry(string? HandledType, string HandlerClass
 /// </summary>
 /// <param name="Type">The type, fully qualified with <c>global::</c>.</param>
 /// <param name="DisplayName">The name the diagnostic shows.</param>
-/// <param name="Location">A source location, if any; KRX030 falls back to <c>[assembly: KeryxHost]</c>.</param>
+/// <param name="Location">A source location, if any; without one KRX030 has no location (<see cref="Microsoft.CodeAnalysis.Location.None" />).</param>
 internal sealed record HostRequestModel(string Type, string DisplayName, LocationInfo? Location);
 
 /// <summary>
@@ -199,37 +199,38 @@ internal sealed record HostDiagnosticModel(Microsoft.CodeAnalysis.DiagnosticDesc
 ///     The compilation-wide inputs of the host generator.
 /// </summary>
 /// <param name="Enabled">
-///     The compilation references Keryx, has <c>[assembly: KeryxHost]</c> and compiles with C# 14 or later (KRX022). When false the host
-///     generator emits and reports nothing.
+///     The compilation references Keryx, the project is a host (<c>build_property.KeryxHost</c> is <c>true</c>) and it compiles with C# 14
+///     or later (KRX022). When false the host generator emits and reports nothing.
 /// </param>
 /// <param name="Namespace">The namespace of the generated host types (ADR 0001, Opting in).</param>
 /// <param name="AssemblyName">The host's assembly name, for messages.</param>
-/// <param name="HostAttribute">Where <c>[assembly: KeryxHost]</c> is, for host diagnostics without a source location of their own.</param>
 /// <param name="UnsupportedTargetFramework">
 ///     The target framework KRX031 reports when it is older than <c>net10.0</c>, or <see langword="null" /> when it is supported.
 /// </param>
-internal sealed record HostSettings(bool Enabled, string Namespace, string AssemblyName, LocationInfo? HostAttribute, string? UnsupportedTargetFramework)
+internal sealed record HostSettings(bool Enabled, string Namespace, string AssemblyName, string? UnsupportedTargetFramework)
 {
-    public static HostSettings Disabled { get; } = new(false, "", "", null, null);
+    public static HostSettings Disabled { get; } = new(false, "", "", null);
 }
 
 /// <summary>
 ///     What the host generator reads from the compilation itself (fed directly by the compilation, so this step always runs).
 /// </summary>
-/// <param name="IsHost">The compilation references Keryx and has <c>[assembly: KeryxHost]</c>.</param>
+/// <param name="ReferencesKeryx">The compilation references Keryx.</param>
 /// <param name="AssemblyName">The assembly name.</param>
-/// <param name="HostAttribute">Where <c>[assembly: KeryxHost]</c> is.</param>
 /// <param name="RuntimeAssemblyName">The name of the referenced runtime assembly used when the target framework properties are absent.</param>
 /// <param name="RuntimeAssemblyVersion">Its version, or <see langword="null" /> when no runtime assembly is referenced.</param>
-internal sealed record HostCompilationInfo(bool IsHost, string AssemblyName, LocationInfo? HostAttribute, string? RuntimeAssemblyName, Version? RuntimeAssemblyVersion);
+internal sealed record HostCompilationInfo(bool ReferencesKeryx, string AssemblyName, string? RuntimeAssemblyName, Version? RuntimeAssemblyVersion);
 
 /// <summary>
 ///     The MSBuild properties the host generator reads (<c>build/Keryx.props</c> makes them compiler visible).
 /// </summary>
+/// <param name="IsHost">
+///     <c>KeryxHost</c> is <c>true</c> (<c>build/Keryx.targets</c> defaults it for executables and test projects; unset is not a host).
+/// </param>
 /// <param name="RootNamespace"><c>RootNamespace</c>, or <see langword="null" /> when absent or empty.</param>
 /// <param name="TargetFrameworkIdentifier"><c>TargetFrameworkIdentifier</c>, or <see langword="null" /> when absent or empty.</param>
 /// <param name="TargetFrameworkVersion"><c>TargetFrameworkVersion</c>, or <see langword="null" /> when absent or empty.</param>
-internal sealed record HostBuildProperties(string? RootNamespace, string? TargetFrameworkIdentifier, string? TargetFrameworkVersion);
+internal sealed record HostBuildProperties(bool IsHost, string? RootNamespace, string? TargetFrameworkIdentifier, string? TargetFrameworkVersion);
 
 /// <summary>
 ///     Everything the host composes from its own source and its references (ADR 0001, How the host reads it), computed in one step that

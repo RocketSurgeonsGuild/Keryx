@@ -297,18 +297,18 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Every request and stream request type a host references, including those declared in a referenced host, needs exactly one handler in the host's composed set. Each assembly checks its own requests (KRX001), so this is a safety net: it catches a referenced request whose handler the host excluded (ExcludeHandler) or cannot see (an internal handler of a referenced host), or whose assembly was built with KRX001 suppressed. The severity can be changed in .editorconfig.",
+        description: "Every request and stream request type a host references, including those declared in a referenced host, needs exactly one handler in the host's composed set. Each assembly checks its own requests (KRX001), so this is a safety net: it catches a referenced request whose handler the host excluded (ExcludeHandler) or cannot see (an internal handler of a referenced host), or whose assembly was built with KRX001 suppressed. It has no source location, so its severity is set for the whole host: a global AnalyzerConfig file (.globalconfig), NoWarn or WarningsAsErrors.",
         helpLinkUri: HelpLinkBase + "krx030"
     );
 
     public static readonly DiagnosticDescriptor HostTargetFrameworkTooOld = new(
         "KRX031",
         "Host targets a framework older than net10.0",
-        "'{0}' is a Keryx host ([assembly: KeryxHost]), so it must target net10.0 or newer, but it targets {1}",
+        "'{0}' is a Keryx host (its KeryxHost MSBuild property is true), so it must target net10.0 or newer, but it targets {1}; set <KeryxHost>false</KeryxHost> if it is not meant to be one",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework.",
+        description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework. A project is a host when its KeryxHost MSBuild property is true, which Keryx defaults for executables (OutputType Exe or WinExe) and test projects; set <KeryxHost>false</KeryxHost> in one that is not.",
         helpLinkUri: HelpLinkBase + "krx031"
     );
 
@@ -444,11 +444,11 @@ internal static class Descriptors
     public static readonly DiagnosticDescriptor HostOnlyAttributeOutsideHost = new(
         "KRX043",
         "Host-only attribute outside a host",
-        "[assembly: {0}] has no effect, because this assembly is not a host ([assembly: KeryxHost])",
+        "[assembly: {0}] has no effect, because this assembly is not a host (its KeryxHost MSBuild property is not true)",
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "[assembly: ExcludeHandler] and [assembly: ExcludeBehavior] are read only by a host. In an assembly without [assembly: KeryxHost] they do nothing.",
+        description: "[assembly: ExcludeHandler] and [assembly: ExcludeBehavior] are read only by a host. In a project whose KeryxHost MSBuild property is not true (Keryx defaults it to true only for executables and test projects) they do nothing.",
         helpLinkUri: HelpLinkBase + "krx043"
     );
 

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <!--
-        A console host ([assembly: KeryxHost]): its generated KeryxMediator and AddKeryx() compose its own handlers with those of
+        A console host (an Exe, so KeryxHost defaults to true): its generated KeryxMediator and AddKeryx() compose its own handlers with those of
         Keryx.Samples.Orders, read from that library's manifest (ADR 0001, Cross-assembly discovery). It runs a short scenario and exits with
         a non-zero code when anything is off. CI publishes it with Native AOT and runs the binary (ADR 0001, AOT verification).
     -->

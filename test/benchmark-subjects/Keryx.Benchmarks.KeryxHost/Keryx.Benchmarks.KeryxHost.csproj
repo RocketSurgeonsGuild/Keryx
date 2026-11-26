@@ -1,9 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <!--
-        Keryx, as a host ([assembly: KeryxHost]) so its generated KeryxMediator and AddKeryx() are in this assembly. Both are internal, so the
-        benchmark runner sees them through InternalsVisibleTo. Keryx is wired up as a package consumer gets it, like the samples
-        (samples/Directory.Build.targets).
+        Keryx, as a host so its generated KeryxMediator and AddKeryx() are in this assembly. Both are internal, so the benchmark runner sees
+        them through InternalsVisibleTo. Keryx is wired up as a package consumer gets it, like the samples (samples/Directory.Build.targets).
+        A class library is not a host by default (build/Keryx.targets), so it says so with KeryxHost.
     -->
+    <PropertyGroup>
+        <KeryxHost>true</KeryxHost>
+    </PropertyGroup>
     <ItemGroup>
         <InternalsVisibleTo Include="Keryx.Benchmarks" />
     </ItemGroup>

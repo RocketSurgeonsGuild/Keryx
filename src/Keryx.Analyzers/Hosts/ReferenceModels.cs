@@ -18,16 +18,12 @@ internal sealed record KeryxReferenceModel(EquatableArray<ReferencedAssemblyMode
 
 /// <summary>
 ///     The projection of one referenced assembly's manifest (ADR 0001, Manifest): its <c>[assembly: KeryxManifest]</c> format version,
-///     whether it is a host itself, its handler classes with their <c>[KeryxHandler]</c> arguments, its global behaviors, and its request,
+///     its handler classes with their <c>[KeryxHandler]</c> arguments, its global behaviors, and its request,
 ///     stream request and notification types. Stored per assembly in Specular's ScanCache (keyed by MVID), so the format version is known on a
 ///     cache hit too (KRX032).
 /// </summary>
 /// <param name="Name">The assembly's metadata name.</param>
 /// <param name="FormatVersion">The manifest's <c>FormatVersion</c>, or <see langword="null" /> when the assembly has no manifest (KRX033).</param>
-/// <param name="IsHost">
-///     Whether the assembly carries <c>[assembly: KeryxHost]</c>. KRX030 covers a referenced host's request types like any other reference's
-///     (OQ-16), so the host composition does not read it.
-/// </param>
 /// <param name="Handlers">The public handler classes, ordered by metadata name.</param>
 /// <param name="GlobalBehaviors">
 ///     The public behavior classes with <c>[GlobalBehavior]</c> on the class or on a behavior method, ordered by metadata name.
@@ -37,7 +33,6 @@ internal sealed record KeryxReferenceModel(EquatableArray<ReferencedAssemblyMode
 internal sealed record ReferencedAssemblyModel(
     string Name,
     int? FormatVersion,
-    bool IsHost,
     EquatableArray<ReferencedHandlerModel> Handlers,
     EquatableArray<KeryxTypeReference> GlobalBehaviors,
     EquatableArray<KeryxTypeReference> Messages,
@@ -106,7 +101,6 @@ internal sealed class AssemblyProjection
 {
     public string Name { get; set; } = "";
     public int? FormatVersion { get; set; }
-    public bool IsHost { get; set; }
     public List<HandlerProjection> Handlers { get; set; } = [];
     public List<TypeReferenceProjection> GlobalBehaviors { get; set; } = [];
     public List<TypeReferenceProjection> Messages { get; set; } = [];
@@ -117,7 +111,6 @@ internal sealed class AssemblyProjection
         {
             Name = model.Name,
             FormatVersion = model.FormatVersion,
-            IsHost = model.IsHost,
             Handlers = [.. model.Handlers.Select(HandlerProjection.From)],
             GlobalBehaviors = [.. model.GlobalBehaviors.Select(TypeReferenceProjection.From)],
             Messages = [.. model.Messages.Select(TypeReferenceProjection.From)],
@@ -128,7 +121,6 @@ internal sealed class AssemblyProjection
         new(
             Name,
             FormatVersion,
-            IsHost,
             Handlers.Select(static h => h.ToModel()).ToImmutableArray(),
             GlobalBehaviors.Select(static t => t.ToModel()).ToImmutableArray(),
             Messages.Select(static t => t.ToModel()).ToImmutableArray(),

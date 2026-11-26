@@ -954,8 +954,7 @@ public class BehaviorAnalyzerTests : AnalyzerTest
     public async Task KRX016_A_Host_Behavior_Narrower_Than_Internal(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(
-            "[assembly: KeryxHost]\n"
-          + "[assembly: Behavior(typeof(FileLocalAssembly))]\n"
+            "[assembly: Behavior(typeof(FileLocalAssembly))]\n"
           + "[assembly: Behavior(typeof(PrivateAssemblyMethod))]\n"
           + "[assembly: Behavior(typeof(Outer.Reachable))]\n"
           + Requests
@@ -1030,7 +1029,8 @@ public class BehaviorAnalyzerTests : AnalyzerTest
                 private static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n) where TRequest : IRequest<TResponse> where TNext : struct, INext<TResponse> => n.InvokeAsync(default);
             }
             """,
-            cancellationToken
+            cancellationToken,
+            host: true
         );
 
         await Assert.That(Messages(diagnostics, "KRX016"))

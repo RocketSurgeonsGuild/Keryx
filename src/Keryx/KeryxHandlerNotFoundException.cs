@@ -17,8 +17,8 @@ public sealed class KeryxHandlerNotFoundException(Type requestType) : InvalidOpe
         ArgumentNullException.ThrowIfNull(requestType);
         return "No Keryx handler is known for the request type '"
          + ( requestType.FullName ?? requestType.Name )
-         + "'. Reference the assembly that contains its handler (and the Keryx package) from the host project, the one marked with "
-         + "[assembly: KeryxHost].";
+         + "'. Reference the assembly that contains its handler (and the Keryx package) from the host project, the one whose KeryxHost "
+         + "MSBuild property is true (by default an executable or a test project).";
     }
 
     /// <summary>

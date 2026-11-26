@@ -2,8 +2,6 @@
   Before: [
     using Keryx;
 
-[assembly: KeryxHost]
-
 namespace Sample;
 
 public sealed record GetName(int Id) : IRequest<string>;

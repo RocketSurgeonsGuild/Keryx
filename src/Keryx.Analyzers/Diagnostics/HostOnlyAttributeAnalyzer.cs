@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Keryx.Analyzers.Diagnostics;
 
 /// <summary>
-///     KRX043: <c>[assembly: ExcludeHandler]</c> or <c>[assembly: ExcludeBehavior]</c> in an assembly without <c>[assembly: KeryxHost]</c>
-///     (OQ-54). Only a host reads them, so elsewhere they have no effect. Reported on each attribute.
+///     KRX043: <c>[assembly: ExcludeHandler]</c> or <c>[assembly: ExcludeBehavior]</c> in a project that is not a host (its <c>KeryxHost</c>
+///     MSBuild property is not <c>true</c>; OQ-54). Only a host reads them, so elsewhere they have no effect. Reported on each attribute.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class HostOnlyAttributeAnalyzer : DiagnosticAnalyzer
@@ -25,7 +25,8 @@ public sealed class HostOnlyAttributeAnalyzer : DiagnosticAnalyzer
             static startContext =>
             {
                 if (!KeryxSymbols.SupportsLanguageVersion(startContext.Compilation)
-                 || KeryxSymbols.Create(startContext.Compilation) is not { IsHost: false } symbols)
+                 || KeryxBuildProperties.IsHost(startContext.Options.AnalyzerConfigOptionsProvider.GlobalOptions)
+                 || KeryxSymbols.Create(startContext.Compilation) is not { } symbols)
                 {
                     return;
                 }

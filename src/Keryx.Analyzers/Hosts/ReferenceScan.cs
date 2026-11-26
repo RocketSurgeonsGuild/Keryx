@@ -25,8 +25,11 @@ internal static class ReferenceScan
     ///     The version of the projection's shape, its derivation and its JSON contract (<see cref="AssemblyProjection" />). Bump it whenever
     ///     one of them changes, so projections cached by an older Keryx are recomputed.
     /// </summary>
-    /// <remarks>2: global behaviors are static behavior classes with <c>[GlobalBehavior]</c> on the class or on a behavior method.</remarks>
-    public const int ProjectionDataVersion = 2;
+    /// <remarks>
+    ///     2: global behaviors are static behavior classes with <c>[GlobalBehavior]</c> on the class or on a behavior method. 3: the
+    ///     referenced-host flag is gone (a host is an MSBuild property, not an assembly attribute).
+    /// </remarks>
+    public const int ProjectionDataVersion = 3;
 
     /// <summary>The newest <c>KeryxManifest.FormatVersion</c> this Keryx reads (ADR 0001, Versioning). A newer one is KRX032.</summary>
     public const int CurrentFormatVersion = 1;
@@ -38,11 +41,13 @@ internal static class ReferenceScan
     ///     The three scan requests, in this order (results are read by position): handler classes (<c>WithAttribute(KeryxHandler)</c>), behavior
     ///     classes (any kind attribute; the transform keeps those with <c>[GlobalBehavior]</c> on the class or on a behavior method), and
     ///     non-abstract request, stream request and notification types. Each is pruned to
-    ///     the referenced assemblies that reference Keryx, without the host itself. Empty when the compilation is not a host.
+    ///     the referenced assemblies that reference Keryx, without the host itself. Empty when the project is not a host
+    ///     (<paramref name="isHost" />, <c>build_property.KeryxHost</c>).
     /// </summary>
-    public static EquatableArray<ScanRequest> CreateRequests(Compilation compilation)
+    public static EquatableArray<ScanRequest> CreateRequests(Compilation compilation, bool isHost)
     {
-        if (KeryxSymbols.Create(compilation) is not { IsHost: true } symbols
+        if (!isHost
+         || KeryxSymbols.Create(compilation) is not { } symbols
          || symbols.KeryxHandlerAttribute is not { } handlerAttribute
          || symbols.RequestBehaviorAttribute is not { } requestBehavior
          || symbols.StreamBehaviorAttribute is not { } streamBehavior
@@ -117,8 +122,7 @@ internal static class ReferenceScan
     public static Dictionary<string, IAssemblySymbol> ReferencedAssemblies(Compilation compilation) => ScanAssemblies.ByName(ScanAssemblies.Get(compilation));
 
     /// <summary>
-    ///     Reads one assembly's manifest: <c>[assembly: KeryxManifest]</c>, <c>[assembly: KeryxHost]</c>, its <c>[assembly: Behavior]</c>s,
-    ///     and the arguments of the
+    ///     Reads one assembly's manifest: <c>[assembly: KeryxManifest]</c>, its <c>[assembly: Behavior]</c>s, and the arguments of the
     ///     <c>[KeryxHandler]</c> on each scanned handler class, plus the scanned global behaviors and message types. Only types the host can
     ///     reference are kept.
     /// </summary>
@@ -131,7 +135,6 @@ internal static class ReferenceScan
     )
     {
         int? formatVersion = null;
-        var isHost = false;
         var assemblyBehaviors = ImmutableArray.CreateBuilder<KeryxTypeReference>();
         foreach (var attribute in assembly.GetAttributes())
         {
@@ -143,10 +146,6 @@ internal static class ReferenceScan
             else if (KeryxSymbols.IsAttribute(attribute, symbols.KeryxManifestAttribute))
             {
                 formatVersion = attribute.NamedArguments.FirstOrDefault(static a => a.Key == "FormatVersion").Value.Value is int version ? version : 0;
-            }
-            else if (KeryxSymbols.IsAttribute(attribute, symbols.KeryxHostAttribute))
-            {
-                isHost = true;
             }
         }
 
@@ -185,7 +184,6 @@ internal static class ReferenceScan
         return new(
             assembly.MetadataName,
             formatVersion,
-            isHost,
             handlers.ToImmutable(),
             globals.ToImmutable(),
             messages.ToImmutable(),

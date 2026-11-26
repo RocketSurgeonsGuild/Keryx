@@ -69,11 +69,11 @@ public class MessageTypeAnalyzerTests : AnalyzerTest
     }
 
     [Test]
-    [Arguments("[assembly: KeryxHost] internal sealed class Hidden : IRequest<int> { }")]
-    [Arguments("public sealed class Get : IRequest<List<string>> { }")]
-    public async Task KRX016_Public_Or_In_A_Host(string source, CancellationToken cancellationToken)
+    [Arguments(true, "internal sealed class Hidden : IRequest<int> { }")]
+    [Arguments(false, "public sealed class Get : IRequest<List<string>> { }")]
+    public async Task KRX016_Public_Or_In_A_Host(bool host, string source, CancellationToken cancellationToken)
     {
-        var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken, host: host);
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
     }
@@ -105,16 +105,16 @@ public class MessageTypeAnalyzerTests : AnalyzerTest
     }
 
     [Test]
-    [Arguments("[assembly: KeryxHost] [NotificationBehavior] internal static class Hidden " + NotificationMethod + " [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
-    [Arguments("[assembly: KeryxHost] [assembly: Behavior(typeof(Hidden))] [RequestBehavior] internal static class Hidden " + RequestMethod)]
-    [Arguments("[assembly: KeryxHost] [RequestBehavior] [GlobalBehavior] internal static class Hidden " + RequestMethod)]
-    [Arguments("[NotificationBehavior] public static class Visible " + NotificationMethod + " [Behavior(typeof(Visible))] public sealed class Placed : INotification { }")]
-    [Arguments("[assembly: Behavior(typeof(Visible))] [RequestBehavior] public static class Visible " + RequestMethod)]
-    [Arguments("[RequestBehavior] [GlobalBehavior] public static class Visible " + RequestMethod)]
-    [Arguments("internal sealed class NotABehavior { } [Behavior(typeof(NotABehavior))] public sealed class Placed : INotification { }")]
-    public async Task KRX016_Behavior_Public_Or_In_A_Host(string source, CancellationToken cancellationToken)
+    [Arguments(true, "[NotificationBehavior] internal static class Hidden " + NotificationMethod + " [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
+    [Arguments(true, "[assembly: Behavior(typeof(Hidden))] [RequestBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments(true, "[RequestBehavior] [GlobalBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments(false, "[NotificationBehavior] public static class Visible " + NotificationMethod + " [Behavior(typeof(Visible))] public sealed class Placed : INotification { }")]
+    [Arguments(false, "[assembly: Behavior(typeof(Visible))] [RequestBehavior] public static class Visible " + RequestMethod)]
+    [Arguments(false, "[RequestBehavior] [GlobalBehavior] public static class Visible " + RequestMethod)]
+    [Arguments(false, "internal sealed class NotABehavior { } [Behavior(typeof(NotABehavior))] public sealed class Placed : INotification { }")]
+    public async Task KRX016_Behavior_Public_Or_In_A_Host(bool host, string source, CancellationToken cancellationToken)
     {
-        var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken);
+        var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken, host: host);
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
     }

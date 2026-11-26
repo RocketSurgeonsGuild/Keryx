@@ -76,7 +76,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            [assembly: ExcludeBehavior(typeof(Sample.Trace))]
                                            [assembly: ExcludeBehavior(typeof(Sample.Unused))]
                                            [assembly: ExcludeBehavior(typeof(string))]
@@ -118,8 +117,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
     {
         // OQ-57: one class global for all three kinds is listed once per kind, each on the class's [GlobalBehavior].
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
@@ -188,7 +185,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     [Test]
     public async Task KRX036_Is_Not_Reported_For_An_Exclusion_That_Removes_A_Behavior(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\n[assembly: ExcludeBehavior(typeof(Sample.Audit))]\nnamespace Sample;\n" + Behaviors)
+        var result = await HostBuilder.AddSources(Usings + "[assembly: ExcludeBehavior(typeof(Sample.Audit))]\nnamespace Sample;\n" + Behaviors)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -209,7 +206,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
         // One exclusion names the class: its request, stream and notification behaviors all leave every pipeline, and the exclusion counts
         // as used (no KRX036).
         const string source = """
-            [assembly: KeryxHost]
             [assembly: ExcludeBehavior(typeof(Sample.Everywhere))]
 
             namespace Sample;
@@ -285,8 +281,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
             """
         );
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
@@ -364,8 +358,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
             """
         );
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
@@ -435,8 +427,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
             """
         );
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             [NotificationBehavior]
@@ -514,8 +504,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
             """
         );
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
             """;
 
@@ -534,8 +522,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
     {
         // An open in-source behavior in a cycle with an open referenced one, both attached to two handlers: two pipelines, one KRX008.
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
@@ -582,8 +568,6 @@ public class HostBehaviorDiagnosticsTests : HostTest
         // A and B (in source) form a cycle; A also runs before a referenced behavior in the same bucket, which waits on the cycle without
         // being part of it. The host reports nothing; the analyzer reports the cycle once.
         const string source = """
-            [assembly: KeryxHost]
-
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;

@@ -16,8 +16,6 @@ namespace Keryx.Tests.Notifications;
 public class NotificationRuntimeTests : HostTest
 {
     internal const string Source = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         public static class Log
@@ -692,8 +690,6 @@ public class NotificationRuntimeTests : HostTest
         """;
 
     private const string ReferencedNotificationHost = """
-        [assembly: KeryxHost]
-
         namespace Sample;
 
         """ + LogSource + """
@@ -777,7 +773,7 @@ public class NotificationRuntimeTests : HostTest
                        )
         );
         var last = string.Create(CultureInfo.InvariantCulture, $"N{count - 1:00}");
-        return "[assembly: KeryxHost]\n\nnamespace Sample;\n\n"
+        return "namespace Sample;\n\n"
              + LogSource
              + types
              + $$"""

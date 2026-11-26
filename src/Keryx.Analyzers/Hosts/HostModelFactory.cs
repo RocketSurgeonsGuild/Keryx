@@ -22,37 +22,30 @@ internal static class HostModelFactory
 
     public static HostCompilationInfo CreateCompilationInfo(Compilation compilation)
     {
-        if (KeryxSymbols.Create(compilation) is not { IsHost: true } symbols)
+        if (KeryxSymbols.Create(compilation) is null)
         {
-            return new(false, compilation.AssemblyName ?? "", null, null, null);
+            return new(false, compilation.AssemblyName ?? "", null, null);
         }
 
-        var hostAttribute = compilation.Assembly.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, symbols.KeryxHostAttribute));
         var runtime = compilation.ReferencedAssemblyNames.FirstOrDefault(static identity => identity.Name == SystemRuntime)
          ?? compilation.ObjectType.ContainingAssembly?.Identity;
-        return new(
-            true,
-            compilation.AssemblyName ?? "",
-            hostAttribute is null ? null : LocationInfo.From(HandlerAnalysis.AttributeLocation(hostAttribute)),
-            runtime?.Name,
-            runtime?.Version
-        );
+        return new(true, compilation.AssemblyName ?? "", runtime?.Name, runtime?.Version);
     }
 
     public static HostBuildProperties ReadBuildProperties(AnalyzerConfigOptionsProvider options) =>
         new(
-            Property(options, "RootNamespace"),
-            Property(options, "TargetFrameworkIdentifier"),
-            Property(options, "TargetFrameworkVersion")
+            KeryxBuildProperties.IsHost(options.GlobalOptions),
+            KeryxBuildProperties.Get(options.GlobalOptions, "RootNamespace"),
+            KeryxBuildProperties.Get(options.GlobalOptions, "TargetFrameworkIdentifier"),
+            KeryxBuildProperties.Get(options.GlobalOptions, "TargetFrameworkVersion")
         );
 
     public static HostSettings CreateSettings(HostCompilationInfo compilation, HostBuildProperties properties, bool languageVersionSupported) =>
-        compilation.IsHost && languageVersionSupported
+        compilation.ReferencesKeryx && properties.IsHost && languageVersionSupported
             ? new(
                 true,
                 Namespace(properties.RootNamespace, compilation.AssemblyName),
                 compilation.AssemblyName,
-                compilation.HostAttribute,
                 UnsupportedTargetFramework(properties, compilation)
             )
             : HostSettings.Disabled;
@@ -399,7 +392,4 @@ internal static class HostModelFactory
             type is INamedTypeSymbol { Name: "IServiceProvider", Arity: 0, ContainingType: null, ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
         );
     }
-
-    private static string? Property(AnalyzerConfigOptionsProvider options, string name) =>
-        options.GlobalOptions.TryGetValue("build_property." + name, out var value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
 }

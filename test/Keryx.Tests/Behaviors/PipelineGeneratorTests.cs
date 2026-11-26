@@ -45,8 +45,6 @@ public class PipelineGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
-
                                            namespace Sample;
 
                                            public sealed class Outer<T> { public interface IMarker { } }
@@ -115,7 +113,6 @@ public class PipelineGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
                                            [assembly: Behavior(typeof(Sample.FileLocalAssembly))]
                                            [assembly: Behavior(typeof(Sample.AnnotatedConstraint))]
 
@@ -188,8 +185,6 @@ public class PipelineGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """
-                                           [assembly: KeryxHost]
-
                                            namespace Sample;
 
                                            public interface IAudit { void Write(string text); }
@@ -256,7 +251,7 @@ public class PipelineGeneratorTests : HostTest
     /// </summary>
     internal static string Depth(int depth)
     {
-        var builder = new StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\npublic interface IClock { }\n\n");
+        var builder = new StringBuilder("namespace Sample;\n\npublic interface IClock { }\n\n");
         for (var k = 1; k <= depth; k++)
         {
             var clock = k % 2 == 1 ? "IClock clock, " : "";

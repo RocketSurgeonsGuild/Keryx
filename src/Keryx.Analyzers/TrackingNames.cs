@@ -12,10 +12,21 @@ internal static class TrackingNames
     /// <summary>What the handler generator reads from the compilation itself. Fed directly by the compilation, so it always runs.</summary>
     public const string CompilationSettings = "Keryx.CompilationSettings";
 
-    /// <summary><see cref="CompilationSettings" /> paired with <see cref="LanguageVersion" />, before they are merged.</summary>
+    /// <summary>Whether the project is a host: the <c>KeryxHost</c> MSBuild property (<c>build_property.KeryxHost</c>) is <c>true</c>.</summary>
+    public const string HostProperty = "Keryx.HostProperty";
+
+    /// <summary><see cref="CompilationSettings" /> paired with <see cref="HostProperty" />.</summary>
+    public const string HandlerCompilationAndHost = "Keryx.HandlerCompilationAndHost";
+
+    /// <summary>
+    ///     <see cref="HandlerCompilationAndHost" /> paired with <see cref="LanguageVersion" />, before they are merged.
+    /// </summary>
     public const string HandlerSettingsInputs = "Keryx.HandlerSettingsInputs";
 
-    /// <summary>The handler generator's settings: <see cref="LanguageVersion" /> combined with <see cref="CompilationSettings" />.</summary>
+    /// <summary>
+    ///     The handler generator's settings: <see cref="CompilationSettings" /> combined with <see cref="HostProperty" /> and
+    ///     <see cref="LanguageVersion" />.
+    /// </summary>
     public const string HandlerSettings = "Keryx.HandlerSettings";
 
     /// <summary>Every <c>Handle</c>/<c>HandleAsync</c> method projected to a handler model, or nothing.</summary>
@@ -36,7 +47,7 @@ internal static class TrackingNames
     /// <summary>What the host generator reads from the compilation itself. Fed directly by the compilation, so it always runs.</summary>
     public const string HostCompilation = "Keryx.Host.Compilation";
 
-    /// <summary>The MSBuild properties the host generator reads (RootNamespace, TargetFrameworkIdentifier, TargetFrameworkVersion).</summary>
+    /// <summary>The MSBuild properties the host generator reads (KeryxHost, RootNamespace, TargetFrameworkIdentifier, TargetFrameworkVersion).</summary>
     public const string HostBuildProperties = "Keryx.Host.BuildProperties";
 
     /// <summary><see cref="HostCompilation" />, <see cref="HostBuildProperties" /> and <see cref="HostLanguageVersion" />, before they are merged.</summary>
@@ -68,6 +79,9 @@ internal static class TrackingNames
 
     /// <summary><see cref="HostNotifications" />, collected.</summary>
     public const string HostNotificationList = "Keryx.Host.NotificationList";
+
+    /// <summary>The compilation paired with <see cref="HostBuildProperties" /> (whether the project is a host), before the scan requests.</summary>
+    public const string HostScanInputs = "Keryx.Host.ScanInputs";
 
     /// <summary>
     ///     The three scan requests of the host's one <c>Scan</c> call over its references, built from the compilation (fed directly by the

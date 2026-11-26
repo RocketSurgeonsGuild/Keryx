@@ -8,8 +8,8 @@ using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 namespace Keryx.Tests.Hosts;
 
 /// <summary>
-///     Runs both generators over a host (<c>[assembly: KeryxHost]</c>), the way a host project compiles: the handler generator emits the
-///     handler partials, the host generator the mediator and <c>AddKeryx()</c>.
+///     Runs both generators over a host (<c>build_property.KeryxHost</c> = <c>true</c>, see <see cref="BuildProperties.WithKeryxHost" />), the
+///     way a host project compiles: the handler generator emits the handler partials, the host generator the mediator and <c>AddKeryx()</c>.
 /// </summary>
 public abstract class HostTest : GeneratorTest
 {
@@ -27,7 +27,14 @@ public abstract class HostTest : GeneratorTest
 
         """;
 
-    protected GeneratorTestContextBuilder HostBuilder =>
+    /// <summary>A host: both generators, <see cref="HostNamespace" /> as <c>RootNamespace</c> and <c>KeryxHost</c> set.</summary>
+    protected GeneratorTestContextBuilder HostBuilder => HostGenerators.WithKeryxHost();
+
+    /// <summary>
+    ///     <see cref="HostBuilder" /> before <c>KeryxHost</c> is set: both generators over a project that is not a host unless the test
+    ///     sets it (<see cref="BuildProperties.WithKeryxHost" />).
+    /// </summary>
+    protected GeneratorTestContextBuilder HostGenerators =>
         Builder.WithGenerator<HostGenerator>()
                .AddGlobalOption("build_property.RootNamespace", HostNamespace)
                // FrozenDictionary, which generic dispatch uses above the threshold; a net10.0 host gets it from the shared framework.

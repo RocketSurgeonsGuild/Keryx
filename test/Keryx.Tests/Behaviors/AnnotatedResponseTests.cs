@@ -238,12 +238,12 @@ public class AnnotatedResponseTests : HostTest
         }
         """;
 
-    private const string Host = "[assembly: KeryxHost]\n\nnamespace Sample;\n\n" + Behaviors + "\n" + ClosedBehaviors + "\n" + Requests;
+    private const string Host = "namespace Sample;\n\n" + Behaviors + "\n" + ClosedBehaviors + "\n" + Requests;
 
     private const string LibrarySource =
         "#nullable enable\nusing System.Collections.Generic;\nusing System.Threading;\nusing System.Threading.Tasks;\nusing Keryx;\n\nnamespace Lib;\n\n" + Behaviors;
 
-    private const string ReferencingHost = "[assembly: KeryxHost]\n\nnamespace Sample;\n\n" + Requests;
+    private const string ReferencingHost = "namespace Sample;\n\n" + Requests;
 
     [Test]
     public async Task Should_Generate_Pipelines_For_Annotated_Response_Type_Parameters(CancellationToken cancellationToken)

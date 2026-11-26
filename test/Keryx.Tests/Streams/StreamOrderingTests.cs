@@ -70,7 +70,7 @@ public class StreamOrderingTests : HostTest
 
     private static string BuildSource()
     {
-        var builder = new StringBuilder("using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\n").Append(Support);
+        var builder = new StringBuilder("using System.Runtime.CompilerServices;\n\nnamespace Sample;\n\n").Append(Support);
         builder.Append(Closed("WObs", "[BehaviorOrder(Phase.Observability)]"));
         builder.Append(Closed("WSec", "[BehaviorOrder(Phase.Security)]"));
         builder.Append(Closed("WVal1", "[BehaviorOrder(Phase.Validation, Order = 1)]"));

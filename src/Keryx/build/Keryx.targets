@@ -1,5 +1,17 @@
 <Project>
     <!--
+        Whether this project is a Keryx host (ADR 0001, Opting in): the generated KeryxMediator and AddKeryx(), composed from its own and its
+        references' handlers and behaviors. A targets file, so it runs after the project body has set OutputType and IsTestProject (NuGet
+        imports a package's build targets from nuget.g.targets, after the project). A KeryxHost the project (or its Directory.Build.props)
+        sets itself wins; otherwise executables (OutputType Exe or WinExe) and test projects are hosts, and everything else, class libraries
+        included, is not. build/Keryx.props makes it compiler visible; the generators and analyzers read build_property.KeryxHost, and treat
+        an unset value as not a host.
+    -->
+    <PropertyGroup Condition="'$(KeryxHost)' == ''">
+        <KeryxHost Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(IsTestProject)' == 'true'">true</KeryxHost>
+        <KeryxHost Condition="'$(KeryxHost)' == ''">false</KeryxHost>
+    </PropertyGroup>
+    <!--
         The generator keeps its Specular.Scanning scan cache in $(IntermediateOutputPath)ctp/Keryx.ctpjson. The shared wiring feeds it
         back as an AdditionalFile just before CoreCompile and deletes it on Clean. The guard keeps it to one import when another
         Specular.Scanning-based generator brings it too.

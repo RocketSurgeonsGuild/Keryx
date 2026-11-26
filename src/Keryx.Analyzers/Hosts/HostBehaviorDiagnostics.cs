@@ -12,7 +12,7 @@ namespace Keryx.Analyzers.Hosts;
 /// </summary>
 internal static class HostBehaviorDiagnostics
 {
-    public static IEnumerable<HostDiagnosticModel> Ordering(HostSettings settings, HostComposition composition)
+    public static IEnumerable<HostDiagnosticModel> Ordering(HostComposition composition)
     {
         var reported = new HashSet<string>(StringComparer.Ordinal);
         foreach (var pipeline in composition.BehaviorLists)
@@ -39,7 +39,7 @@ internal static class HostBehaviorDiagnostics
 
                         yield return new(
                             Descriptors.InvalidBehaviorOrdering,
-                            edge.Location ?? settings.HostAttribute,
+                            edge.Location,
                             new([Display(behavior.Identity), Contradiction(behavior, edge.Edge.RunsAfter, target, kind)])
                         );
                     }
@@ -50,7 +50,7 @@ internal static class HostBehaviorDiagnostics
         foreach (var cycle in composition.Cycles)
         {
             // Keyed on the behavior classes, so the same cycle in pipelines of other targets is reported once.
-            if (CycleDiagnostic(settings, cycle) is { } diagnostic
+            if (CycleDiagnostic(cycle) is { } diagnostic
              && reported.Add("cycle|" + string.Join("|", cycle.Select(static b => b.Identity).Order(StringComparer.Ordinal)) + "|" + KindText([.. cycle])))
             {
                 yield return diagnostic;
@@ -60,9 +60,9 @@ internal static class HostBehaviorDiagnostics
 
     /// <summary>
     ///     KRX008 for one cycle the sort found (a strongly connected component, in name order), unless all its members are in source (then the
-    ///     analyzer reports it). Reported at the first in-source edge between two members of the cycle, else on <c>[assembly: KeryxHost]</c>.
+    ///     analyzer reports it). Reported at the first in-source edge between two members of the cycle, else with no location.
     /// </summary>
-    private static HostDiagnosticModel? CycleDiagnostic(HostSettings settings, ImmutableArray<PipelineBehaviorModel> cycle)
+    private static HostDiagnosticModel? CycleDiagnostic(ImmutableArray<PipelineBehaviorModel> cycle)
     {
         if (cycle.All(static b => b.InSource))
         {
@@ -84,7 +84,7 @@ internal static class HostBehaviorDiagnostics
         var names = string.Join(", ", cycle.Select(static b => $"'{Display(b.Identity)}'"));
         return new(
             Descriptors.InvalidBehaviorOrdering,
-            location ?? settings.HostAttribute,
+            location,
             new([Display(cycle[0].Identity), BehaviorOrderingText.Cycle(names, KindText([.. cycle]))])
         );
     }
