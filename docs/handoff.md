@@ -26,11 +26,13 @@ question, the interim behavior you are using and a proposal, continue with the s
   attribute.
 - `[assembly: KeryxHost]` (net10.0+) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers everything with generated factory lambdas.
-- Behaviors (`IRequestPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamWrapPipelineBehavior`, `INotificationPipelineBehavior`,
+- Behaviors (`IRequestPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamHookBehavior`, `INotificationPipelineBehavior`,
   `INotificationHandlerPipelineBehavior`): per target, per assembly, global; ordered by `Phase` (with `Caching = 450`), `Order`,
   `RunsAfter`/`RunsBefore` (`typeof` or generic form, treated identically), type name.
   Registered and called as closed concrete types. Pipelines are flat link structs over a per-scope pipeline context.
-- Streams: fused hook iterator, items travel outward; `IStreamWrapPipelineBehavior` splits fusion.
+- Streams: `IStreamPipelineBehavior` wraps the stream (Immediate.Handlers `StreamingBehavior` model with a struct `IStreamNext<TItem>`
+  link: get the inner stream from `next`, re-yield it with `await foreach`); optional `IStreamHookBehavior` hooks, fused into one
+  iterator per run of adjacent hook behaviors, items travel outward.
 - Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
   then `AggregateException`, per-publish and per-handler behaviors.
 - Cross-assembly: the host reads `[KeryxHandler]`/`[GlobalBehavior]` types and request types from references with
@@ -97,7 +99,8 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
   the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit.
 - After Phase 0, push the branch and open a **draft** PR to `main`, so CI runs on every later phase. Mark it ready after Phase 8. Never
   merge it.
-- Continue from one phase to the next without waiting. Stop only if the Phase 4 gate fails.
+- Continue from one phase to the next without waiting. A failed Phase 4 gate does not stop work (decided 2026-11-26): record the numbers,
+  commit Phase 4 and continue.
 - After each phase, give a short summary: what was built, test status, decisions made, entries added to `open-questions.md`.
 
 ## Phases
@@ -154,10 +157,12 @@ concurrency test covers concurrent first use in one scope; a micro-benchmark com
 ### Phase 4: behaviors
 
 First, the gate: a **hand-written** prototype of a depth-1/3/8 struct pipeline (flat links, concrete behavior calls) in
-`test/Keryx.Benchmarks/Prototype`, measured against the ADR's Phase 4 gate criteria. If it fails, stop: commit the prototype and numbers,
-report, and wait for a decision. Do not switch to the hook fallback on your own.
+`test/Keryx.Benchmarks/Prototype`, measured against the ADR's Phase 4 gate criteria. If it fails, do not stop (decided 2026-11-26): record
+the measured numbers and the `DisassemblyDiagnoser` findings in a new `open-questions.md` entry, report them in the phase summary, and
+carry on with the struct-based pipeline as designed; commit Phase 4 and continue to Phase 5. Do not switch to the hook fallback on your
+own.
 
-If it passes: behavior shapes (KRX019, KRX020), three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` from the host's own
+Then: behavior shapes (KRX019, KRX020), three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` from the host's own
 compilation), constraint evaluation (ADR, Matching), KRX009, KRX042, ordering with KRX008, `ExcludeBehavior`, KRX035, KRX036 for
 `ExcludeBehavior`, closed concrete registrations and generated flat link structs for request/response pipelines. Ordering reads
 `RunsAfter`/`RunsBefore` in both forms, `[RunsAfter(typeof(T))]` and the generic `[RunsAfter<T>]` (likewise `RunsBefore`), through one
@@ -165,17 +170,41 @@ helper, so the sort never sees which form was written.
 
 **Done when:** snapshot tests for pipelines of depth 0–8; ordering tests for every sort rule and every KRX008 case, each run with the
 `typeof` form, the generic form and the two forms mixed on one class, with identical results; constraint tests for
-each constraint kind; allocation tests at depths 1, 3 and 8 show 0 B; gate numbers recorded in the phase summary.
+each constraint kind; allocation tests at depths 1, 3 and 8 show 0 B; gate numbers recorded in the phase summary and, when the gate
+failed, in the new `open-questions.md` gate-results entry. A failed gate does not block this line: if criterion 1 (0 B at depths 1, 3
+and 8) failed, follow `open-questions.md` OQ-22 for the 0 B allocation tests.
 
 ### Phase 5: streaming
 
-Stream dispatch (typed and generic), no-behavior pass-through, fused `IStreamPipelineBehavior` iterator with the ADR's hook semantics, token
-linking rules, `IStreamWrapPipelineBehavior` with fusion splitting, synchronous validation of null and unknown requests.
+Stream dispatch (typed and generic), no-behavior pass-through (the handler's enumerable returned as is), `IStreamPipelineBehavior` wrap
+behaviors called on the concrete type through flat `IStreamNext<TItem>` link structs, `IStreamHookBehavior` hooks fused into one generated
+iterator per run of adjacent hook behaviors with the ADR's hook semantics, both kinds sorted in one list, the token rules (two tokens
+linked once, at the outermost element), synchronous validation of null and unknown requests. Follow `open-questions.md` OQ-21 for
+exceptions raised outside a fused segment.
 
-**Done when:** tests cover hook order, item dropping, early dispose, exceptions from the handler and from hooks, cancellation through both
-tokens, and wrap behaviors at the start, middle and end; allocation tests show 0 extra with no behaviors, one iterator per fused hook
-segment per `Stream` call, exactly one linked `CancellationTokenSource` when two distinct cancellable tokens are supplied (and none
-otherwise), and 0 per item.
+**Done when:**
+
+- runtime tests cover wrap behaviors (re-yield, filter, map, calling `next` twice, not calling it), hook order, item dropping, early
+  dispose, exceptions from the handler, from hooks and from wrap behaviors, cancellation through both tokens with a hook segment and with
+  a wrap behavior outermost, and wrap behaviors at the start, middle and end of a run of hooks (segment splitting);
+- a non-iterator wrap behavior inside a fused segment that throws synchronously from `Handle`: the segment's hooks run `OnErrorAsync`
+  (inner → outer) and the exception is rethrown;
+- an outermost non-iterator wrap behavior that throws in `Handle`: the exception comes from the `Stream()` call itself;
+- an exception thrown by an outer wrap behavior, and one thrown by a hook of an outer segment, makes the inner segment's hooks run
+  `OnCompleteAsync` (not `OnErrorAsync`) and still reaches the consumer (OQ-21);
+- ordering tests where wrap and hook behaviors interleave by `Phase`, `Order` and `RunsAfter`/`RunsBefore`, with snapshots of the
+  resulting segment split;
+- KRX019 analyzer tests, positive (a class implementing both `IStreamPipelineBehavior<,>` and `IStreamHookBehavior<,>`; an `abstract`
+  wrap behavior; a `virtual`, `abstract` or `override` `Handle<TNext>`; a `virtual` hook method) and negative (a sealed class implementing
+  exactly one of the two);
+- scope tests (per target, `[assembly: Behavior]`, `[GlobalBehavior]`) and constraint-matching tests for open generic behaviors of each
+  stream kind, substituted with `TRequest`/`TItem`;
+- generator snapshot tests of wrap-only, hook-only and mixed stream pipelines: the `StreamLink_k` structs, one segment iterator per run
+  of adjacent hooks, and `Handle` called on the concrete type;
+- allocation tests show 0 extra with no behaviors, one iterator per wrap behavior plus one per fused hook segment per `Stream` call, and
+  0 per item; the two-token test runs with (a) a hook segment outermost and (b) a wrap behavior outermost over an inner fused hook
+  segment, each asserting exactly one linked `CancellationTokenSource` in total when two distinct cancellable tokens are supplied, and
+  none when one token is `default` or the two are equal.
 
 ### Phase 6: notifications
 

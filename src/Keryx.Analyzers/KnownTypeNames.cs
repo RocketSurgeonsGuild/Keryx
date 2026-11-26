@@ -19,8 +19,9 @@ internal static class KnownTypeNames
     public const string INextOfT = "Keryx.INext`1";
     public const string INext = "Keryx.INext";
     public const string IRequestPipelineBehavior = "Keryx.IRequestPipelineBehavior`2";
+    public const string IStreamNext = "Keryx.IStreamNext`1";
     public const string IStreamPipelineBehavior = "Keryx.IStreamPipelineBehavior`2";
-    public const string IStreamWrapPipelineBehavior = "Keryx.IStreamWrapPipelineBehavior`2";
+    public const string IStreamHookBehavior = "Keryx.IStreamHookBehavior`2";
     public const string INotificationPipelineBehavior = "Keryx.INotificationPipelineBehavior`1";
     public const string INotificationHandlerPipelineBehavior = "Keryx.INotificationHandlerPipelineBehavior`1";
 

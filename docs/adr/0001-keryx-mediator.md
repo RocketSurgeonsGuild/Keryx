@@ -6,7 +6,8 @@ Nov 25, 2026 · @David
 
 **Status:** Accepted, 2026-11-25; amended 2026-11-26 (verification fixes and the decisions recorded in open-questions.md, including
 the `I…PipelineBehavior` interface names, the generic `RunsAfter<T>`/`RunsBefore<T>` forms, one analyzer assembly with the code fixes
-in it, and the C# 11 floor). This replaces the draft "Source-generated mediator library" ADR (working title "Mediator"). Every
+in it, the C# 11 floor, stream behaviors that wrap the stream with optional fused hook behaviors, and a Phase 4 gate that reports
+instead of stopping). This replaces the draft "Source-generated mediator library" ADR (working title "Mediator"). Every
 placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
 **Decision:** Build a .NET mediator named **Keryx**. Handlers are plain `private static` methods on `partial` classes. A Roslyn
@@ -372,6 +373,11 @@ public interface INext
     ValueTask InvokeAsync(CancellationToken cancellationToken);
 }
 
+public interface IStreamNext<TItem>
+{
+    IAsyncEnumerable<TItem> InvokeAsync(CancellationToken cancellationToken);
+}
+
 public interface IRequestPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -379,19 +385,22 @@ public interface IRequestPipelineBehavior<TRequest, TResponse>
         where TNext : struct, INext<TResponse>;
 }
 
+// Wraps the stream: gets the inner stream from next and re-yields it.
 public interface IStreamPipelineBehavior<TRequest, TItem>
+    where TRequest : IStreamRequest<TItem>
+{
+    IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TNext : struct, IStreamNext<TItem>;
+}
+
+// Optional hook form: adjacent hook behaviors are fused into one generated iterator.
+public interface IStreamHookBehavior<TRequest, TItem>
     where TRequest : IStreamRequest<TItem>
 {
     ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken);
     bool OnItem(TRequest request, ref TItem item);            // false drops the item
     ValueTask OnCompleteAsync(TRequest request);
     ValueTask OnErrorAsync(TRequest request, Exception exception); // observe only; the exception is rethrown
-}
-
-public interface IStreamWrapPipelineBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
-{
-    IAsyncEnumerable<TItem> Handle(TRequest request, IAsyncEnumerable<TItem> next, CancellationToken cancellationToken);
 }
 
 // Wraps one whole Publish call.
@@ -411,7 +420,7 @@ public interface INotificationHandlerPipelineBehavior<TNotification>
 }
 ```
 
-Behaviors implement `Handle` (and the stream hooks) implicitly as public, non-virtual methods; the generated code calls them on the
+Behaviors implement `Handle` (or, for `IStreamHookBehavior`, the hooks) implicitly as public, non-virtual methods; the generated code calls them on the
 concrete type. An implicit interface implementation compiles to a sealed virtual slot, so the call is direct. A behavior class that is
 `abstract`, or whose implementing method is `virtual`, `abstract` or `override`, would turn the call back into a generic virtual dispatch,
 and is KRX019.
@@ -426,7 +435,7 @@ A behavior class implements exactly one Keryx behavior interface closing, and is
 - **closed and non-generic** (`AuditCreate : IRequestPipelineBehavior<CreateOrder.Command, Guid>`).
 
 Anything else (swapped parameters, partially open shapes such as `X<T> : IRequestPipelineBehavior<TReq, Result<T>>`, several closings) is
-KRX019. Full type-parameter unification is future work.
+KRX019. `IStreamPipelineBehavior` and `IStreamHookBehavior` are two behavior interfaces, so a class that implements both is KRX019 too. Full type-parameter unification is future work.
 
 Each behavior has exactly one public constructor (KRX020). Its parameters are resolved with the same rules as handler parameters.
 
@@ -446,7 +455,8 @@ that.
 
 "Matching" means:
 
-- The behavior's kind fits the target. A request behavior never applies to a stream or notification.
+- The behavior's kind fits the target. A request behavior never applies to a stream or notification. Both stream behavior kinds
+  (`IStreamPipelineBehavior` and `IStreamHookBehavior`) fit a stream request.
 - **Open behaviors:** every type parameter is substituted with the target's types (request: `TRequest`, `TResponse`; stream: `TRequest`,
   `TItem`; notification: the concrete published type), and then every constraint must hold. Constraint types that mention other type
   parameters (`where TRequest : IRequest<TResponse>`) are checked after substitution.
@@ -484,6 +494,8 @@ For each pipeline the host emits:
 
 Links are **flat**: each one holds two fields regardless of pipeline depth, so struct copying does not grow with depth. A behavior may
 call `next` more than once (retry). The `CancellationToken` is passed as the `InvokeAsync` argument, never stored in a link.
+
+Stream pipelines use the same shape with `IStreamNext<TItem>` links (see Streaming).
 
 ## Ordering
 
@@ -551,28 +563,61 @@ A stream request implements `IStreamRequest<TItem>`. Its handler follows the nor
 
 **No stream behaviors:** `Stream` returns the handler's enumerable as is. No extra allocation.
 
-**Fused stream behaviors.** All `IStreamPipelineBehavior` hooks of a pipeline are fused into one generated async iterator:
+**Two kinds of stream behavior.** Stream behaviors follow the Immediate.Handlers `StreamingBehavior` model, adapted to struct links:
 
-- `OnStartAsync` runs outer → inner, lazily on the first `MoveNextAsync`, not when `Stream()` is called.
-- Items travel outward from the handler: `OnItem` runs inner → outer. Returning `false` drops the item, and outer hooks do not see it.
+- **`IStreamPipelineBehavior<TRequest, TItem>` wraps the stream.** `Handle<TNext>(request, next, ct)` calls `next.InvokeAsync(ct)` to get
+  the inner `IAsyncEnumerable<TItem>` and returns the stream the outer behavior or the caller enumerates, usually by re-yielding the inner
+  stream with `await foreach` in an `async` iterator. It can do anything an iterator can: filter, map, buffer, catch, retry by calling
+  `next` again, or not call `next` at all (for example to serve cached items).
+- **`IStreamHookBehavior<TRequest, TItem>` observes the stream through hooks** and is the optional zero-extra-iterator form: hook behaviors
+  that sit next to each other in the sorted pipeline are fused into one generated async iterator (a **fused hook segment**).
+
+Both kinds are sorted together, in one list, by the rules in Ordering. Each run of consecutive hook behaviors between two wrap behaviors
+(or between a wrap behavior and either end of the pipeline) becomes one fused hook segment. With no wrap behavior, all hooks form one
+segment.
+
+**Links.** As for requests, the host emits one flat `readonly struct StreamLink_k : IStreamNext<TItem> { Context ctx; TRequest request; }`
+per position. Its `InvokeAsync(ct)` returns `ctx.Behavior_{k+1}.Handle(request, new StreamLink_{k+1}(ctx, request), ct)` for a wrap
+behavior, the next fused hook segment's iterator for a segment, or the handler's `InvokeAsync` at the end. The token is an
+argument, never stored in a link. `Handle` is called on the concrete, closed behavior type, as for request behaviors.
+
+**Hook semantics** (per fused hook segment):
+
+- `OnStartAsync` runs outer → inner, lazily on the first `MoveNextAsync`, not when `Stream()` is called. The segment gets its inner
+  stream from `next` only after every `OnStartAsync` of the segment completed.
+- Items travel outward from the handler: `OnItem` runs inner → outer. Returning `false` drops the item, and outer hooks, outer behaviors
+  and the consumer do not see it.
 - `OnCompleteAsync` runs inner → outer on normal completion **and** on early dispose (the consumer breaks out).
-- `OnErrorAsync` runs inner → outer for any exception from the handler or from a hook, including `OperationCanceledException`. The
-  exception is then rethrown.
+- `OnErrorAsync` runs inner → outer for any exception from the segment's inner stream (inner behaviors and the handler) or from a hook
+  of the segment, including `OperationCanceledException`. The exception is then rethrown.
 - `OnCompleteAsync` and `OnErrorAsync` run only for behaviors whose `OnStartAsync` completed.
-- Because C# forbids `yield return` inside a `try` with a `catch` (CS1626), the iterator wraps only the `MoveNextAsync`/`Current` step in
-  `try/catch` and yields outside it.
-- The fused iterator puts `[EnumeratorCancellation]` on its own token, and passes that same token to the handler and to
-  `GetAsyncEnumerator`, so the handler never links tokens a second time. It links the `Stream(request, ct)` token and the consumer's
-  `WithCancellation` token only when both can be cancelled and differ; that link allocates one `CancellationTokenSource` (a documented
-  exception in the Performance contract).
+- An exception raised outside a segment (in an outer wrap behavior or an outer segment) reaches the segment as an early dispose of its
+  iterator, so its hooks run `OnCompleteAsync`, not `OnErrorAsync` (open-questions OQ-21).
+- The guarded region (the `try/catch` that calls `OnErrorAsync` and rethrows) covers `next.InvokeAsync(ct)`, `GetAsyncEnumerator(ct)`,
+  each `MoveNextAsync`, `Current` and the segment's own hook calls. An inner wrap behavior that is not an iterator can throw
+  synchronously from `next.InvokeAsync(ct)` or `GetAsyncEnumerator`, so those calls are inside it too. Because C# forbids
+  `yield return` inside a `try` with a `catch` (CS1626), only the `yield return` stays outside the guarded region.
 
-**`IStreamWrapPipelineBehavior`** receives and returns the whole `IAsyncEnumerable<TItem>`. It splits fusion at its position: hooks inside
-it are fused into one segment, hooks outside it into another. It costs whatever its own enumerable allocates plus, when hooks sit on both
-sides of it, one more fused segment iterator.
+**Cancellation.** The outermost element of the pipeline receives the `Stream(request, ct)` token as its argument and the consumer's
+`WithCancellation` token through `GetAsyncEnumerator`; every inner element receives one token, as its argument, and is enumerated
+without a second one (a wrap behavior enumerates `next.InvokeAsync(ct)` without `WithCancellation`). So two tokens meet in exactly one
+place:
 
-Null and unknown stream requests are validated synchronously in a non-iterator wrapper before the iterator is returned.
+- A fused hook segment puts `[EnumeratorCancellation]` on its own token and passes that same token to the hooks and to `next`. When it is
+  outermost, it links the two tokens only when both can be cancelled and differ; that link allocates one `CancellationTokenSource` (a
+  documented exception in the Performance contract).
+- A wrap behavior written as an `async` iterator puts `[EnumeratorCancellation]` on its `cancellationToken` (CS8425 warns when it is
+  missing) and passes that token to `next.InvokeAsync`. When it is outermost, the compiler-generated iterator links the two tokens under
+  the same condition, with the same single `CancellationTokenSource`.
+- The handler, innermost, is called with the token its caller passed on, so it never links tokens a second time.
 
-Phases, scopes, constraints and diagnostics work exactly as for request/response behaviors.
+Null and unknown stream requests are validated synchronously in a non-iterator wrapper before the first behavior or segment is called.
+`Stream()` then calls the outermost element directly, so a non-iterator wrap behavior's `Handle` (and any non-iterator element it calls
+eagerly, down to the first iterator) runs, and can throw, at the `Stream()` call. Iterator wrap behaviors, fused hook segments and
+iterator handlers stay lazy until the first `MoveNextAsync`. Deferring the outermost call would need one more iterator per `Stream` call,
+which the Performance contract does not allow.
+
+Phases, scopes, constraints, ordering and diagnostics work exactly as for request/response behaviors, for both stream behavior kinds.
 
 ## Notifications
 
@@ -840,10 +885,12 @@ These replace the draft's "minimal allocations" and the handoff's "must not allo
   (handler and behaviors). The only generated async path is `UnitAdapter.ToUnit` (non-generic `ValueTask`/`Task` → `ValueTask<Unit>`). It
   uses `PoolingAsyncValueTaskMethodBuilder` on net10+ and must add 0 bytes in steady state; a benchmark checks it. Typed `IRequest`
   overloads return `ValueTask<Unit>`, so they add no second adapter.
-- **Stream:** 0 extra allocations with no stream behaviors. With stream behaviors, per `Stream` call: one iterator object per fused hook
-  segment (one segment when there is no `IStreamWrapPipelineBehavior`), plus whatever each `IStreamWrapPipelineBehavior`'s own enumerable
-  allocates. Documented exception: one linked `CancellationTokenSource` when the `Stream()` token and the `WithCancellation` token are both
-  cancellable and differ. 0 per item.
+- **Stream:** with no stream behaviors, `Stream` returns the handler's enumerable as is: 0 extra allocations. With stream behaviors, per
+  `Stream` call: one iterator per `IStreamPipelineBehavior` (its own `async` iterator) plus one per fused hook segment (one segment when
+  every stream behavior is an `IStreamHookBehavior`). Links are structs and add nothing. Documented exception: one linked
+  `CancellationTokenSource` when the `Stream()` token and the `WithCancellation` token are both cancellable and differ. 0 per item. The
+  count assumes each wrap behavior calls `next` once and allocates nothing else itself; a wrap behavior that calls `next` again also
+  creates the inner iterators again, and what a wrap behavior allocates beyond its own iterator is its own.
 - **Publish:** 0 extra allocations for a sequential publish with synchronously completing handlers. Parallel: 0 B when every handler
   pipeline completes synchronously; otherwise one array plus one `AsTask()` per pending `ValueTask`, plus what `Task.WhenAll` allocates.
   The exception list only on failure. Documented exception: a struct notification delivered to interface-typed handlers is boxed once per
@@ -851,7 +898,8 @@ These replace the draft's "minimal allocations" and the handoff's "must not allo
 - Allocation tests warm up first, measure only a region that completes synchronously (`IsCompletedSuccessfully`, then `.Result`), and
   use `GC.GetAllocatedBytesForCurrentThread`. They cover value-type and reference-type responses through both entry points, class and
   struct requests (asserting the split above), and streams both with a default token on one side and with two distinct cancellable tokens
-  (asserting exactly the one linked `CancellationTokenSource`). BenchmarkDotNet `[MemoryDiagnoser]` results are the authoritative
+  (asserting exactly the one linked `CancellationTokenSource` in total). The two-token stream tests run for both outermost kinds: a fused
+  hook segment outermost, and a wrap behavior outermost over an inner fused hook segment. BenchmarkDotNet `[MemoryDiagnoser]` results are the authoritative
   evidence; the thread-counter tests are regression guards.
 
 ### Phase 4 gate
@@ -863,8 +911,9 @@ Before behaviors are generated, a hand-written prototype of the struct-based pip
    `next.InvokeAsync` called directly;
 3. mean time at depth 3 within 1.25× of a hand-written nested-call baseline.
 
-If it fails, implementation stops: the prototype and its numbers are committed and reported, and the ADR's fallback (generator-inlined
-before/after hooks for simple behaviors) is **not** adopted without a decision.
+A failed gate does **not** stop implementation (decided 2026-11-26). The measured numbers and the disassembly findings are recorded in
+`docs/adr/open-questions.md`, Phase 4 is committed with the struct-based pipeline as designed, and work continues with Phase 5. The
+ADR's fallback (generator-inlined before/after hooks for simple behaviors) is **not** adopted without a decision.
 
 ## Benchmarks
 
@@ -909,7 +958,15 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - **MediatR-style interface names (`IPipelineBehavior`, `INotificationBehavior`, `IStreamBehavior`, ...):** used until 2026-11-26, then
   renamed to one pattern, `I{Kind}PipelineBehavior` (`IRequestPipelineBehavior`, `INotificationPipelineBehavior`,
   `INotificationHandlerPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamWrapPipelineBehavior`), so every behavior interface follows
-  the same pattern and names the pipeline it belongs to.
+  the same pattern and names the pipeline it belongs to. The stream interfaces were reshaped later the same day (next entry).
+- **Hook-first stream behaviors** (`IStreamPipelineBehavior` as the fused `OnStart`/`OnItem`/`OnComplete`/`OnError` hooks, plus a
+  separate `IStreamWrapPipelineBehavior` whose `Handle(request, IAsyncEnumerable<TItem> next, ct)` received the inner stream already
+  built): used until 2026-11-26, then replaced by the Immediate.Handlers `StreamingBehavior` model. `IStreamPipelineBehavior` is now the
+  wrap shape with a struct `IStreamNext<TItem>` link, consistent with `INext<T>`, so a behavior decides when, whether and how often the
+  rest of the pipeline is built; `IStreamWrapPipelineBehavior` is gone; the hooks stay as the optional `IStreamHookBehavior`, fused per
+  segment.
+- **Stopping implementation when the Phase 4 gate fails:** the original rule, replaced on 2026-11-26. A failed gate is recorded and
+  reported, and work continues (see Phase 4 gate).
 - **`set` instead of `init` on attribute properties, to lower the language floor to C# 8:** rejected 2026-11-26 (open-questions OQ-20).
   The generic ordering attributes need C# 11 regardless, and `build/Keryx.props` defaults `LangVersion` to `latest`.
 - **Separate `Keryx.Abstractions` package:** rejected in favor of one `Keryx` package; contracts projects use `[assembly: KeryxContracts]`.

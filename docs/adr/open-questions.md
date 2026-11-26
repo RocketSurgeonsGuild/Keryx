@@ -145,6 +145,32 @@ public API snapshot.
   attributes (`GlobalBehavior`, `BehaviorOrder`, `RunsAfter`/`RunsBefore`, `PublishStrategy`), so reflection-based tooling does not
   report a derived class as a global behavior or a parallel notification when the generator does not treat it as one.
 
+### OQ-21: Hook behaviors and exceptions raised outside their fused segment
+
+With the wrap model (decided 2026-11-26, below), a wrap behavior splits hook behaviors into separate fused segments, each its own
+iterator. An exception raised outside a segment, in an outer wrap behavior or in a hook of an outer segment, never passes through the
+inner segment's iterator: the outer code stops enumerating and disposes it. Before the wrap model, all hooks shared one iterator and
+`OnErrorAsync` saw every exception from any hook.
+
+- **Interim:** a segment's `OnErrorAsync` observes exceptions from its inner stream (inner behaviors and the handler) and from its own
+  hooks. An exception raised outside the segment reaches it as an early dispose, so its hooks run `OnCompleteAsync`. This is what nested
+  iterators do on their own and costs nothing extra. Within one segment, the previously decided semantics are unchanged.
+- **Proposal:** confirm. The alternative (inner hooks also see outer exceptions through `OnErrorAsync`) would need shared state between
+  segments per `Stream` call, an extra allocation the stream contract does not allow.
+
+### OQ-22: Phase 4 0 B allocation tests after a failed allocation gate
+
+The Phase 4 "Done when" requires allocation tests at depths 1, 3 and 8 to show 0 B, and the Performance contract promises 0 B for a
+synchronous `Send` at any depth. The decision "Phase 4 gate does not stop work" (below) says a failed gate does not block Phase 4. If the
+gate fails on criterion 1 (0 B at depths 1, 3 and 8), the generated pipeline allocates the same way, those tests fail, and with warnings
+as errors and CI Phase 4 cannot be committed. How the tests behave in that case is not decided.
+
+- **Interim:** keep the 0 B assertions, but mark the failing ones skipped, with a skip reason that points to the Phase 4 gate-results
+  entry in this file (which records the measured bytes). Do not loosen the assertions to the measured value and do not delete them. If
+  the gate passes criterion 1, nothing is skipped.
+- **Proposal:** re-enable the skipped tests once the allocation is fixed, and keep the Performance contract at 0 B. Alternative: record
+  the measured allocation as a documented exception in the Performance contract and assert that value instead.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)
@@ -183,12 +209,15 @@ interface follows the pattern of the notification ones, and the names that had n
 
 Shapes and semantics are unchanged. Applied to code, tests, the public API snapshot, `KnownTypeNames`, the ADR, the brief and the
 glossary; the source files are named after the interfaces. Folded into the ADR (Behaviors, Alternatives considered).
+The stream rows were superseded later the same day by "Stream behaviors: wrap model" below: `IStreamPipelineBehavior` changed shape,
+`IStreamWrapPipelineBehavior` was removed, and the hooks moved to `IStreamHookBehavior`.
 
 ### Stream allocation exceptions (2026-11-26)
 
 Per `Stream` call: one iterator per fused hook segment (one when there is no `IStreamWrapPipelineBehavior`), plus one linked
 `CancellationTokenSource` only when two distinct cancellable tokens are supplied, plus whatever a wrap behavior's own enumerable
 allocates; 0 per item. Allocation tests include the two-token case. Folded into the ADR (Streaming, Performance contract).
+Restated for the wrap model by "Stream behaviors: wrap model" below.
 
 ### Parallel publish (2026-11-26)
 
@@ -229,3 +258,37 @@ suppressed in `Keryx.Analyzers.csproj` with a comment. The accepted risk: the co
 code-fix type reached from a generator or analyzer code path fails command-line builds; code-fix types are never touched from those
 paths. Folded into the ADR (Package and assemblies, Repository layout, Diagnostics and code fixes, Alternatives considered,
 Consequences).
+
+### Stream behaviors: wrap model (2026-11-26)
+
+Stream behaviors follow the Immediate.Handlers `StreamingBehavior` model
+(`src/Immediate.Handlers.Shared/StreamingBehavior.cs`: the behavior receives the request, calls `Next(request, ct)` to get the inner
+`IAsyncEnumerable`, and re-yields it with `await foreach`), adapted to Keryx's struct links:
+
+- `IStreamPipelineBehavior<TRequest, TItem>` is the wrap shape:
+  `IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct,
+  IStreamNext<TItem>`, still with `where TRequest : IStreamRequest<TItem>`. The link holds the request, as `INext<T>` links do, so
+  `IStreamNext<TItem>.InvokeAsync(CancellationToken)` takes only the token and returns `IAsyncEnumerable<TItem>`.
+- `IStreamNext<TItem>` is new, named after `INext<T>`; `KnownTypeNames.IStreamNext` is ``Keryx.IStreamNext`1``.
+- `IStreamWrapPipelineBehavior` is removed (merged into `IStreamPipelineBehavior`).
+- The fused hooks (`OnStartAsync`/`OnItem`/`OnCompleteAsync`/`OnErrorAsync`, with the outward semantics decided before) are kept as the
+  optional zero-extra-iterator form `IStreamHookBehavior<TRequest, TItem>` (`KnownTypeNames.IStreamHookBehavior`). Hook behaviors between
+  two wrap behaviors are fused into one segment. The name was given with the decision; it does not follow the
+  `I{Kind}PipelineBehavior` pattern of OQ-12.
+- Phases, scopes, constraints, ordering and diagnostics apply to both kinds. Both are sorted in one list; a class implementing both
+  interfaces is KRX019 (more than one behavior interface closing).
+- Allocation contract per `Stream` call: one iterator per wrap behavior plus one per fused hook segment, plus one linked
+  `CancellationTokenSource` only when two distinct cancellable tokens are supplied; 0 per item; with no behaviors the handler's enumerable
+  is returned as is.
+
+Applied to `src/Keryx` (`IStreamPipelineBehavior.cs`, `IStreamHookBehavior.cs`, `IStreamNext.cs`), `KnownTypeNames`, the shape tests,
+the public API snapshot, the ADR, the brief (Phase 5) and the glossary. Exceptions raised outside a fused segment are OQ-21. Folded into
+the ADR (Behaviors, Streaming, Performance contract, Alternatives considered).
+
+### Phase 4 gate does not stop work (2026-11-26)
+
+A failed Phase 4 performance gate no longer stops implementation. The Phase 4 implementer records the measured numbers for each gate
+criterion (allocations at depths 1, 3 and 8; the `DisassemblyDiagnoser` findings for the `Handle` and `next.InvokeAsync` calls; mean time
+at depth 3 against the nested-call baseline) in a new entry in this file, commits Phase 4 with the struct-based pipeline as designed, and
+continues to Phase 5. The hook fallback is still not adopted without a decision. Folded into the ADR (Phase 4 gate, Alternatives
+considered) and the brief (Git workflow, Phase 4).

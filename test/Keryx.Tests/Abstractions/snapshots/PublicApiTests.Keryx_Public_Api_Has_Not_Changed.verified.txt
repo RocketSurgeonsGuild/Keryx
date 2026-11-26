@@ -76,7 +76,7 @@
         System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(Keryx.IRequest<TResponse> request, System.Threading.CancellationToken cancellationToken = default);
         System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(Keryx.IStreamRequest<TItem> request, System.Threading.CancellationToken cancellationToken = default);
     }
-    public interface IStreamPipelineBehavior<TRequest, TItem>
+    public interface IStreamHookBehavior<TRequest, TItem>
         where TRequest : Keryx.IStreamRequest<TItem>
     {
         System.Threading.Tasks.ValueTask OnCompleteAsync(TRequest request);
@@ -84,12 +84,17 @@
         bool OnItem(TRequest request, ref TItem item);
         System.Threading.Tasks.ValueTask OnStartAsync(TRequest request, System.Threading.CancellationToken cancellationToken);
     }
-    public interface IStreamRequest<TItem> { }
-    public interface IStreamWrapPipelineBehavior<TRequest, TItem>
+    public interface IStreamNext<TItem>
+    {
+        System.Collections.Generic.IAsyncEnumerable<TItem> InvokeAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IStreamPipelineBehavior<TRequest, TItem>
         where TRequest : Keryx.IStreamRequest<TItem>
     {
-        System.Collections.Generic.IAsyncEnumerable<TItem> Handle(TRequest request, System.Collections.Generic.IAsyncEnumerable<TItem> next, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+            where TNext :  struct, Keryx.IStreamNext<TItem>;
     }
+    public interface IStreamRequest<TItem> { }
     [System.AttributeUsage(System.AttributeTargets.Assembly)]
     public sealed class KeryxContractsAttribute : System.Attribute
     {

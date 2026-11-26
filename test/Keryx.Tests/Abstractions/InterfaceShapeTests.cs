@@ -8,9 +8,10 @@ public class InterfaceShapeTests
     [Arguments(typeof(IRequest<>))]
     [Arguments(typeof(IStreamRequest<>))]
     [Arguments(typeof(INext<>))]
+    [Arguments(typeof(IStreamNext<>))]
     [Arguments(typeof(IRequestPipelineBehavior<,>))]
     [Arguments(typeof(IStreamPipelineBehavior<,>))]
-    [Arguments(typeof(IStreamWrapPipelineBehavior<,>))]
+    [Arguments(typeof(IStreamHookBehavior<,>))]
     [Arguments(typeof(INotificationPipelineBehavior<>))]
     [Arguments(typeof(INotificationHandlerPipelineBehavior<>))]
     public async Task Generic_Interface_Is_Invariant(Type type)
@@ -65,11 +66,11 @@ public class InterfaceShapeTests
     {
         var pipeline = typeof(IRequestPipelineBehavior<,>).GetGenericArguments();
         var stream = typeof(IStreamPipelineBehavior<,>).GetGenericArguments();
-        var wrap = typeof(IStreamWrapPipelineBehavior<,>).GetGenericArguments();
+        var hook = typeof(IStreamHookBehavior<,>).GetGenericArguments();
 
         await Assert.That(pipeline[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IRequest<>).MakeGenericType(pipeline[1])]);
         await Assert.That(stream[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(stream[1])]);
-        await Assert.That(wrap[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(wrap[1])]);
+        await Assert.That(hook[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(hook[1])]);
         await Assert.That(typeof(INotificationPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
                     .IsEquivalentTo([typeof(INotification)]);
         await Assert.That(typeof(INotificationHandlerPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
@@ -77,14 +78,15 @@ public class InterfaceShapeTests
     }
 
     [Test]
-    [Arguments(typeof(IRequestPipelineBehavior<,>), true)]
-    [Arguments(typeof(INotificationPipelineBehavior<>), false)]
-    [Arguments(typeof(INotificationHandlerPipelineBehavior<>), false)]
-    public async Task Behavior_Next_Is_A_Struct_Link(Type behaviorType, bool generic)
+    [Arguments(typeof(IRequestPipelineBehavior<,>), typeof(INext<>))]
+    [Arguments(typeof(IStreamPipelineBehavior<,>), typeof(IStreamNext<>))]
+    [Arguments(typeof(INotificationPipelineBehavior<>), typeof(INext))]
+    [Arguments(typeof(INotificationHandlerPipelineBehavior<>), typeof(INext))]
+    public async Task Behavior_Next_Is_A_Struct_Link(Type behaviorType, Type nextType)
     {
         var handle = behaviorType.GetMethod("Handle")!;
         var next = handle.GetGenericArguments().Single();
-        var expected = generic ? typeof(INext<>).MakeGenericType(behaviorType.GetGenericArguments()[1]) : typeof(INext);
+        var expected = nextType.IsGenericTypeDefinition ? nextType.MakeGenericType(behaviorType.GetGenericArguments()[1]) : nextType;
 
         await Assert.That(next.GenericParameterAttributes & GenericParameterAttributes.SpecialConstraintMask)
                     .IsEqualTo(GenericParameterAttributes.NotNullableValueTypeConstraint | GenericParameterAttributes.DefaultConstructorConstraint);
@@ -92,9 +94,24 @@ public class InterfaceShapeTests
     }
 
     [Test]
+    public async Task Stream_Behavior_Wraps_The_Inner_Stream()
+    {
+        var handle = typeof(IStreamPipelineBehavior<,>).GetMethod("Handle")!;
+        var item = typeof(IStreamPipelineBehavior<,>).GetGenericArguments()[1];
+        var invoke = typeof(IStreamNext<>).GetMethod(nameof(IStreamNext<string>.InvokeAsync))!;
+
+        await Assert.That(typeof(IStreamPipelineBehavior<,>).GetMethods()).HasSingleItem();
+        await Assert.That(handle.ReturnType).IsEqualTo(typeof(IAsyncEnumerable<>).MakeGenericType(item));
+        await Assert.That(handle.GetParameters().Select(static p => p.ParameterType.Name).ToArray())
+                    .IsEquivalentTo(["TRequest", "TNext", nameof(CancellationToken)]);
+        await Assert.That(invoke.ReturnType).IsEqualTo(typeof(IAsyncEnumerable<>).MakeGenericType(typeof(IStreamNext<>).GetGenericArguments()[0]));
+        await Assert.That(invoke.GetParameters().Single().ParameterType).IsEqualTo(typeof(CancellationToken));
+    }
+
+    [Test]
     public async Task Stream_Hook_OnItem_Takes_The_Item_By_Reference()
     {
-        var onItem = typeof(IStreamPipelineBehavior<,>).GetMethod(nameof(IStreamPipelineBehavior<StringStream, string>.OnItem))!;
+        var onItem = typeof(IStreamHookBehavior<,>).GetMethod(nameof(IStreamHookBehavior<StringStream, string>.OnItem))!;
 
         await Assert.That(onItem.ReturnType).IsEqualTo(typeof(bool));
         await Assert.That(onItem.GetParameters()[1].ParameterType.IsByRef).IsTrue();
