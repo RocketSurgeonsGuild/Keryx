@@ -1,0 +1,199 @@
+# Keryx implementation brief
+
+Nov 25, 2026 · @David
+
+This brief replaces the original "mediator library" handoff prompt. It is written so an agent with no other context can implement any
+single phase from this file plus the ADR.
+
+## Read first
+
+1. [docs/adr/0001-keryx-mediator.md](adr/0001-keryx-mediator.md): the authoritative design. If this brief and the ADR disagree, the ADR
+   wins.
+2. [CONTEXT.md](../CONTEXT.md): the glossary. Use its terms.
+3. [docs/adr/open-questions.md](adr/open-questions.md): undecided points and their interim behavior.
+
+If the ADR is ambiguous, or you believe part of it is wrong, do not deviate silently. Add an entry to `open-questions.md` with the
+question, the interim behavior you are using and a proposal, continue with the safest option, and say so in your phase summary.
+
+## Summary of the design
+
+- Library name **Keryx**; namespace `Keryx`; generated-code-only types in `Keryx.Internal`; diagnostics `KRX001`+.
+- One NuGet package `Keryx`: `Keryx.dll` (`netstandard2.0;net10.0;net11.0`) plus `Keryx.Analyzers.dll` and
+  `Keryx.Analyzers.CodeFixes.dll` (both `netstandard2.0`) and `System.Text.Json.dll` under `analyzers/dotnet/cs`.
+- Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
+  half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
+  attribute.
+- `[assembly: KeryxHost]` (net10.0+) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
+  exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers everything with generated factory lambdas.
+- Behaviors: per target, per assembly, global; ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore`, type name.
+  Registered and called as closed concrete types. Pipelines are flat link structs over a per-scope pipeline context.
+- Streams: fused hook iterator, items travel outward; `IStreamWrapBehavior` splits fusion.
+- Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
+  then `AggregateException`, per-publish and per-handler behaviors.
+- Cross-assembly: the host reads `[KeryxHandler]`/`[GlobalBehavior]` types and request types from references with
+  `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache.
+
+## Repository layout
+
+Follow the current Specular layout (`RocketSurgeonsGuild/Specular`, `origin/main`, commit 92746cd). A shallow clone may exist at
+`/private/tmp/claude-501/-Users-david-Development-RocketSurgeonsGuild-Keryx/017970f3-2a4b-4b8c-befb-9898fc1dffd8/scratchpad/specular-src`;
+if not, clone `https://github.com/RocketSurgeonsGuild/Specular` (depth 1) into a scratch directory. Do **not** use the Indago-era Specular
+worktree branch (Nuke, husky); it is outdated.
+
+```
+global.json                     .NET 11 SDK 11.0.100, rollForward latestFeature, MTP test runner, Rocket.Surgery.Sdk msbuild-sdk
+Directory.Build.props/.targets  Rocket.Surgery.Sdk import, package metadata, TreatWarningsAsErrors=true (everywhere, always)
+Directory.Packages.props        CPM, every package pinned exactly
+NuGet.config, GitVersion.yml, GitReleaseManager.yaml, .editorconfig, LICENSE, Readme.md
+.config/mise.toml, .config/hk.pkl
+build/Build.cs                  ModularPipelines file-based build, `mise run build`
+.github/workflows/              hand-written (build, lint, release-drafting), modelled on Specular's
+Keryx.slnx
+src/Keryx/                      Keryx.dll + packaging; packs the analyzers via ProjectReference OutputItemType=Analyzer
+src/Keryx/build/Keryx.props      CompilerVisibleProperty RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion, packed to build/
+src/Keryx.Analyzers/            generators + DiagnosticAnalyzers (Microsoft.CodeAnalysis.CSharp only), AnalyzerReleases.*.md
+src/Keryx.Analyzers.CodeFixes/  CodeFixProviders (Workspaces)
+test/Keryx.Tests/               TUnit, TUnit.Assertions.Should, Verify.TUnit, Rocket.Surgery.Extensions.Testing.SourceGenerators
+test/Keryx.Benchmarks/          BenchmarkDotNet; Prototype/ for the Phase 4 spike; comparison libraries in their own projects
+samples/hosts/, samples/libraries/
+docs/adr/, CONTEXT.md
+```
+
+Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/Blazor samples, icons or spec-kit files.
+
+## Engineering rules
+
+- `IIncrementalGenerator` only. Pipeline models are value-equatable records with equatable arrays (reuse Specular's `EquatableArray` once
+  the package is referenced). No `Compilation`, `ISymbol`, `SyntaxNode` or `Location` in cached models. Every step has a tracking name.
+- Emit generated sources with `RegisterSourceOutput`, never `RegisterImplementationSourceOutput`.
+- The analyzers never reference `Keryx.dll`. Keryx types are found by metadata name through one `KnownTypeNames` class, covered by a test.
+- Two generators: `HandlerGenerator` (every project; never reports diagnostics, silently skips malformed input) and `HostGenerator`
+  (only with `[assembly: KeryxHost]`; reports the host-only rules, carrying an equatable `LocationInfo` instead of `Location`).
+  Per-assembly rules come from `DiagnosticAnalyzer`s; KRX001, same-assembly KRX005 and in-source KRX008 are compilation-end diagnostics
+  (tagged `CompilationEnd`).
+- Generated code is deterministic, starts with `// <auto-generated/>`, enables nullable, uses `global::` names, and is AOT and trimming
+  safe. `[GeneratedCode("Keryx", version)]` goes on generated members of user partial types, never on the partial declaration; type level
+  only on types Keryx owns. Hint names are the sanitised fully qualified metadata name of the handler class plus `.Keryx.g.cs` (ADR,
+  Incremental generation rules). No runtime reflection anywhere, including DI activation.
+- Warnings are errors everywhere. Fix warnings; suppress only with a justification comment.
+- Performance: meet the **Performance contract** in the ADR. Prove it with allocation tests (`GC.GetAllocatedBytesForCurrentThread` over a
+  synchronous region after warm-up) and BenchmarkDotNet `[MemoryDiagnoser]` numbers.
+- Tests: generator output as Verify snapshots; analyzer and code-fix tests through `Rocket.Surgery.Extensions.Testing.SourceGenerators`;
+  runtime behavior tests compile and run generated code.
+
+## Git workflow
+
+- The ADR, this brief, `CONTEXT.md` and `open-questions.md` are the initial commit on `main`, pushed to
+  `git@github.com:RocketSurgeonsGuild/Keryx.git`.
+- All phases happen on one feature branch, one commit per phase, each commit passing `mise run build` (build + tests). Commits go through
+  the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit.
+- After Phase 0, push the branch and open a **draft** PR to `main`, so CI runs on every later phase. Mark it ready after Phase 8. Never
+  merge it.
+- Continue from one phase to the next without waiting. Stop only if the Phase 4 gate fails.
+- After each phase, give a short summary: what was built, test status, decisions made, entries added to `open-questions.md`.
+
+## Phases
+
+The order is fixed. Phase 3 should build the host on a handler model (request type, response type, handler class, kind, injected
+parameters, attached behaviors) that Phase 7 can fill from manifests without rewriting Phase 3's emitter.
+
+### Phase 0: scaffold
+
+Solution, all projects (empty), Directory.Build/Packages props, global.json, mise/hk config, `build/Build.cs`, GitHub workflows, `.editorconfig`,
+`AnalyzerReleases.Shipped.md`/`Unshipped.md`. `mise run build` succeeds with one trivial test per test project. Packing produces a `Keryx`
+package with the analyzer assemblies in `analyzers/dotnet/cs`.
+
+**Done when:** clean clone → `mise run build` passes locally; the draft PR's CI passes.
+
+### Phase 1: abstractions
+
+Every public type in the ADR's Core types, Behaviors, Ordering, Notifications and Attribute reference sections, plus `Keryx.Internal`
+(`KeryxHandlerAttribute`, `KeryxManifestAttribute`, `HandlerKind`, `UnitAdapter`), for `netstandard2.0;net10.0;net11.0`. XML docs on
+every public member. `UnitAdapter.ToUnit` allocates nothing when the source has already completed.
+
+**Done when:** the abstractions compile for all three TFMs; unit tests cover `Unit` equality and `UnitAdapter` (including a zero-allocation
+test on net10+); the `KnownTypeNames` test exists (it may start with an empty list).
+
+### Phase 2: handlers, diagnostics, code fixes
+
+Handler-candidate selection, handler partial generation (constructor, `InvokeAsync`, return adaptation, keyed/default parameter copying,
+static invoker, `[KeryxHandler]` and `[assembly: KeryxManifest(FormatVersion = 1)]`). Analyzer rules KRX001–KRX007, KRX011–KRX018 and
+KRX021, and the shape checks for notification handlers (KRX040, KRX041). Code fixes for KRX001 (both actions), KRX002, KRX004 and KRX014.
+
+**Done when:** snapshot tests cover every handler shape (nested/top-level, static/instance, every return type, keyed and default
+parameters, notifications including polymorphic parameters); every diagnostic has a positive and a negative test; every code fix has a
+before/after test; the incremental test (ADR, Incremental generation rules) passes for the handler pipeline.
+
+### Phase 3: host, request/response, no behaviors
+
+`[assembly: KeryxHost]`, KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped, lazy pipeline
+contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic `Send`
+with exact-type dispatch, `Unsafe.As` result reinterpretation, `FrozenDictionary` above the threshold, `KeryxHandlerNotFoundException`,
+`AddKeryx()` with factory registrations (including value-type and keyed optional parameters), host namespace from `RootNamespace` with
+the sanitised assembly-name fallback, KRX030 for the host's own request types. Same-assembly handlers only.
+
+**Done when:** runtime tests send through typed and generic paths (value-type and reference-type responses, `IRequest`, struct requests);
+allocation tests show 0 B after warm-up for synchronous handlers (class requests on both paths; struct requests on the typed path); a
+concurrency test covers concurrent first use in one scope; a micro-benchmark compares lazy pipeline contexts against
+`GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15).
+
+### Phase 4: behaviors
+
+First, the gate: a **hand-written** prototype of a depth-1/3/8 struct pipeline (flat links, concrete behavior calls) in
+`test/Keryx.Benchmarks/Prototype`, measured against the ADR's Phase 4 gate criteria. If it fails, stop: commit the prototype and numbers,
+report, and wait for a decision. Do not switch to the hook fallback on your own.
+
+If it passes: behavior shapes (KRX019, KRX020), three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` from the host's own
+compilation), constraint evaluation (ADR, Matching), KRX009, KRX042, ordering with KRX008, `ExcludeBehavior`, KRX035, KRX036 for
+`ExcludeBehavior`, closed concrete registrations and generated flat link structs for request/response pipelines.
+
+**Done when:** snapshot tests for pipelines of depth 0–8; ordering tests for every sort rule and every KRX008 case; constraint tests for
+each constraint kind; allocation tests at depths 1, 3 and 8 show 0 B; gate numbers recorded in the phase summary.
+
+### Phase 5: streaming
+
+Stream dispatch (typed and generic), no-behavior pass-through, fused `IStreamBehavior` iterator with the ADR's hook semantics, token
+linking rules, `IStreamWrapBehavior` with fusion splitting, synchronous validation of null and unknown requests.
+
+**Done when:** tests cover hook order, item dropping, early dispose, exceptions from the handler and from hooks, cancellation through both
+tokens, and wrap behaviors at the start, middle and end; allocation tests show 0 extra with no behaviors, one iterator per fused hook
+segment per `Stream` call, exactly one linked `CancellationTokenSource` when two distinct cancellable tokens are supplied (and none
+otherwise), and 0 per item.
+
+### Phase 6: notifications
+
+Publish dispatch (typed and generic), handler lists with polymorphic expansion and `[HandlerOrder]`, sequential and parallel strategies,
+run-all-then-`AggregateException` (also for one failure and on cancellation), `INotificationBehavior` (per publish, also with zero
+handlers) and `INotificationHandlerBehavior` (per handler) with all three scopes, boxing-free generic `Publish` for struct notifications,
+KRX037. Parallel publish exactly as the ADR's Publish strategy section defines it. Follow `open-questions.md` interim behavior for OQ-3,
+OQ-4, OQ-5, OQ-17 and OQ-18.
+
+**Done when:** tests cover zero/one/many handlers, polymorphic handlers, ordering, both strategies, failures in several handlers,
+cancellation, and both behavior kinds; allocation tests show 0 B for a sequential publish and for a parallel publish with synchronous
+handlers.
+
+### Phase 7: cross-assembly discovery
+
+Reference `Specular.Scanning.Sources` 0.4.3-beta.2 (exact, `PrivateAssets=all`) plus `System.Text.Json` and
+`System.Collections.Immutable` as it requires; ship `System.Text.Json.dll` beside the analyzer; let Specular's pack helper add its cache
+targets to the package. One `context.Scan<KeryxReferenceModel>("Keryx", requests, transform)` call over the three scans in the ADR
+(an `IncrementalValuesProvider<ScanRequest>`, results read by position); projection cached in ScanCache with a source-generated
+`JsonSerializerContext` and the `ProjectionDataVersion` constant. Merge own and referenced handlers into the Phase 3 model. Host rules
+KRX005 (cross-assembly), KRX030 (referenced types, skipping types declared in another host), KRX032, KRX033, KRX034, `ExcludeHandler`
+with KRX036 for `ExcludeHandler`. Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/`
+(a contracts library with `[assembly: KeryxContracts]` and a handler library with handlers, a global behavior and notification
+handlers). CI job: publish the sample host with `PublishAot=true`, fail on IL2xxx/IL3xxx, run it.
+
+**Done when:** the samples build and run end to end; tests cover a host with project and metadata references, a missing reference
+(KRX034), a newer format version (KRX032), a Keryx reference without a manifest (KRX033), duplicate handlers (KRX005), exclusion
+(including KRX036 for `ExcludeHandler`), and a test host that references an app host;
+the incremental test shows downstream steps cached after an unrelated edit and `Modified` after a manifest change; the AOT job passes.
+
+### Phase 8: benchmarks, README, notes
+
+The benchmark suite in the ADR's Benchmarks section (baseline, Keryx, Mediator 3.0.2 scoped and singleton, MediatR 15.x without a key,
+Immediate.Handlers 4.4.0, ZeroAlloc.Mediator 7.0.1), each library in its own project. README: install, minimum SDK (.NET 10), handler
+rules, behaviors, streaming, notifications, hosts, contracts assemblies, testing handlers through `InvokeAsync`, diagnostics table with
+help links, benchmark results from a local run with machine details. A short "what is left" note in `docs/`.
+
+**Done when:** benchmarks run locally and in CI with `--job Dry`; the README is complete; the PR is marked ready for review.
