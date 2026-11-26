@@ -14,7 +14,7 @@ internal static class HostBehaviorDiagnostics
     public static IEnumerable<HostDiagnosticModel> Ordering(HostSettings settings, HostComposition composition)
     {
         var reported = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var pipeline in composition.Requests)
+        foreach (var pipeline in composition.Requests.Concat(composition.Streams))
         {
             foreach (var behavior in pipeline.Behaviors)
             {

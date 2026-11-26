@@ -6,8 +6,8 @@
 namespace Sample
 {
     /// <summary>
-    ///     This host's Keryx mediator: sends each request through its pipeline to its handler. Scoped: it creates each pipeline
-    ///     context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by
+    ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler. Scoped: it creates
+    ///     each pipeline context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by
     ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
@@ -183,11 +183,11 @@ namespace Sample
         }
 
         /// <inheritdoc />
-        /// <remarks>This mediator dispatches no stream requests yet, so every stream request is unknown to it.</remarks>
         public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            throw __HandlerNotFound(request.GetType());
+            var requestType = request.GetType();
+            throw __HandlerNotFound(requestType);
         }
 
         /// <inheritdoc />

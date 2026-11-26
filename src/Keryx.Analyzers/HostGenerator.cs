@@ -134,7 +134,6 @@ public sealed class HostGenerator : IIncrementalGenerator
             diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(global.Name, global.Assembly)));
         }
 
-        // Stream pipelines are composed already (their behaviors count as used), although the host dispatches them only from Phase 5.
         var used = new HashSet<string>(models.SelectMany(static m => m.UsedExclusions), StringComparer.Ordinal);
         foreach (var exclusion in settings.Exclusions)
         {

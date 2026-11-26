@@ -191,7 +191,7 @@ public class HostRuntimeTests : HostTest
     }
 
     [Test]
-    public async Task Stream_And_Publish_Know_No_Types_Yet(CancellationToken cancellationToken)
+    public async Task Unknown_Stream_Requests_Throw_And_Publish_Knows_No_Types_Yet(CancellationToken cancellationToken)
     {
         var host = await CompileHostAsync(Source, cancellationToken);
         await using var provider = BuildProvider(host, Registrations(host));

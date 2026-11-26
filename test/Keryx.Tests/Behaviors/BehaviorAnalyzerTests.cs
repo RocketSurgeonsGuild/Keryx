@@ -289,6 +289,76 @@ public class BehaviorAnalyzerTests : AnalyzerTest
     }
 
     [Test]
+    public async Task KRX009_Stream_Behaviors_Whose_Constraints_Do_Not_Hold(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(
+            Requests
+          + """
+            public sealed class ValueItems<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem> where TItem : struct
+            {
+                public IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem> =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            public sealed class Commands<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>, ICommand
+            {
+                public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken) => default;
+                public bool OnItem(TRequest request, ref TItem item) => true;
+                public ValueTask OnCompleteAsync(TRequest request) => default;
+                public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
+            }
+
+            public sealed class CommandItems<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>, ICommand
+            {
+                public IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem> =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            public sealed class ValueHooks<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem> where TItem : struct
+            {
+                public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken) => default;
+                public bool OnItem(TRequest request, ref TItem item) => true;
+                public ValueTask OnCompleteAsync(TRequest request) => default;
+                public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
+            }
+
+            public sealed record Ticks : IStreamRequest<int>, ICommand;
+
+            public static partial class NamesHandler
+            {
+                [Behavior(typeof(ValueItems<,>))]
+                [Behavior(typeof(Commands<,>))]
+                [Behavior(typeof(CommandItems<,>))]
+                [Behavior(typeof(ValueHooks<,>))]
+                private static IAsyncEnumerable<string> Handle(Names request) => null!;
+            }
+
+            public static partial class TicksHandler
+            {
+                [Behavior(typeof(ValueItems<,>))]
+                [Behavior(typeof(Commands<,>))]
+                [Behavior(typeof(CommandItems<,>))]
+                [Behavior(typeof(ValueHooks<,>))]
+                private static IAsyncEnumerable<int> Handle(Ticks request) => null!;
+            }
+            """,
+            cancellationToken
+        );
+
+        // Each kind is checked on both type arguments: wrap behaviors and hooks on TRequest and on TItem.
+        await Assert.That(Messages(diagnostics, "KRX009"))
+                    .IsEquivalentTo(
+                         [
+                             "Behavior 'Commands<,>' does not fit 'NamesHandler.Handle(Names)': 'Names' does not satisfy the constraint 'TRequest : ICommand'",
+                             "Behavior 'ValueItems<,>' does not fit 'NamesHandler.Handle(Names)': 'string' does not satisfy the constraint 'TItem : struct'",
+                             "Behavior 'CommandItems<,>' does not fit 'NamesHandler.Handle(Names)': 'Names' does not satisfy the constraint 'TRequest : ICommand'",
+                             "Behavior 'ValueHooks<,>' does not fit 'NamesHandler.Handle(Names)': 'string' does not satisfy the constraint 'TItem : struct'",
+                         ]
+                     );
+        await Assert.That(Ids(diagnostics).Distinct()).IsEquivalentTo(["KRX009"]);
+    }
+
+    [Test]
     public async Task KRX009_Constraint_Types_Nested_In_Generic_Types(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(
@@ -350,12 +420,30 @@ public class BehaviorAnalyzerTests : AnalyzerTest
     [Arguments("public struct X : IRequestPipelineBehavior<Ping, string> { public ValueTask<string> Handle<TNext>(Ping r, TNext n, CancellationToken c) where TNext : struct, INext<string> => default; }", "is a struct; a behavior is a class, resolved once per scope and held by the pipeline context")]
     [Arguments("public sealed class Outer<T> { public sealed class X : IRequestPipelineBehavior<Ping, string> { public ValueTask<string> Handle<TNext>(Ping r, TNext n, CancellationToken c) where TNext : struct, INext<string> => default; } }", "is nested in a generic type; a behavior is open with the interface's type parameters, or closed and non-generic")]
     [Arguments("public sealed class X : IStreamPipelineBehavior<Names, string>, IStreamHookBehavior<Names, string> { public IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); public ValueTask OnStartAsync(Names r, CancellationToken c) => default; public bool OnItem(Names r, ref string i) => true; public ValueTask OnCompleteAsync(Names r) => default; public ValueTask OnErrorAsync(Names r, Exception e) => default; }", "implements more than one Keryx behavior interface closing (IStreamPipelineBehavior<Names, string>, IStreamHookBehavior<Names, string>); a behavior implements exactly one")]
+    [Arguments("public abstract class X : IStreamPipelineBehavior<Names, string> { public IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); }", "is abstract; generated code constructs it and calls it on its concrete type")]
+    [Arguments("public class X : IStreamPipelineBehavior<Names, string> { public virtual IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); }", "implements 'Handle' with a method that is 'virtual'; generated code calls it on the concrete type, which must be a direct (non-virtual) call")]
+    [Arguments("public abstract class X : IStreamPipelineBehavior<Names, string> { public abstract IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string>; }", "implements 'Handle' with a method that is 'abstract'; generated code calls it on the concrete type, which must be a direct (non-virtual) call")]
+    [Arguments("public abstract class B { public abstract IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string>; } public sealed class X : B, IStreamPipelineBehavior<Names, string> { public override IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) => n.InvokeAsync(c); }", "implements 'Handle' with a method that is 'override'; generated code calls it on the concrete type, which must be a direct (non-virtual) call")]
+    [Arguments("public abstract class X : IStreamHookBehavior<Names, string> { public ValueTask OnStartAsync(Names r, CancellationToken c) => default; public bool OnItem(Names r, ref string i) => true; public ValueTask OnCompleteAsync(Names r) => default; public ValueTask OnErrorAsync(Names r, Exception e) => default; }", "is abstract; generated code constructs it and calls it on its concrete type")]
+    [Arguments("public class X : IStreamHookBehavior<Names, string> { public virtual ValueTask OnStartAsync(Names r, CancellationToken c) => default; public bool OnItem(Names r, ref string i) => true; public ValueTask OnCompleteAsync(Names r) => default; public ValueTask OnErrorAsync(Names r, Exception e) => default; }", "implements 'OnStartAsync' with a method that is 'virtual'; generated code calls it on the concrete type, which must be a direct (non-virtual) call")]
     public async Task KRX019_Unsupported_Behavior_Shapes(string behavior, string reason, CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(Requests + behavior, cancellationToken);
 
         await Assert.That(Ids(diagnostics).Distinct()).IsEquivalentTo(["KRX019"]);
         await Assert.That(Messages(diagnostics, "KRX019")).Contains(m => m.EndsWith(reason, StringComparison.Ordinal));
+    }
+
+    [Test]
+    [Arguments("public sealed class X : IStreamPipelineBehavior<Names, string> { public IAsyncEnumerable<string> Handle<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); }")]
+    [Arguments("public sealed class X<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem> { public IAsyncEnumerable<TItem> Handle<TNext>(TRequest r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<TItem> => n.InvokeAsync(c); }")]
+    [Arguments("public sealed class X : IStreamHookBehavior<Names, string> { public ValueTask OnStartAsync(Names r, CancellationToken c) => default; public bool OnItem(Names r, ref string i) => true; public ValueTask OnCompleteAsync(Names r) => default; public ValueTask OnErrorAsync(Names r, Exception e) => default; }")]
+    [Arguments("public sealed class X<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem> { public ValueTask OnStartAsync(TRequest r, CancellationToken c) => default; public bool OnItem(TRequest r, ref TItem i) => true; public ValueTask OnCompleteAsync(TRequest r) => default; public ValueTask OnErrorAsync(TRequest r, Exception e) => default; }")]
+    public async Task KRX019_A_Sealed_Stream_Behavior_With_One_Interface_Reports_Nothing(string behavior, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(Requests + behavior, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
     }
 
     [Test]

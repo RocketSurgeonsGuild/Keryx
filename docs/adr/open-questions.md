@@ -454,6 +454,34 @@ code that does not compile:
 - **Interim:** as listed.
 - **Proposal:** confirm and fold into the ADR's Behaviors and Ordering sections and the KRX016, KRX019, KRX020, KRX035 and KRX036 rows.
 
+### OQ-38: Terminal hook calls in a fused segment that throw, and disposing the inner stream
+
+The ADR's hook semantics say when `OnCompleteAsync` and `OnErrorAsync` run, but not what happens when one of them throws, whether the
+remaining (outer) hooks of the segment still get their terminal call, or where the segment disposes the enumerator of its inner stream
+(the guarded region lists `next.InvokeAsync(ct)`, `GetAsyncEnumerator(ct)`, `MoveNextAsync`, `Current` and the hook calls, not
+`DisposeAsync`).
+
+- **Interim:** the terminal pass nests like `using` statements, so every hook whose `OnStartAsync` completed gets exactly one terminal
+  call even when an inner one throws. Its kind is decided once, before the pass: `OnErrorAsync` when the guarded region threw, otherwise
+  `OnCompleteAsync`; an exception thrown during the pass does not change the kind for the outer hooks. An exception from `OnCompleteAsync`
+  or `OnErrorAsync` propagates with C# `finally` semantics (it replaces the exception being rethrown, and the last one thrown wins). The
+  inner enumerator is disposed before any terminal hook call: on normal completion inside the guarded region (so an exception from that
+  `DisposeAsync` reaches `OnErrorAsync`), and on early dispose or after a fault first in the terminal pass (an exception from it then
+  propagates like a terminal hook's, and the hooks still get their call).
+- **Proposal:** confirm and add to the ADR's Hook semantics. Alternatives: switch the outer hooks to `OnErrorAsync` once a terminal call
+  throws, or collect terminal-call exceptions into an `AggregateException`; both need more generated state.
+
+### OQ-39: `ConfigureAwait` in fused hook segments
+
+A fused hook segment awaits the hooks' `OnStartAsync`, `OnCompleteAsync` and `OnErrorAsync` and the inner enumerator's `MoveNextAsync` and
+`DisposeAsync`. The ADR does not say whether these awaits capture the caller's synchronization context.
+
+- **Interim:** every await in a generated segment uses `ConfigureAwait(false)`, as library code usually does: hooks and inner elements may
+  continue on a thread-pool thread after an asynchronous hook or item. Wrap behaviors, which users write, await however they choose, and
+  the consumer's own `await foreach` still resumes on its context.
+- **Proposal:** confirm and state it in the ADR's Streaming section. The alternative (capturing the context) keeps thread-affine hooks on
+  the caller's context but costs a context switch per asynchronous step in UI and legacy ASP.NET hosts.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

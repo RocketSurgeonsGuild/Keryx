@@ -10,7 +10,7 @@ namespace Keryx.Analyzers.Hosts;
 ///     exact-type dispatch, lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers and closed behaviors.
 /// </summary>
-internal static class HostEmitter
+internal static partial class HostEmitter
 {
     public const string MediatorHintName = "KeryxMediator.Keryx.g.cs";
     public const string ServiceCollectionExtensionsHintName = "KeryxServiceCollectionExtensions.Keryx.g.cs";
@@ -42,8 +42,8 @@ internal static class HostEmitter
     {
         var writer = Start(settings);
         writer.Line("/// <summary>");
-        writer.Line("///     This host's Keryx mediator: sends each request through its pipeline to its handler. Scoped: it creates each pipeline");
-        writer.Line("///     context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by");
+        writer.Line("///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler. Scoped: it creates");
+        writer.Line("///     each pipeline context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by");
         writer.Line("///     <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.");
         writer.Line("/// </summary>");
         writer.Line(HandlerEmitter.GeneratedCode);
@@ -58,6 +58,15 @@ internal static class HostEmitter
             if (NeedsContext(requests[i]))
             {
                 writer.Line($"private {ContextName(i)}? {ContextField(i)};");
+            }
+        }
+
+        var streams = composition.Streams;
+        for (var i = 0; i < streams.Length; i++)
+        {
+            if (NeedsContext(streams[i]))
+            {
+                writer.Line($"private {StreamContextName(i)}? {StreamContextField(i)};");
             }
         }
 
@@ -78,8 +87,15 @@ internal static class HostEmitter
 
         writer.Line();
         WriteGenericSend(writer, handlers);
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            writer.Line();
+            WriteTypedStream(writer, streams[i].Handler, i);
+        }
+
         writer.Line();
-        WriteStream(writer);
+        WriteGenericStream(writer, streams.Select(static p => p.Handler).ToImmutableArray());
         writer.Line();
         WritePublish(writer);
 
@@ -87,6 +103,12 @@ internal static class HostEmitter
         {
             writer.Line();
             WriteCore(writer, requests[i], i);
+        }
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            writer.Line();
+            WriteStreamCore(writer, streams[i], i);
         }
 
         writer.Line();
@@ -99,6 +121,15 @@ internal static class HostEmitter
             {
                 writer.Line();
                 WriteContext(writer, requests[i], i);
+            }
+        }
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            if (NeedsContext(streams[i]))
+            {
+                writer.Line();
+                WriteStreamContext(writer, streams[i], i);
             }
         }
 
@@ -233,23 +264,7 @@ internal static class HostEmitter
         if (requests.Length > DispatchThreshold)
         {
             writer.Line();
-            writer.Line("/// <summary>Every request type this host dispatches, mapped to its position in the dispatch switch.</summary>");
-            writer.Line("private static readonly global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int> __requestTypes =");
-            writer.Line("    global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(");
-            writer.Line("        new global::System.Collections.Generic.KeyValuePair<global::System.Type, int>[]");
-            writer.Line("        {");
-            for (var i = 0; i < requests.Length; i++)
-            {
-                writer.Line($"            new(typeof({requests[i].MessageType}), {Number(i)}),");
-            }
-
-            writer.Line("        }");
-            writer.Line("    );");
-            writer.Line();
-            writer.Line("/// <summary>The position of a request type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
-            writer.Line(NoInlining);
-            writer.Line("private static int __RequestIndex(global::System.Type requestType) =>");
-            writer.Line("    __requestTypes.TryGetValue(requestType, out var requestIndex) ? requestIndex : -1;");
+            WriteTypeTable(writer, "request", "__requestTypes", "__RequestIndex", requests);
         }
 
         for (var i = 0; i < requests.Length; i++)
@@ -257,6 +272,35 @@ internal static class HostEmitter
             writer.Line();
             WriteDispatchArm(writer, requests[i], i);
         }
+    }
+
+    /// <summary>
+    ///     The <c>FrozenDictionary</c> generic dispatch uses above <see cref="DispatchThreshold" />, and the non-inlined lookup into it.
+    /// </summary>
+    /// <param name="writer">The writer.</param>
+    /// <param name="kind">"request" or "stream request", for the documentation.</param>
+    /// <param name="table">The name of the static table.</param>
+    /// <param name="lookup">The name of the lookup method.</param>
+    /// <param name="handlers">The dispatched handlers, in switch order.</param>
+    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<HostHandlerModel> handlers)
+    {
+        writer.Line($"/// <summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
+        writer.Line($"private static readonly global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int> {table} =");
+        writer.Line("    global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(");
+        writer.Line("        new global::System.Collections.Generic.KeyValuePair<global::System.Type, int>[]");
+        writer.Line("        {");
+        for (var i = 0; i < handlers.Length; i++)
+        {
+            writer.Line($"            new(typeof({handlers[i].MessageType}), {Number(i)}),");
+        }
+
+        writer.Line("        }");
+        writer.Line("    );");
+        writer.Line();
+        writer.Line($"/// <summary>The position of a {kind} type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
+        writer.Line(NoInlining);
+        writer.Line($"private static int {lookup}(global::System.Type requestType) =>");
+        writer.Line($"    {table}.TryGetValue(requestType, out var requestIndex) ? requestIndex : -1;");
     }
 
     /// <summary>
@@ -280,19 +324,6 @@ internal static class HostEmitter
         writer.Open();
         writer.Line($"var response = {CoreName(index)}({argument}, cancellationToken);");
         writer.Line($"return {Unsafe}.As<{ValueTask}<{request.ResponseType}>, {ValueTask}<TResponse>>(ref response);");
-        writer.Close();
-    }
-
-    private static void WriteStream(CodeWriter writer)
-    {
-        writer.Line("/// <inheritdoc />");
-        writer.Line("/// <remarks>This mediator dispatches no stream requests yet, so every stream request is unknown to it.</remarks>");
-        writer.Line(
-            $"public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, {CancellationToken} cancellationToken = default)"
-        );
-        writer.Open();
-        writer.Line($"{ThrowIfNull}(request);");
-        writer.Line("throw __HandlerNotFound(request.GetType());");
         writer.Close();
     }
 
@@ -548,11 +579,13 @@ internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<Pip
 ///     What the host dispatches and registers, composed from the handler models (ADR 0001, How the host reads it).
 /// </summary>
 /// <param name="Requests">The request pipelines, one per request type, ordered by request type.</param>
+/// <param name="Streams">The stream pipelines, one per stream request type, ordered by stream request type.</param>
 /// <param name="ConstructedHandlers">The handler classes with injected parameters, ordered by class, each once.</param>
-/// <param name="Behaviors">Every closed behavior a request pipeline uses, ordered by closed type, each once.</param>
+/// <param name="Behaviors">Every closed behavior a request or stream pipeline uses, ordered by closed type, each once.</param>
 /// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
 internal sealed record HostComposition(
     ImmutableArray<HostPipeline> Requests,
+    ImmutableArray<HostPipeline> Streams,
     ImmutableArray<HostHandlerModel> ConstructedHandlers,
     ImmutableArray<PipelineBehaviorModel> Behaviors,
     ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
@@ -562,17 +595,9 @@ internal sealed record HostComposition(
     {
         var all = handlers.ToArray();
 
-        // A request with more than one handler is KRX005 (the analyzer reports it in this assembly); the host dispatches neither, so the
-        // error is not joined by duplicate members in generated code.
         var cycles = new List<ImmutableArray<PipelineBehaviorModel>>();
-        var requests = all
-                      .Where(static h => h.Kind == HandlerKind.Request)
-                      .GroupBy(static h => h.MessageType, StringComparer.Ordinal)
-                      .Where(static g => g.Count() == 1)
-                      .Select(static g => g.Single())
-                      .OrderBy(static h => h.MessageType, StringComparer.Ordinal)
-                      .Select(h => new HostPipeline(h, BehaviorOrdering.Sort(h.Behaviors, static b => b.Key, cycles)))
-                      .ToImmutableArray();
+        var requests = Pipelines(all, HandlerKind.Request, cycles);
+        var streams = Pipelines(all, HandlerKind.Stream, cycles);
 
         var constructed = all
                          .Where(static h => !h.StaticInvoker)
@@ -582,12 +607,28 @@ internal sealed record HostComposition(
                          .ToImmutableArray();
 
         var behaviors = requests
+                       .Concat(streams)
                        .SelectMany(static p => p.Behaviors)
                        .GroupBy(static b => b.Identity, StringComparer.Ordinal)
                        .Select(static g => g.First())
                        .OrderBy(static b => b.Identity, StringComparer.Ordinal)
                        .ToImmutableArray();
 
-        return new(requests, constructed, behaviors, [.. cycles]);
+        return new(requests, streams, constructed, behaviors, [.. cycles]);
     }
+
+    /// <summary>
+    ///     The pipelines of one kind of handler, one per message type, ordered by message type, each with its behaviors sorted (ADR 0001,
+    ///     Ordering). A message type with more than one handler is KRX005 (the analyzer reports it in this assembly); the host dispatches
+    ///     neither, so the error is not joined by duplicate members in generated code.
+    /// </summary>
+    private static ImmutableArray<HostPipeline> Pipelines(HostHandlerModel[] all, HandlerKind kind, List<ImmutableArray<PipelineBehaviorModel>> cycles) =>
+        all
+           .Where(h => h.Kind == kind)
+           .GroupBy(static h => h.MessageType, StringComparer.Ordinal)
+           .Where(static g => g.Count() == 1)
+           .Select(static g => g.Single())
+           .OrderBy(static h => h.MessageType, StringComparer.Ordinal)
+           .Select(h => new HostPipeline(h, BehaviorOrdering.Sort(h.Behaviors, static b => b.Key, cycles)))
+           .ToImmutableArray();
 }
