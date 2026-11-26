@@ -7,7 +7,7 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Writes the host's generated types (ADR 0001, Generated host): the scoped <c>KeryxMediator</c> with its typed overloads, generic
-///     exact-type dispatch, lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
+///     exact-type dispatch (runtime-type dispatch for notifications), lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers and closed behaviors.
 /// </summary>
 internal static partial class HostEmitter
@@ -42,9 +42,9 @@ internal static partial class HostEmitter
     {
         var writer = Start(settings);
         writer.Line("/// <summary>");
-        writer.Line("///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler. Scoped: it creates");
-        writer.Line("///     each pipeline context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by");
-        writer.Line("///     <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.");
+        writer.Line("///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each");
+        writer.Line("///     notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so");
+        writer.Line("///     nothing is resolved or allocated per call after that. Registered by <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.");
         writer.Line("/// </summary>");
         writer.Line(HandlerEmitter.GeneratedCode);
         writer.Line("internal sealed partial class KeryxMediator : global::Keryx.IMediator");
@@ -68,6 +68,12 @@ internal static partial class HostEmitter
             {
                 writer.Line($"private {StreamContextName(i)}? {StreamContextField(i)};");
             }
+        }
+
+        var notifications = composition.Notifications.Where(static n => n.IsActive).ToImmutableArray();
+        for (var i = 0; i < notifications.Length; i++)
+        {
+            writer.Line($"private {NotificationContextName(i)}? {NotificationContextField(i)};");
         }
 
         writer.Line();
@@ -96,8 +102,7 @@ internal static partial class HostEmitter
 
         writer.Line();
         WriteGenericStream(writer, streams.Select(static p => p.Handler).ToImmutableArray());
-        writer.Line();
-        WritePublish(writer);
+        WritePublish(writer, composition.Notifications, notifications);
 
         for (var i = 0; i < requests.Length; i++)
         {
@@ -109,6 +114,18 @@ internal static partial class HostEmitter
         {
             writer.Line();
             WriteStreamCore(writer, streams[i], i);
+        }
+
+        for (var i = 0; i < notifications.Length; i++)
+        {
+            writer.Line();
+            WritePublishCore(writer, notifications[i], i);
+        }
+
+        if (notifications.Any(static n => n.Notification.Parallel && !n.Handlers.IsEmpty))
+        {
+            writer.Line();
+            WriteWhenAllHandlers(writer);
         }
 
         writer.Line();
@@ -131,6 +148,12 @@ internal static partial class HostEmitter
                 writer.Line();
                 WriteStreamContext(writer, streams[i], i);
             }
+        }
+
+        for (var i = 0; i < notifications.Length; i++)
+        {
+            writer.Line();
+            WriteNotificationContext(writer, notifications[i], i);
         }
 
         writer.Close();
@@ -282,16 +305,27 @@ internal static partial class HostEmitter
     /// <param name="table">The name of the static table.</param>
     /// <param name="lookup">The name of the lookup method.</param>
     /// <param name="handlers">The dispatched handlers, in switch order.</param>
-    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<HostHandlerModel> handlers)
+    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<HostHandlerModel> handlers) =>
+        WriteTypeTable(writer, kind, table, lookup, handlers.Select(static h => h.MessageType).ToImmutableArray());
+
+    /// <summary>
+    ///     The <c>FrozenDictionary</c> generic dispatch uses above <see cref="DispatchThreshold" />, and the non-inlined lookup into it.
+    /// </summary>
+    /// <param name="writer">The writer.</param>
+    /// <param name="kind">"request", "stream request" or "notification", for the documentation.</param>
+    /// <param name="table">The name of the static table.</param>
+    /// <param name="lookup">The name of the lookup method.</param>
+    /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
+    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<string> types)
     {
         writer.Line($"/// <summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
         writer.Line($"private static readonly global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int> {table} =");
         writer.Line("    global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(");
         writer.Line("        new global::System.Collections.Generic.KeyValuePair<global::System.Type, int>[]");
         writer.Line("        {");
-        for (var i = 0; i < handlers.Length; i++)
+        for (var i = 0; i < types.Length; i++)
         {
-            writer.Line($"            new(typeof({handlers[i].MessageType}), {Number(i)}),");
+            writer.Line($"            new(typeof({types[i]}), {Number(i)}),");
         }
 
         writer.Line("        }");
@@ -324,23 +358,6 @@ internal static partial class HostEmitter
         writer.Open();
         writer.Line($"var response = {CoreName(index)}({argument}, cancellationToken);");
         writer.Line($"return {Unsafe}.As<{ValueTask}<{request.ResponseType}>, {ValueTask}<TResponse>>(ref response);");
-        writer.Close();
-    }
-
-    private static void WritePublish(CodeWriter writer)
-    {
-        writer.Line("/// <inheritdoc />");
-        writer.Line("/// <remarks>This mediator dispatches no notifications yet, so every notification type is unknown to it and runs no handlers.</remarks>");
-        writer.Line($"public {ValueTask} Publish<TNotification>(TNotification notification, {CancellationToken} cancellationToken = default)");
-        writer.Line("    where TNotification : global::Keryx.INotification");
-        writer.Open();
-        // Not ArgumentNullException.ThrowIfNull(object): that would box a struct notification.
-        writer.Line("if (notification is null)");
-        writer.Open();
-        writer.Line("throw new global::System.ArgumentNullException(nameof(notification));");
-        writer.Close();
-        writer.Line();
-        writer.Line("return default;");
         writer.Close();
     }
 
@@ -580,24 +597,38 @@ internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<Pip
 /// </summary>
 /// <param name="Requests">The request pipelines, one per request type, ordered by request type.</param>
 /// <param name="Streams">The stream pipelines, one per stream request type, ordered by stream request type.</param>
+/// <param name="Notifications">
+///     The notification pipelines, one per concrete notification type the host knows (whether or not anything runs for it), ordered by
+///     notification type.
+/// </param>
 /// <param name="ConstructedHandlers">The handler classes with injected parameters, ordered by class, each once.</param>
-/// <param name="Behaviors">Every closed behavior a request or stream pipeline uses, ordered by closed type, each once.</param>
+/// <param name="Behaviors">Every closed behavior a pipeline uses, ordered by closed type, each once.</param>
 /// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
 internal sealed record HostComposition(
     ImmutableArray<HostPipeline> Requests,
     ImmutableArray<HostPipeline> Streams,
+    ImmutableArray<NotificationPipeline> Notifications,
     ImmutableArray<HostHandlerModel> ConstructedHandlers,
     ImmutableArray<PipelineBehaviorModel> Behaviors,
     ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
 )
 {
-    public static HostComposition Create(IEnumerable<HostHandlerModel> handlers)
+    /// <summary>Every sorted behavior list of every pipeline: requests, streams, per-publish and per-handler notification pipelines.</summary>
+    public IEnumerable<ImmutableArray<PipelineBehaviorModel>> BehaviorLists =>
+        Requests
+           .Concat(Streams)
+           .Select(static p => p.Behaviors)
+           .Concat(Notifications.Select(static n => n.Behaviors))
+           .Concat(Notifications.SelectMany(static n => n.Handlers.Select(static h => h.Behaviors)));
+
+    public static HostComposition Create(IEnumerable<HostHandlerModel> handlers, IEnumerable<HostNotificationModel> notifications)
     {
         var all = handlers.ToArray();
 
         var cycles = new List<ImmutableArray<PipelineBehaviorModel>>();
         var requests = Pipelines(all, HandlerKind.Request, cycles);
         var streams = Pipelines(all, HandlerKind.Stream, cycles);
+        var notificationPipelines = NotificationPipelines(all, notifications, cycles);
 
         var constructed = all
                          .Where(static h => !h.StaticInvoker)
@@ -609,12 +640,13 @@ internal sealed record HostComposition(
         var behaviors = requests
                        .Concat(streams)
                        .SelectMany(static p => p.Behaviors)
+                       .Concat(notificationPipelines.SelectMany(static n => n.Behaviors.Concat(n.Handlers.SelectMany(static h => h.Behaviors))))
                        .GroupBy(static b => b.Identity, StringComparer.Ordinal)
                        .Select(static g => g.First())
                        .OrderBy(static b => b.Identity, StringComparer.Ordinal)
                        .ToImmutableArray();
 
-        return new(requests, streams, constructed, behaviors, [.. cycles]);
+        return new(requests, streams, notificationPipelines, constructed, behaviors, [.. cycles]);
     }
 
     /// <summary>
@@ -631,4 +663,102 @@ internal sealed record HostComposition(
            .OrderBy(static h => h.MessageType, StringComparer.Ordinal)
            .Select(h => new HostPipeline(h, BehaviorOrdering.Sort(h.Behaviors, static b => b.Key, cycles)))
            .ToImmutableArray();
+
+    /// <summary>
+    ///     One pipeline per concrete notification type the host knows (declared in its source, or delivered to one of its handlers), ordered
+    ///     by type: its per-publish behaviors sorted, and every handler that receives it (exact-type and polymorphic), ordered by
+    ///     <c>[HandlerOrder]</c>, then by the ordinal fully qualified handler class name (ADR 0001, Handler order), each with its per-handler
+    ///     behaviors sorted.
+    /// </summary>
+    private static ImmutableArray<NotificationPipeline> NotificationPipelines(
+        HostHandlerModel[] all,
+        IEnumerable<HostNotificationModel> declared,
+        List<ImmutableArray<PipelineBehaviorModel>> cycles
+    )
+    {
+        var handlers = all.Where(static h => h.Kind == HandlerKind.Notification).ToArray();
+        var known = new SortedDictionary<string, HostNotificationModel>(StringComparer.Ordinal);
+        foreach (var notification in declared.Concat(handlers.SelectMany(static h => h.Deliveries.Select(static d => d.Notification))))
+        {
+            if (!known.ContainsKey(notification.Type))
+            {
+                known.Add(notification.Type, notification);
+            }
+        }
+
+        var received = new Dictionary<string, List<NotificationHandlerPipeline>>(StringComparer.Ordinal);
+        foreach (var handler in handlers.OrderBy(static h => h.Order).ThenBy(static h => h.HandlerClass, StringComparer.Ordinal))
+        {
+            foreach (var delivery in handler.Deliveries)
+            {
+                if (!received.TryGetValue(delivery.Notification.Type, out var list))
+                {
+                    list = [];
+                    received.Add(delivery.Notification.Type, list);
+                }
+
+                list.Add(
+                    new(
+                        handler,
+                        Sorted(delivery.Behaviors, cycles),
+                        delivery.Notification.IsValueType && handler.MessageType != delivery.Notification.Type
+                    )
+                );
+            }
+        }
+
+        var pipelines = ImmutableArray.CreateBuilder<NotificationPipeline>(known.Count);
+        foreach (var notification in known.Values)
+        {
+            pipelines.Add(
+                new(
+                    notification,
+                    Sorted(notification.Behaviors, cycles),
+                    received.TryGetValue(notification.Type, out var list) ? [.. list] : []
+                )
+            );
+        }
+
+        return pipelines.MoveToImmutable();
+    }
+
+    private static ImmutableArray<PipelineBehaviorModel> Sorted(
+        Specular.Scanning.EquatableArray<PipelineBehaviorModel> behaviors,
+        List<ImmutableArray<PipelineBehaviorModel>> cycles
+    ) =>
+        BehaviorOrdering.Sort(behaviors, static b => b.Key, cycles);
 }
+
+/// <summary>
+///     One notification type's publish pipeline: its per-publish behaviors, sorted outermost first, around its publish strategy over its
+///     handler pipelines (ADR 0001, Notifications).
+/// </summary>
+/// <param name="Notification">The concrete notification type.</param>
+/// <param name="Behaviors">The per-publish behaviors, outermost first.</param>
+/// <param name="Handlers">The handler pipelines, in handler order.</param>
+internal sealed record NotificationPipeline(
+    HostNotificationModel Notification,
+    ImmutableArray<PipelineBehaviorModel> Behaviors,
+    ImmutableArray<NotificationHandlerPipeline> Handlers
+)
+{
+    /// <summary>
+    ///     Whether anything runs when the type is published: a handler or a per-publish behavior (OQ-18). Otherwise <c>Publish</c> completes
+    ///     immediately.
+    /// </summary>
+    public bool IsActive => !Handlers.IsEmpty || !Behaviors.IsEmpty;
+
+    /// <summary>Whether a publish boxes the notification once, for handlers typed as an interface (KRX037).</summary>
+    public bool Boxes => Handlers.Any(static h => h.Boxed);
+}
+
+/// <summary>
+///     One handler of a notification type, with its per-handler behaviors closed over the concrete type, sorted outermost first.
+/// </summary>
+/// <param name="Handler">The handler.</param>
+/// <param name="Behaviors">The per-handler behaviors, outermost first.</param>
+/// <param name="Boxed">
+///     Whether the notification is a struct and the handler's parameter an interface or <c>INotification</c>, so the handler receives the
+///     publish's one box (OQ-17).
+/// </param>
+internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, ImmutableArray<PipelineBehaviorModel> Behaviors, bool Boxed);

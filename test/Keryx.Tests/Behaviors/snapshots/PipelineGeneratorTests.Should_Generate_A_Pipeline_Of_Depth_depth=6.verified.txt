@@ -7,9 +7,9 @@
 namespace Sample
 {
     /// <summary>
-    ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler. Scoped: it creates
-    ///     each pipeline context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by
-    ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
+    ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each
+    ///     notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so
+    ///     nothing is resolved or allocated per call after that. Registered by <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal sealed partial class KeryxMediator : global::Keryx.IMediator
@@ -66,7 +66,6 @@ namespace Sample
         }
 
         /// <inheritdoc />
-        /// <remarks>This mediator dispatches no notifications yet, so every notification type is unknown to it and runs no handlers.</remarks>
         public global::System.Threading.Tasks.ValueTask Publish<TNotification>(TNotification notification, global::System.Threading.CancellationToken cancellationToken = default)
             where TNotification : global::Keryx.INotification
         {

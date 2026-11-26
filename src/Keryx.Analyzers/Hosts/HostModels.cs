@@ -27,7 +27,12 @@ namespace Keryx.Analyzers.Hosts;
 ///     emitter sorts them (ADR 0001, Ordering).
 /// </param>
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from this pipeline (for KRX036).</param>
-/// <param name="Order">The <c>[HandlerOrder]</c> of a notification handler (Phase 6).</param>
+/// <param name="Order">The <c>[HandlerOrder]</c> of a notification handler.</param>
+/// <param name="Deliveries">
+///     For a notification handler, every concrete notification type the host knows that converts to the handler's parameter type (ADR 0001,
+///     Polymorphic handlers), each with the per-handler behaviors closed over that concrete type, in no particular order (ordinal by type).
+///     Empty for request and stream request handlers, whose behaviors are <paramref name="Behaviors" />.
+/// </param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
     HandlerKind Kind,
@@ -39,7 +44,48 @@ internal sealed record HostHandlerModel(
     EquatableArray<ServiceParameterModel> Services,
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
-    int Order
+    int Order,
+    EquatableArray<NotificationDeliveryModel> Deliveries = default
+);
+
+/// <summary>
+///     A concrete notification type the host knows (ADR 0001, Notifications): its publish strategy and its per-publish behaviors
+///     (<c>INotificationPipelineBehavior</c>), composed from the three scopes and closed over the type.
+/// </summary>
+/// <param name="Type">The notification type, fully qualified with <c>global::</c>.</param>
+/// <param name="DisplayName">The name diagnostics show.</param>
+/// <param name="IsValueType">Whether it is a struct (dispatched without boxing; boxed once for interface-typed handlers, KRX037).</param>
+/// <param name="IsSealed">Whether no other type can derive from it (a sealed class or a struct).</param>
+/// <param name="Parallel">Whether it carries <c>[PublishStrategy(PublishStrategy.Parallel)]</c>.</param>
+/// <param name="Behaviors">
+///     The closed per-publish behaviors: the type's <c>[Behavior]</c>s, its assembly's <c>[assembly: Behavior]</c>s (OQ-3) and the global
+///     ones, de-duplicated, minus the host's exclusions, in no particular order (ordinal by identity).
+/// </param>
+/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from the per-publish pipeline (for KRX036).</param>
+/// <param name="Location">Its first declaration when it is in source, for KRX037.</param>
+internal sealed record HostNotificationModel(
+    string Type,
+    string DisplayName,
+    bool IsValueType,
+    bool IsSealed,
+    bool Parallel,
+    EquatableArray<PipelineBehaviorModel> Behaviors,
+    EquatableArray<string> UsedExclusions,
+    LocationInfo? Location
+);
+
+/// <summary>
+///     One concrete notification type a notification handler receives, with the per-handler behaviors
+///     (<c>INotificationHandlerPipelineBehavior</c>) closed over that concrete type (ADR 0001, Notifications, Behaviors: <c>TNotification</c>
+///     is always the concrete published type).
+/// </summary>
+/// <param name="Notification">The concrete notification type.</param>
+/// <param name="Behaviors">The closed per-handler behaviors, in no particular order (ordinal by identity).</param>
+/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from this handler's pipeline (for KRX036).</param>
+internal sealed record NotificationDeliveryModel(
+    HostNotificationModel Notification,
+    EquatableArray<PipelineBehaviorModel> Behaviors,
+    EquatableArray<string> UsedExclusions
 );
 
 /// <summary>
@@ -89,12 +135,8 @@ internal sealed record GlobalBehaviorModel(string Name, string Assembly, Locatio
 /// <summary>An <c>[assembly: ExcludeBehavior(typeof(X))]</c> entry of the host, for KRX036.</summary>
 /// <param name="Operand">The excluded type's <c>typeof</c> operand, as <see cref="HostHandlerModel.UsedExclusions" /> lists it.</param>
 /// <param name="Display">The excluded type's display name.</param>
-/// <param name="Checked">
-///     Whether KRX036 is checked for it: notification behaviors are composed only from Phase 6, so an exclusion that names one is not
-///     reported yet.
-/// </param>
 /// <param name="Location">The attribute.</param>
-internal sealed record ExclusionModel(string Operand, string Display, bool Checked, LocationInfo? Location);
+internal sealed record ExclusionModel(string Operand, string Display, LocationInfo? Location);
 
 /// <summary>
 ///     One parameter of a generated constructor (a handler's, later a behavior's), resolved by a generated factory (ADR 0001, Injected

@@ -310,6 +310,17 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx036"
     );
 
+    public static readonly DiagnosticDescriptor BoxedStructNotification = new(
+        "KRX037",
+        "Struct notification is boxed for interface-typed handlers",
+        "Struct notification '{0}' is boxed once per Publish, because handlers typed as an interface or INotification receive it: {1}",
+        Category,
+        DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "A handler whose parameter is an interface or INotification cannot receive a struct without boxing it. The host boxes the notification once per Publish and reuses that box for every such handler. Type the handler with the struct itself to avoid it.",
+        helpLinkUri: HelpLinkBase + "krx037"
+    );
+
     public static readonly DiagnosticDescriptor MisplacedHandlerOrder = new(
         "KRX040",
         "[HandlerOrder] on a method that is not a notification handler",

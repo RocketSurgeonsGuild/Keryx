@@ -70,17 +70,12 @@ internal static class HostModelFactory
         return globals.ToImmutable();
     }
 
-    /// <summary>
-    ///     The host's <c>ExcludeBehavior</c> entries, for KRX036. One that names a notification behavior is not checked yet: notification
-    ///     pipelines are composed from Phase 6.
-    /// </summary>
+    /// <summary>The host's <c>ExcludeBehavior</c> entries, for KRX036.</summary>
     private static ImmutableArray<ExclusionModel> Exclusions(BehaviorCatalog catalog) =>
     [
-        .. catalog.Exclusions.Select(e => new ExclusionModel(
+        .. catalog.Exclusions.Select(static e => new ExclusionModel(
                                          BehaviorOrdering.Operand(e.Type),
                                          e.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                                         e.Type is not INamedTypeSymbol named
-                                      || catalog.Shape(named) is not { Kind: BehaviorKind.Notification or BehaviorKind.NotificationHandler },
                                          LocationInfo.From(HandlerAnalysis.AttributeLocation(e.Attribute))
                                      )
                     ),
@@ -192,6 +187,17 @@ internal static class HostModelFactory
     }
 
     /// <summary>
+    ///     The concrete notification type a declaration declares, with its publish strategy and per-publish behaviors, or nothing (ADR 0001,
+    ///     Notifications). The host knows every notification type declared in its source, so its per-publish pipeline runs even when it has no
+    ///     handlers (OQ-18).
+    /// </summary>
+    public static HostNotificationModel? CreateNotification(GeneratorSyntaxContext context, CancellationToken cancellationToken) =>
+        context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is INamedTypeSymbol type
+     && KeryxSymbols.Create(context.SemanticModel.Compilation) is { } symbols
+            ? BehaviorCatalog.For(symbols.Compilation, symbols).Notification(type)
+            : null;
+
+    /// <summary>
     ///     What the host needs from one handler candidate (see <see cref="HostHandlerEntry" />), or nothing when the method is not a candidate.
     /// </summary>
     public static HostHandlerEntry? CreateHandler(GeneratorSyntaxContext context, CancellationToken cancellationToken)
@@ -245,11 +251,13 @@ internal static class HostModelFactory
             return null;
         }
 
+        var catalog = BehaviorCatalog.For(symbols.Compilation, symbols);
         var classified = MessageType.Classify(messageType, symbols);
         var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
         var (behaviors, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
-            ? PipelineBehaviors.For(method, target, BehaviorCatalog.For(symbols.Compilation, symbols))
+            ? PipelineBehaviors.For(method, target, catalog)
             : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
+        var deliveries = model.Kind == HandlerKind.Notification ? Deliveries(method, messageType, catalog) : ImmutableArray<NotificationDeliveryModel>.Empty;
 
         return new(
             model.HandlerClass,
@@ -262,8 +270,36 @@ internal static class HostModelFactory
             services.ToImmutable(),
             behaviors,
             usedExclusions,
-            model.Order
+            model.Order,
+            deliveries
         );
+    }
+
+    /// <summary>
+    ///     The concrete notification types a notification handler receives (ADR 0001, Polymorphic handlers): every notification type the host
+    ///     knows that converts to the handler's parameter type (identity, implicit reference or boxing conversion), each with the per-handler
+    ///     behaviors closed over it. The host knows the notification types declared in its source and the parameter type of each of its
+    ///     notification handlers when that is a concrete notification (<see cref="BehaviorCatalog.KnownNotifications" />, OQ-42; Phase 7 adds
+    ///     the ones in referenced assemblies), the same set for every handler. An attached behavior whose constraints do not hold for one
+    ///     concrete type is skipped for that type (OQ-40).
+    /// </summary>
+    private static ImmutableArray<NotificationDeliveryModel> Deliveries(IMethodSymbol method, ITypeSymbol parameterType, BehaviorCatalog catalog)
+    {
+        var deliveries = new SortedDictionary<string, NotificationDeliveryModel>(StringComparer.Ordinal);
+        foreach (var notification in catalog.KnownNotifications)
+        {
+            if (catalog.Notification(notification) is not { } model
+             || deliveries.ContainsKey(model.Type)
+             || !BehaviorCatalog.Converts(notification, parameterType, catalog.Compilation))
+            {
+                continue;
+            }
+
+            var (behaviors, usedExclusions) = PipelineBehaviors.For(method, new(BehaviorTargetKind.NotificationHandler, [notification]), catalog);
+            deliveries.Add(model.Type, new(model, behaviors, usedExclusions));
+        }
+
+        return [.. deliveries.Values];
     }
 
     /// <summary>One injected parameter of a handler or behavior constructor, as a generated factory resolves it.</summary>

@@ -69,13 +69,28 @@ internal static class TrackingNames
     /// <summary><see cref="HostRequests" />, collected.</summary>
     public const string HostRequestList = "Keryx.Host.RequestList";
 
+    /// <summary>Every type declaration with a base list projected to a concrete notification model, or nothing.</summary>
+    public const string HostNotificationCandidates = "Keryx.Host.NotificationCandidates";
+
+    /// <summary>The <see cref="HostNotificationCandidates" /> that are concrete notifications (still typed as nullable).</summary>
+    public const string HostNotificationModels = "Keryx.Host.NotificationModels";
+
+    /// <summary>The notification types declared in the host, with their publish strategy and per-publish behaviors.</summary>
+    public const string HostNotifications = "Keryx.Host.Notifications";
+
+    /// <summary><see cref="HostNotifications" />, collected.</summary>
+    public const string HostNotificationList = "Keryx.Host.NotificationList";
+
     /// <summary>The settings combined with <see cref="HostHandlerList" />.</summary>
     public const string HostSettingsAndHandlers = "Keryx.Host.SettingsAndHandlers";
 
-    /// <summary>The settings, handlers and request types combined: the input of the host's source output.</summary>
+    /// <summary><see cref="HostSettingsAndHandlers" /> combined with <see cref="HostRequestList" />.</summary>
+    public const string HostSettingsHandlersAndRequests = "Keryx.Host.SettingsHandlersAndRequests";
+
+    /// <summary>The settings, handlers, request types and notification types combined: the input of the host's source output.</summary>
     public const string HostSources = "Keryx.Host.Sources";
 
-    /// <summary>The host diagnostics (KRX030, KRX031), computed from <see cref="HostSources" />.</summary>
+    /// <summary>The host diagnostics (KRX008, KRX030, KRX031, KRX035, KRX036, KRX037), computed from <see cref="HostSources" />.</summary>
     public const string HostDiagnostics = "Keryx.Host.Diagnostics";
 
     /// <summary><see cref="HostDiagnostics" /> combined with the compilation, to report them on their syntax trees (fed by the compilation).</summary>

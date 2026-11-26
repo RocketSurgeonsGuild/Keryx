@@ -61,18 +61,31 @@ public sealed class HostGenerator : IIncrementalGenerator
                       .Select(static (request, _) => request!)
                       .WithTrackingName(TrackingNames.HostRequests);
 
+        var notifications = context
+                           .SyntaxProvider.CreateSyntaxProvider(
+                                static (node, _) => HostModelFactory.IsRequestCandidateSyntax(node),
+                                static (syntaxContext, cancellationToken) => HostModelFactory.CreateNotification(syntaxContext, cancellationToken)
+                            )
+                           .WithTrackingName(TrackingNames.HostNotificationCandidates)
+                           .Where(static notification => notification is not null)
+                           .WithTrackingName(TrackingNames.HostNotificationModels)
+                           .Select(static (notification, _) => notification!)
+                           .WithTrackingName(TrackingNames.HostNotifications);
+
         var sources = settings
                      .Combine(handlers.Collect().WithTrackingName(TrackingNames.HostHandlerList))
                      .WithTrackingName(TrackingNames.HostSettingsAndHandlers)
                      .Combine(requests.Collect().WithTrackingName(TrackingNames.HostRequestList))
+                     .WithTrackingName(TrackingNames.HostSettingsHandlersAndRequests)
+                     .Combine(notifications.Collect().WithTrackingName(TrackingNames.HostNotificationList))
                      .WithTrackingName(TrackingNames.HostSources);
 
-        context.RegisterSourceOutput(sources, static (production, inputs) => Produce(production, inputs.Left.Left, inputs.Left.Right));
+        context.RegisterSourceOutput(sources, static (production, inputs) => Produce(production, inputs.Left.Left.Left, inputs.Left.Left.Right, inputs.Right));
 
         // Diagnostics have their own output: they are computed from the cached models, and only reporting them reads the compilation, to
         // put each one on its syntax tree so per-file .editorconfig severity applies (OQ-35). The source output above stays cached.
         var diagnostics = sources
-                         .Select(static (inputs, _) => CreateDiagnostics(inputs.Left.Left, inputs.Left.Right, inputs.Right))
+                         .Select(static (inputs, _) => CreateDiagnostics(inputs.Left.Left.Left, inputs.Left.Left.Right, inputs.Left.Right, inputs.Right))
                          .WithTrackingName(TrackingNames.HostDiagnostics);
 
         context.RegisterSourceOutput(
@@ -81,14 +94,19 @@ public sealed class HostGenerator : IIncrementalGenerator
         );
     }
 
-    private static void Produce(SourceProductionContext production, HostSettings settings, ImmutableArray<HostHandlerEntry> handlers)
+    private static void Produce(
+        SourceProductionContext production,
+        HostSettings settings,
+        ImmutableArray<HostHandlerEntry> handlers,
+        ImmutableArray<HostNotificationModel> notifications
+    )
     {
         if (!settings.Enabled || settings.UnsupportedTargetFramework is not null)
         {
             return;
         }
 
-        var composition = HostComposition.Create(handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>());
+        var composition = HostComposition.Create(handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>(), notifications);
         production.AddSource(HostEmitter.MediatorHintName, HostEmitter.Mediator(settings, composition));
         production.AddSource(HostEmitter.ServiceCollectionExtensionsHintName, HostEmitter.ServiceCollectionExtensions(settings, composition));
     }
@@ -96,13 +114,14 @@ public sealed class HostGenerator : IIncrementalGenerator
     /// <summary>
     ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline), then KRX031, then
     ///     KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks in-source pairs), KRX035 for each global
-    ///     behavior and KRX036 for each <c>ExcludeBehavior</c> that removed nothing. A request whose handler candidate breaks a rule counts as
-    ///     handled: the analyzers report the handler.
+    ///     behavior, KRX036 for each <c>ExcludeBehavior</c> that removed nothing and KRX037 for each struct notification that handlers typed
+    ///     as an interface receive. A request whose handler candidate breaks a rule counts as handled: the analyzers report the handler.
     /// </summary>
     private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(
         HostSettings settings,
         ImmutableArray<HostHandlerEntry> handlers,
-        ImmutableArray<HostRequestModel> requests
+        ImmutableArray<HostRequestModel> requests,
+        ImmutableArray<HostNotificationModel> notifications
     )
     {
         if (!settings.Enabled)
@@ -127,19 +146,49 @@ public sealed class HostGenerator : IIncrementalGenerator
         }
 
         var models = handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>().ToArray();
-        diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(settings, HostComposition.Create(models)));
+        var composition = HostComposition.Create(models, notifications);
+        diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(settings, composition));
 
         foreach (var global in settings.GlobalBehaviors)
         {
             diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(global.Name, global.Assembly)));
         }
 
-        var used = new HashSet<string>(models.SelectMany(static m => m.UsedExclusions), StringComparer.Ordinal);
+        var used = new HashSet<string>(
+            models
+               .SelectMany(static m => m.UsedExclusions.Concat(m.Deliveries.SelectMany(static d => d.UsedExclusions.Concat(d.Notification.UsedExclusions))))
+               .Concat(notifications.SelectMany(static n => n.UsedExclusions)),
+            StringComparer.Ordinal
+        );
         foreach (var exclusion in settings.Exclusions)
         {
-            if (exclusion.Checked && !used.Contains(exclusion.Operand))
+            if (!used.Contains(exclusion.Operand))
             {
                 diagnostics.Add(new(Descriptors.UnusedExclusion, exclusion.Location ?? settings.HostAttribute, ImmutableArray.Create("ExcludeBehavior", exclusion.Display)));
+            }
+        }
+
+        var boxed = new List<string>();
+        foreach (var notification in composition.Notifications)
+        {
+            boxed.Clear();
+            foreach (var handler in notification.Handlers)
+            {
+                if (handler.Boxed)
+                {
+                    boxed.Add($"'{handler.Handler.HandlerClass.Replace("global::", "")}'");
+                }
+            }
+
+            if (boxed.Count > 0)
+            {
+                diagnostics.Add(
+                    new(
+                        Descriptors.BoxedStructNotification,
+                        notification.Notification.Location ?? settings.HostAttribute,
+                        ImmutableArray.Create(notification.Notification.DisplayName, string.Join(", ", boxed))
+                    )
+                );
             }
         }
 

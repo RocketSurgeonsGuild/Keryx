@@ -30,6 +30,7 @@ KRX030  | Keryx    | Error    | HostGenerator, request without a handler in the 
 KRX031  | Keryx    | Error    | HostGenerator, host targets a framework older than net10.0
 KRX035  | Keryx    | Info     | HostGenerator, global behavior applied in the host
 KRX036  | Keryx    | Warning  | HostGenerator, ExcludeBehavior names a type that is not part of any pipeline
+KRX037  | Keryx    | Info     | HostGenerator, struct notification boxed for handlers typed as an interface
 KRX040  | Keryx    | Warning  | HandlerAnalyzer, [HandlerOrder] on a method that is not a notification handler
 KRX041  | Keryx    | Warning  | MessageTypeAnalyzer, [PublishStrategy] on a type that is not a notification
 KRX042  | Keryx    | Warning  | BehaviorAnalyzer, [Behavior] or [GlobalBehavior] where it has no effect

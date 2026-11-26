@@ -7,7 +7,10 @@ namespace Keryx.Analyzers.Handlers;
 /// </summary>
 internal enum AccessLevel
 {
-    /// <summary>Narrower than <c>internal</c> (private, protected or private protected somewhere in the chain).</summary>
+    /// <summary>
+    ///     Narrower than <c>internal</c> (private, protected or private protected somewhere in the chain), or file-local somewhere in the
+    ///     chain: generated code in another file cannot name it either (OQ-44).
+    /// </summary>
     Restricted = 0,
 
     /// <summary>Usable throughout its own assembly, but not effectively public.</summary>
@@ -34,6 +37,11 @@ internal static class TypeAccessibility
         var level = AccessLevel.Public;
         for (var current = type; current is not null; current = current.ContainingType)
         {
+            if (current.IsFileLocal)
+            {
+                return AccessLevel.Restricted;
+            }
+
             level = Min(level, OfDeclaredAccessibility(current.DeclaredAccessibility));
         }
 

@@ -152,7 +152,7 @@ public sealed class BehaviorAnalyzer : DiagnosticAnalyzer
         {
             { IsRequest: true, ResponseType: { } response } => (new(BehaviorTargetKind.Request, [message.Type, response]), true),
             { IsStream: true, ItemType: { } item } => (new(BehaviorTargetKind.Stream, [message.Type, item]), true),
-            // A polymorphic notification handler's behaviors are closed over each concrete published type by the host (Phase 6); here
+            // A polymorphic notification handler's behaviors are closed over each concrete published type by the host (OQ-40); here
             // only the kind can be checked.
             { IsNotificationOnly: true } => (new(BehaviorTargetKind.NotificationHandler, [message.Type]), message.IsConcrete),
             _ => null,

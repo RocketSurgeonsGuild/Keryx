@@ -446,7 +446,7 @@ code that does not compile:
   target (an exclusion of one closing of an open global leaves it listed). It is reported on the `[GlobalBehavior]` attribute.
 - **KRX036 for `ExcludeBehavior`** is not reported for an exclusion that names a notification behavior until Phase 6 composes
   notification pipelines. Stream pipelines are composed already (their behaviors count as used), although the host dispatches streams
-  only from Phase 5.
+  only from Phase 5. (Phase 6 composes notification pipelines, so KRX036 now covers notification behavior exclusions too.)
 - **Allocation tests of `async` behaviors** compile the test host with optimizations on: a Debug build compiles an `async` method's state
   machine to a class, allocated on every call even when it completes synchronously. That allocation is the behavior's own (ADR, Performance
   contract: "provided the behaviors' own work completes synchronously"); Keryx's generated pipeline allocates nothing in either build.
@@ -481,6 +481,71 @@ A fused hook segment awaits the hooks' `OnStartAsync`, `OnCompleteAsync` and `On
   the consumer's own `await foreach` still resumes on its context.
 - **Proposal:** confirm and state it in the ADR's Streaming section. The alternative (capturing the context) keeps thread-affine hooks on
   the caller's context but costs a context switch per asynchronous step in UI and legacy ASP.NET hosts.
+
+### OQ-40: Attached behaviors whose constraints a polymorphic handler's concrete type does not satisfy
+
+`TNotification` of a per-handler behavior is always the concrete published type, so a behavior attached with `[Behavior]` to a
+polymorphic handler (`Handle(IDomainEvent e)`) is closed once per concrete type the handler receives. The ADR says an attached behavior
+that does not fit its target is KRX009, but a polymorphic handler has several targets, and a constrained behavior (`where T : IAudited`)
+may fit some of them and not others. OQ-37 already leaves the constraints out of the analyzer's KRX009 for such a handler.
+
+- **Interim:** the host skips the behavior for each concrete type it does not fit, silently, and applies it to the ones it fits. No
+  diagnostic, also when it fits none of them.
+- **Proposal:** keep skipping per concrete type, and have the host report KRX009 (or a new warning) only when an attached behavior fits
+  none of the concrete types the handler receives, which is almost certainly a mistake.
+
+### OQ-41: `ConfigureAwait` in generated publish code
+
+The sequential strategy's slow path awaits each handler pipeline after the first one that did not complete synchronously, and the
+parallel strategy awaits `Task.WhenAll`. The ADR does not say whether these awaits capture the caller's synchronization context, so
+whether later handlers run on it.
+
+- **Interim:** every await in generated publish code uses `ConfigureAwait(false)`, as in fused hook segments (OQ-39): after a handler
+  yields, the next handlers of a sequential publish may run on a thread-pool thread. Handlers and behaviors, which users write, await
+  however they choose, and the caller's own `await Publish(...)` still resumes on its context.
+- **Proposal:** confirm together with OQ-39 and state it in the ADR's Notifications section. The alternative keeps thread-affine handlers
+  on the caller's context at the cost of a context switch per yielding handler.
+
+### OQ-42: Which notification types the host knows before cross-assembly discovery
+
+Polymorphic expansion needs every concrete notification type the host knows. Phase 6 reads the host's own source; Phase 7 adds the
+referenced assemblies through the scan. Until then a handler in the host can still take a notification type declared in a referenced
+assembly (typically a contracts assembly).
+
+- **Interim:** the host knows (a) every concrete notification type declared in its own source that generated code can reach (at least
+  `internal`; narrower ones are skipped like OQ-24 handlers), and (b) the parameter type of each of its own notification handlers when
+  that is itself a concrete notification, wherever it is declared. A referenced type known this way gets its per-publish behaviors from
+  `[Behavior]` on the type, the `[assembly: Behavior]`s of its own assembly read from metadata (OQ-3) and the host's globals. Referenced
+  types reach polymorphic handlers only through (b) until Phase 7. A typed `Publish` overload is generated for every known type, also for
+  one that has neither handlers nor per-publish behaviors (it completes immediately).
+- **Proposal:** keep (a) and (b) and add the scanned referenced notification types in Phase 7, as the ADR's third scan describes.
+
+### OQ-43: Exceptions from per-publish behaviors, and derived notifications of unknown types
+
+The ADR says `Publish` throws one `AggregateException` when any handler fails, and that a type the host does not know runs no handlers.
+It does not say what a per-publish behavior's own exception looks like, or what happens to a notification whose runtime type derives from
+a known type but is itself unknown.
+
+- **Interim:** handler failures, including failures of per-handler behaviors (they are part of the handler's pipeline), are collected into
+  the `AggregateException`. A per-publish behavior wraps the whole publish, so an exception it throws (or lets through from `next`, which
+  is already the `AggregateException`) propagates as it is, not wrapped again; a synchronous throw from the outermost per-publish behavior
+  throws from `Publish` itself, like a request behavior's from `Send`. A notification whose runtime type is unknown runs nothing, even
+  when it derives from a known type with handlers: the typed overload of a non-sealed type checks the runtime type and redispatches, as
+  typed `Send` does for requests (OQ-31).
+- **Proposal:** confirm and add both to the ADR's Notifications section.
+
+### OQ-44: File-local types in a host
+
+A file-local (`file`) type, or any type nested in one, has declared accessibility `internal` or wider, but generated code in another file
+cannot name it. OQ-42 generates a typed `Publish` overload for every notification type declared in the host's source, so a
+`file sealed record Hidden : INotification;` made the generated mediator fail to compile (CS0234) with no Keryx diagnostic. Behaviors
+(global, assembly or attached) that are file-local hit the same problem. Handler classes do not: KRX004 reports them (OQ-26).
+
+- **Interim:** a file-local type anywhere in the containing chain counts as narrower than `internal`. A file-local notification type is
+  unknown to the host (no overload, no dispatch, polymorphic handlers do not receive it), like a `private` nested one (OQ-42), and a
+  file-local behavior is skipped by the host and reported where the host already reports a behavior narrower than `internal` (KRX016
+  with "at least internal", for `[GlobalBehavior]` and attached behaviors).
+- **Proposal:** confirm, and say in the ADR that "narrower than `internal`" includes file-local types.
 
 ## Decided
 

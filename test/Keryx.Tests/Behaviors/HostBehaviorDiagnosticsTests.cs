@@ -77,6 +77,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
                              // Trace is excluded entirely, so only Audit is listed; an exclusion of one closing leaves the global applied.
                              "KRX035: Global behavior 'Audit<TRequest, TResponse>' from assembly 'TestProject' applies in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(Audit<Placed, int>))] has no effect, because 'Audit<Placed, int>' is not part of any pipeline in this host",
+                             "KRX036: [assembly: ExcludeBehavior(typeof(OnPublish<>))] has no effect, because 'OnPublish<>' is not part of any pipeline in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(Unused<,>))] has no effect, because 'Unused<,>' is not part of any pipeline in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(string))] has no effect, because 'string' is not part of any pipeline in this host",
                          ],
@@ -180,6 +181,82 @@ public class HostBehaviorDiagnosticsTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
+    }
+
+    [Test]
+    public async Task KRX008_For_Notification_Behavior_Pairs_With_A_Referenced_Behavior(CancellationToken cancellationToken)
+    {
+        // Per-publish and per-handler: a library behavior in Phase.Transaction; the host's own, in Phase.Observability, claims to run after
+        // it. Referenced global behaviors are Phase 7, so the library behaviors are attached with [Behavior].
+        var library = Library(
+            """
+            namespace Lib;
+
+            [global::Keryx.BehaviorOrder(global::Keryx.Phase.Transaction)]
+            public sealed class PublishTransaction<T> : global::Keryx.INotificationPipelineBehavior<T> where T : global::Keryx.INotification
+            {
+                public global::System.Threading.Tasks.ValueTask Handle<TNext>(T notification, TNext next, global::System.Threading.CancellationToken cancellationToken)
+                    where TNext : struct, global::Keryx.INext => next.InvokeAsync(cancellationToken);
+            }
+
+            [global::Keryx.BehaviorOrder(global::Keryx.Phase.Transaction)]
+            public sealed class HandlerTransaction<T> : global::Keryx.INotificationHandlerPipelineBehavior<T> where T : global::Keryx.INotification
+            {
+                public global::System.Threading.Tasks.ValueTask Handle<TNext>(T notification, TNext next, global::System.Threading.CancellationToken cancellationToken)
+                    where TNext : struct, global::Keryx.INext => next.InvokeAsync(cancellationToken);
+            }
+            """
+        );
+        var source = """
+            [assembly: KeryxHost]
+
+            namespace Sample;
+
+            [BehaviorOrder(Phase.Observability)]
+            [RunsAfter(typeof(Lib.PublishTransaction<Sample.Placed>))]
+            public sealed class EarlyPublish : INotificationPipelineBehavior<Placed>
+            {
+                public ValueTask Handle<TNext>(Placed notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            [BehaviorOrder(Phase.Observability)]
+            [RunsAfter(typeof(Lib.HandlerTransaction<Sample.Placed>))]
+            public sealed class EarlyHandler : INotificationHandlerPipelineBehavior<Placed>
+            {
+                public ValueTask Handle<TNext>(Placed notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            [Behavior(typeof(EarlyPublish))]
+            [Behavior(typeof(Lib.PublishTransaction<>))]
+            public sealed record Placed : INotification;
+
+            public static partial class OnPlaced
+            {
+                [Behavior(typeof(EarlyHandler))]
+                [Behavior(typeof(Lib.HandlerTransaction<>))]
+                private static ValueTask Handle(Placed notification) => default;
+            }
+            """;
+
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+
+        var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
+        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX008: 'Sample.EarlyHandler' declares RunsAfter 'Lib.HandlerTransaction<Sample.Placed>', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.HandlerTransaction<Sample.Placed>' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                             "KRX008: 'Sample.EarlyPublish' declares RunsAfter 'Lib.PublishTransaction<Sample.Placed>', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.PublishTransaction<Sample.Placed>' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+
+        // Reported at the edge.
+        foreach (var diagnostic in diagnostics)
+        {
+            await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).StartsWith("RunsAfter");
+        }
     }
 
     [Test]

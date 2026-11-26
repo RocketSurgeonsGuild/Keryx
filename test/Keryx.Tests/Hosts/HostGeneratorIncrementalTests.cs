@@ -7,7 +7,8 @@ namespace Keryx.Tests.Hosts;
 
 /// <summary>
 ///     The incremental rules for the host pipeline (ADR 0001, Incremental generation rules): an unrelated edit leaves every named step and
-///     both host sources <c>Cached</c> or <c>Unchanged</c>; adding a request handler produces <c>Modified</c> host sources. The diagnostics
+///     both host sources <c>Cached</c> or <c>Unchanged</c>; adding a request handler, a global behavior or a notification type a polymorphic
+///     handler receives produces <c>Modified</c> host sources. The diagnostics
 ///     output reads the compilation to report on syntax trees (OQ-35), so it reruns on every edit and is not asserted; the diagnostics
 ///     themselves are a cached step. (The scan and manifest parts of the test come with cross-assembly discovery.)
 /// </summary>
@@ -38,6 +39,15 @@ public class HostGeneratorIncrementalTests
 
             private static string Handle(Query request) => "pong";
         }
+
+        public interface IDomainEvent : INotification { }
+        public sealed record OrderPlaced : IDomainEvent;
+        public sealed record Unheard : INotification;
+
+        public static partial class AuditDomainEvents
+        {
+            private static ValueTask Handle(IDomainEvent notification) => default;
+        }
         """;
 
     /// <summary>Steps fed directly by the compilation always run, and are not asserted (ADR 0001).</summary>
@@ -58,7 +68,12 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostRequestModels,
         TrackingNames.HostRequests,
         TrackingNames.HostRequestList,
+        TrackingNames.HostNotificationCandidates,
+        TrackingNames.HostNotificationModels,
+        TrackingNames.HostNotifications,
+        TrackingNames.HostNotificationList,
         TrackingNames.HostSettingsAndHandlers,
+        TrackingNames.HostSettingsHandlersAndRequests,
         TrackingNames.HostSources,
         TrackingNames.HostDiagnostics,
         TrackingNames.HostDiagnosticsAndCompilation,
@@ -170,6 +185,27 @@ public class HostGeneratorIncrementalTests
         await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
         await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
                     .Contains("global::Sample.Audit<global::Sample.CreateOrder.Command, global::System.Guid> Behavior1;");
+    }
+
+    [Test]
+    public async Task Adding_A_Notification_Type_A_Polymorphic_Handler_Receives_Modifies_The_Host_Sources(CancellationToken cancellationToken)
+    {
+        var compilation = Compile(Host);
+        var driver = Run(compilation, cancellationToken);
+
+        // No handler's syntax changes, but the polymorphic AuditDomainEvents now receives one more concrete type.
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText("namespace Sample; public sealed record Shipped : IDomainEvent;", ParseOptions, "Shipped.cs", cancellationToken: cancellationToken)
+            ),
+            cancellationToken
+        );
+        var result = driver.GetRunResult().Results.Single();
+
+        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
+                    .Contains("private __Notification1 __CreateNotification1()");
     }
 
     /// <summary>The runs of the output that adds the host sources (fed by <see cref="TrackingNames.HostSources" />).</summary>

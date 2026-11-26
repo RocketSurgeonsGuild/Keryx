@@ -6,9 +6,9 @@
 namespace Sample
 {
     /// <summary>
-    ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler. Scoped: it creates
-    ///     each pipeline context once per scope, on first use, so nothing is resolved or allocated per call after that. Registered by
-    ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
+    ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each
+    ///     notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so
+    ///     nothing is resolved or allocated per call after that. Registered by <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal sealed partial class KeryxMediator : global::Keryx.IMediator
@@ -17,6 +17,7 @@ namespace Sample
         private __Pipeline0? __pipeline0;
         private __Pipeline1? __pipeline1;
         private __Pipeline2? __pipeline2;
+        private __Notification0? __notification0;
 
         /// <summary>Creates the mediator of one scope.</summary>
         /// <param name="serviceProvider">The scope's service provider. Pipeline contexts resolve handlers from it.</param>
@@ -190,14 +191,36 @@ namespace Sample
             throw __HandlerNotFound(requestType);
         }
 
+        /// <summary>
+        ///     Publishes a <c>Sample.Placed</c> to its handlers, without type dispatch.
+        /// </summary>
+        /// <param name="notification">The notification.</param>
+        /// <param name="cancellationToken">The token passed to every behavior and handler. Cancelling it does not skip handlers.</param>
+        /// <returns>A task that completes when every handler has run; it faults with one <see cref="global::System.AggregateException" /> when any handler fails.</returns>
+        public global::System.Threading.Tasks.ValueTask Publish(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken = default)
+        {
+            global::System.ArgumentNullException.ThrowIfNull(notification);
+            return __Publish0(notification, cancellationToken);
+        }
+
         /// <inheritdoc />
-        /// <remarks>This mediator dispatches no notifications yet, so every notification type is unknown to it and runs no handlers.</remarks>
         public global::System.Threading.Tasks.ValueTask Publish<TNotification>(TNotification notification, global::System.Threading.CancellationToken cancellationToken = default)
             where TNotification : global::Keryx.INotification
         {
             if (notification is null)
             {
                 throw new global::System.ArgumentNullException(nameof(notification));
+            }
+
+            if (typeof(TNotification).IsValueType)
+            {
+                return default;
+            }
+
+            var notificationType = notification.GetType();
+            if (notificationType == typeof(global::Sample.Placed))
+            {
+                return __Publish0(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Placed>((object)notification), cancellationToken);
             }
 
             return default;
@@ -233,6 +256,16 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<global::Keryx.Unit> __Send5(global::Sample.Touch request, global::System.Threading.CancellationToken cancellationToken) =>
             global::Sample.TouchHandler.InvokeAsync(request, cancellationToken);
 
+        private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken)
+        {
+            var pipeline = global::System.Threading.Volatile.Read(ref __notification0) ?? __CreateNotification0();
+            return pipeline.RunHandlers(notification, cancellationToken);
+        }
+
+        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private __Notification0 __CreateNotification0() =>
+            global::System.Threading.Interlocked.CompareExchange(ref __notification0, new __Notification0(__serviceProvider), null) ?? __notification0!;
+
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType) => new(requestType);
 
@@ -267,6 +300,65 @@ namespace Sample
             {
                 Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.LookupHandler>(serviceProvider);
             }
+        }
+
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        private sealed class __Notification0
+        {
+            public readonly global::Sample.OnPlaced Handler0;
+
+            public __Notification0(global::System.IServiceProvider serviceProvider)
+            {
+                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.OnPlaced>(serviceProvider);
+            }
+
+            /// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>
+            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken)
+            {
+                global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
+                global::System.Threading.Tasks.ValueTask task;
+                try
+                {
+                    task = RunHandler0(notification, cancellationToken);
+                }
+                catch (global::System.Exception exception)
+                {
+                    (exceptions ??= new()).Add(exception);
+                    task = default;
+                }
+
+                if (!task.IsCompletedSuccessfully)
+                {
+                    return RunHandlersAsync(notification, task, 0, exceptions, cancellationToken);
+                }
+
+                task.GetAwaiter().GetResult();
+
+                return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
+            }
+
+            /// <summary>Awaits the handler pipeline at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
+            [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
+            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.Placed notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            {
+                try
+                {
+                    await pending.ConfigureAwait(false);
+                }
+                catch (global::System.Exception exception)
+                {
+                    (exceptions ??= new()).Add(exception);
+                }
+
+                if (exceptions is not null)
+                {
+                    throw new global::System.AggregateException(exceptions);
+                }
+            }
+
+            /// <summary>Runs the pipeline of <c>Sample.OnPlaced</c>.</summary>
+            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken) =>
+                Handler0.InvokeAsync(notification, cancellationToken);
         }
     }
 }
