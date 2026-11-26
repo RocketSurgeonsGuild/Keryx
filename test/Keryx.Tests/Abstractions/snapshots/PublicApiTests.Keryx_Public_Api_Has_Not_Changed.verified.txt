@@ -46,23 +46,17 @@
         System.Threading.Tasks.ValueTask<TResponse> InvokeAsync(System.Threading.CancellationToken cancellationToken);
     }
     public interface INotification { }
-    public interface INotificationBehavior<TNotification>
+    public interface INotificationHandlerPipelineBehavior<TNotification>
         where TNotification : Keryx.INotification
     {
         System.Threading.Tasks.ValueTask Handle<TNext>(TNotification notification, TNext next, System.Threading.CancellationToken cancellationToken)
             where TNext :  struct, Keryx.INext;
     }
-    public interface INotificationHandlerBehavior<TNotification>
+    public interface INotificationPipelineBehavior<TNotification>
         where TNotification : Keryx.INotification
     {
         System.Threading.Tasks.ValueTask Handle<TNext>(TNotification notification, TNext next, System.Threading.CancellationToken cancellationToken)
             where TNext :  struct, Keryx.INext;
-    }
-    public interface IPipelineBehavior<TRequest, TResponse>
-        where TRequest : Keryx.IRequest<TResponse>
-    {
-        System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
-            where TNext :  struct, Keryx.INext<TResponse>;
     }
     public interface IPublisher
     {
@@ -70,13 +64,19 @@
             where TNotification : Keryx.INotification;
     }
     public interface IRequest : Keryx.IRequest<Keryx.Unit> { }
+    public interface IRequestPipelineBehavior<TRequest, TResponse>
+        where TRequest : Keryx.IRequest<TResponse>
+    {
+        System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+            where TNext :  struct, Keryx.INext<TResponse>;
+    }
     public interface IRequest<TResponse> { }
     public interface ISender
     {
         System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(Keryx.IRequest<TResponse> request, System.Threading.CancellationToken cancellationToken = default);
         System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(Keryx.IStreamRequest<TItem> request, System.Threading.CancellationToken cancellationToken = default);
     }
-    public interface IStreamBehavior<TRequest, TItem>
+    public interface IStreamPipelineBehavior<TRequest, TItem>
         where TRequest : Keryx.IStreamRequest<TItem>
     {
         System.Threading.Tasks.ValueTask OnCompleteAsync(TRequest request);
@@ -85,7 +85,7 @@
         System.Threading.Tasks.ValueTask OnStartAsync(TRequest request, System.Threading.CancellationToken cancellationToken);
     }
     public interface IStreamRequest<TItem> { }
-    public interface IStreamWrapBehavior<TRequest, TItem>
+    public interface IStreamWrapPipelineBehavior<TRequest, TItem>
         where TRequest : Keryx.IStreamRequest<TItem>
     {
         System.Collections.Generic.IAsyncEnumerable<TItem> Handle(TRequest request, System.Collections.Generic.IAsyncEnumerable<TItem> next, System.Threading.CancellationToken cancellationToken);
@@ -134,9 +134,21 @@
         public System.Type BehaviorType { get; }
     }
     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
+    public sealed class RunsAfterAttribute<TBehavior> : System.Attribute
+    {
+        public RunsAfterAttribute() { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
     public sealed class RunsBeforeAttribute : System.Attribute
     {
         public RunsBeforeAttribute(System.Type behaviorType) { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
+    public sealed class RunsBeforeAttribute<TBehavior> : System.Attribute
+    {
+        public RunsBeforeAttribute() { }
         public System.Type BehaviorType { get; }
     }
     public readonly struct Unit : System.IComparable<Keryx.Unit>, System.IEquatable<Keryx.Unit>

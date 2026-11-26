@@ -15,12 +15,11 @@
         <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
     </ItemGroup>
     <!--
-        The generator, analyzers and code fixes ship inside this package (analyzers/dotnet/cs), so a project that references Keryx
-        runs them. Built before this project; never referenced as assemblies.
+        The generators, analyzers and code fixes (one assembly, Keryx.Analyzers) ship inside this package (analyzers/dotnet/cs), so a
+        project that references Keryx runs them. Built before this project; never referenced as an assembly.
     -->
     <ItemGroup>
         <ProjectReference Include="..\Keryx.Analyzers\Keryx.Analyzers.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
-        <ProjectReference Include="..\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     </ItemGroup>
     <ItemGroup>
         <None Include="build/*.*" Pack="true" PackagePath="build" />
@@ -28,15 +27,12 @@
     </ItemGroup>
 
     <!--
-        Adds the analyzer assemblies (and the System.Text.Json the generator loads on .NET Framework compiler hosts) to analyzers/dotnet/cs,
-        and the Specular.Scanning scan cache wiring that build/Keryx.targets imports to build/. The analyzer projects name their own
-        files (GetKeryxPackageFiles), so their output paths live in one place.
+        Adds Keryx.Analyzers.dll (and the System.Text.Json the generator loads on .NET Framework compiler hosts) to analyzers/dotnet/cs,
+        and the Specular.Scanning scan cache wiring that build/Keryx.targets imports to build/. The analyzer project names its own files
+        (GetKeryxPackageFiles), so their output paths live in one place.
     -->
     <Target Name="_KeryxAddAnalyzerPackageFiles" BeforeTargets="_GetPackageFiles">
         <MSBuild Projects="..\Keryx.Analyzers\Keryx.Analyzers.csproj" Targets="GetKeryxPackageFiles" Properties="Configuration=$(Configuration)">
-            <Output TaskParameter="TargetOutputs" ItemName="_KeryxAnalyzerPackageFile" />
-        </MSBuild>
-        <MSBuild Projects="..\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" Targets="GetKeryxPackageFiles" Properties="Configuration=$(Configuration)">
             <Output TaskParameter="TargetOutputs" ItemName="_KeryxAnalyzerPackageFile" />
         </MSBuild>
         <ItemGroup>

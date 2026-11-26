@@ -8,11 +8,11 @@ public class InterfaceShapeTests
     [Arguments(typeof(IRequest<>))]
     [Arguments(typeof(IStreamRequest<>))]
     [Arguments(typeof(INext<>))]
-    [Arguments(typeof(IPipelineBehavior<,>))]
-    [Arguments(typeof(IStreamBehavior<,>))]
-    [Arguments(typeof(IStreamWrapBehavior<,>))]
-    [Arguments(typeof(INotificationBehavior<>))]
-    [Arguments(typeof(INotificationHandlerBehavior<>))]
+    [Arguments(typeof(IRequestPipelineBehavior<,>))]
+    [Arguments(typeof(IStreamPipelineBehavior<,>))]
+    [Arguments(typeof(IStreamWrapPipelineBehavior<,>))]
+    [Arguments(typeof(INotificationPipelineBehavior<>))]
+    [Arguments(typeof(INotificationHandlerPipelineBehavior<>))]
     public async Task Generic_Interface_Is_Invariant(Type type)
     {
         foreach (var parameter in type.GetGenericArguments())
@@ -63,23 +63,23 @@ public class InterfaceShapeTests
     [Test]
     public async Task Request_Behaviors_Constrain_The_Request_To_Its_Response()
     {
-        var pipeline = typeof(IPipelineBehavior<,>).GetGenericArguments();
-        var stream = typeof(IStreamBehavior<,>).GetGenericArguments();
-        var wrap = typeof(IStreamWrapBehavior<,>).GetGenericArguments();
+        var pipeline = typeof(IRequestPipelineBehavior<,>).GetGenericArguments();
+        var stream = typeof(IStreamPipelineBehavior<,>).GetGenericArguments();
+        var wrap = typeof(IStreamWrapPipelineBehavior<,>).GetGenericArguments();
 
         await Assert.That(pipeline[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IRequest<>).MakeGenericType(pipeline[1])]);
         await Assert.That(stream[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(stream[1])]);
         await Assert.That(wrap[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(wrap[1])]);
-        await Assert.That(typeof(INotificationBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
+        await Assert.That(typeof(INotificationPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
                     .IsEquivalentTo([typeof(INotification)]);
-        await Assert.That(typeof(INotificationHandlerBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
+        await Assert.That(typeof(INotificationHandlerPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
                     .IsEquivalentTo([typeof(INotification)]);
     }
 
     [Test]
-    [Arguments(typeof(IPipelineBehavior<,>), true)]
-    [Arguments(typeof(INotificationBehavior<>), false)]
-    [Arguments(typeof(INotificationHandlerBehavior<>), false)]
+    [Arguments(typeof(IRequestPipelineBehavior<,>), true)]
+    [Arguments(typeof(INotificationPipelineBehavior<>), false)]
+    [Arguments(typeof(INotificationHandlerPipelineBehavior<>), false)]
     public async Task Behavior_Next_Is_A_Struct_Link(Type behaviorType, bool generic)
     {
         var handle = behaviorType.GetMethod("Handle")!;
@@ -94,7 +94,7 @@ public class InterfaceShapeTests
     [Test]
     public async Task Stream_Hook_OnItem_Takes_The_Item_By_Reference()
     {
-        var onItem = typeof(IStreamBehavior<,>).GetMethod(nameof(IStreamBehavior<StringStream, string>.OnItem))!;
+        var onItem = typeof(IStreamPipelineBehavior<,>).GetMethod(nameof(IStreamPipelineBehavior<StringStream, string>.OnItem))!;
 
         await Assert.That(onItem.ReturnType).IsEqualTo(typeof(bool));
         await Assert.That(onItem.GetParameters()[1].ParameterType.IsByRef).IsTrue();

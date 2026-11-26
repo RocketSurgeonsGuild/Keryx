@@ -122,7 +122,7 @@ struct notifications.
 
 ### OQ-18: Per-publish behaviors when a notification has zero handlers
 
-The ADR said both "zero handlers: `Publish` completes immediately" and "`INotificationBehavior` wraps the whole `Publish` call". The
+The ADR said both "zero handlers: `Publish` completes immediately" and "`INotificationPipelineBehavior` wraps the whole `Publish` call". The
 verification pass picked one reading.
 
 - **Interim:** for a notification type the host knows, the per-publish pipeline runs even with zero handlers. `Publish` completes
@@ -144,26 +144,6 @@ public API snapshot.
 - **Proposal:** confirm and copy the declarations into the ADR's Attribute reference. Alternative: `Inherited = false` on the class-level
   attributes (`GlobalBehavior`, `BehaviorOrder`, `RunsAfter`/`RunsBefore`, `PublishStrategy`), so reflection-based tooling does not
   report a derived class as a global behavior or a parallel notification when the generator does not treat it as one.
-
-### OQ-20: C# language version floor set by `init` attribute properties
-
-The ADR declares `KeryxHandlerAttribute.Behaviors`, `Order` and `StaticInvoker`, `KeryxManifestAttribute.FormatVersion` and
-`BehaviorOrderAttribute.Order` as `init` properties. Setting an `init` property through an attribute named argument needs C# 9 (CS8400
-in C# 8). The generator emits `[assembly: KeryxManifest(FormatVersion = 1)]` into every project that references Keryx, and the ADR lets
-contracts and handler libraries target `netstandard2.0`, where the default `LangVersion` is 7.3. Such a project gets compile errors in
-generated code it cannot edit; hand-written `[BehaviorOrder(..., Order = n)]` hits the same error. The generated `#nullable enable`
-already needs C# 8, so these projects must raise `LangVersion` either way; `init` moves the floor from C# 8 to C# 9 without the ADR
-saying so.
-
-- **Interim:** keep `init`, as the ADR declares. Keryx requires C# 9 or later in every project that references it. Phase 2 reports a
-  diagnostic for a project below C# 9 instead of emitting code that does not compile, and emits `Behaviors` as
-  `new global::System.Type[] { ... }` (a collection expression would raise the floor to C# 12). `ManifestContractTests` compiles the
-  attributes as generated code writes them against the `netstandard2.0` `Keryx.dll` with C# 9 and the latest version, reads them back from
-  metadata by `KnownTypeNames`, and pins the C# 8 failure (five CS8400 errors).
-- **Proposal:** change the four generated-only `Keryx.Internal` properties to `{ get; set; }`. They are `[EditorBrowsable(Never)]`, so
-  mutability costs nothing, `set` is the usual attribute pattern, and the floor drops back to C# 8 (the `#nullable enable` in generated
-  code). Consider the same for `BehaviorOrderAttribute.Order`. The change is source compatible for attribute usage (a named argument is
-  stored by name), but it changes the public API snapshot and the ADR declarations, and flips the C# 8 test in `ManifestContractTests`.
 
 ## Decided
 
@@ -188,13 +168,25 @@ Folded into the ADR (Generated host, Performance contract, Answered open questio
 Allowed when the method is synchronous. `async void` stays an error (KRX002). The invoker calls the handler and returns a completed
 `ValueTask<Unit>`. Folded into the ADR (Handler rules, return adaptation).
 
-### OQ-12: Behavior interface name (2026-11-25)
+### OQ-12: Behavior interface name (2026-11-25, revised 2026-11-26)
 
-Keep `IPipelineBehavior<TRequest, TResponse>`. No rename.
+On 2026-11-25 the decision was to keep `IPipelineBehavior<TRequest, TResponse>` with no rename. Revised on 2026-11-26: every behavior
+interface follows the pattern of the notification ones, and the names that had no `Pipeline` in them gain it:
+
+| Before                                   | After                                           |
+| ---------------------------------------- | ----------------------------------------------- |
+| `IPipelineBehavior<TRequest, TResponse>` | `IRequestPipelineBehavior<TRequest, TResponse>` |
+| `INotificationBehavior<TNotification>`   | `INotificationPipelineBehavior<TNotification>`  |
+| `INotificationHandlerBehavior<T>`        | `INotificationHandlerPipelineBehavior<T>`       |
+| `IStreamBehavior<TRequest, TItem>`       | `IStreamPipelineBehavior<TRequest, TItem>`      |
+| `IStreamWrapBehavior<TRequest, TItem>`   | `IStreamWrapPipelineBehavior<TRequest, TItem>`  |
+
+Shapes and semantics are unchanged. Applied to code, tests, the public API snapshot, `KnownTypeNames`, the ADR, the brief and the
+glossary; the source files are named after the interfaces. Folded into the ADR (Behaviors, Alternatives considered).
 
 ### Stream allocation exceptions (2026-11-26)
 
-Per `Stream` call: one iterator per fused hook segment (one when there is no `IStreamWrapBehavior`), plus one linked
+Per `Stream` call: one iterator per fused hook segment (one when there is no `IStreamWrapPipelineBehavior`), plus one linked
 `CancellationTokenSource` only when two distinct cancellable tokens are supplied, plus whatever a wrap behavior's own enumerable
 allocates; 0 per item. Allocation tests include the two-token case. Folded into the ADR (Streaming, Performance contract).
 
@@ -203,3 +195,37 @@ allocates; 0 per item. Allocation tests include the two-token case. Folded into 
 Start each handler pipeline in handler order on the calling thread without awaiting (no `Task.Run`), catching synchronous throws. 0 B
 when all complete synchronously; otherwise one array plus `AsTask()` per pending `ValueTask`, then `Task.WhenAll`. `AggregateException`
 in handler order from synchronous and asynchronous failures. Folded into the ADR (Notifications, Publish strategy; Performance contract).
+
+### OQ-20: C# language version floor (2026-11-26)
+
+The question: `init` properties on `KeryxHandlerAttribute`, `KeryxManifestAttribute` and `BehaviorOrderAttribute` need C# 9 when set
+through an attribute named argument, and a `netstandard2.0` project defaults to C# 7.3, so generated code would not compile there.
+
+Decided: keep the `init` properties. The floor is **C# 11**, because the generic `RunsAfter<T>`/`RunsBefore<T>` attributes (decided
+below) need it too. The package's `build/Keryx.props` sets `<LangVersion>latest</LangVersion>` when the consuming project leaves
+`LangVersion` empty, as `Specular.Scanning.Sources` does for its own default; a value the project or its `Directory.Build.props` sets
+still wins. A project below C# 11 gets error **KRX022** (Phase 2 implements the analyzer; the generators emit nothing there).
+`ManifestContractTests` keeps pinning the C# 8 failure of the `init` named arguments. Verified by packing: a `netstandard2.0` project
+with no `LangVersion` that references the package evaluates `LangVersion` to `latest` and compiles `[RunsAfter<T>]` and
+`[BehaviorOrder(..., Order = n)]`; with `LangVersion` 10 in its `Directory.Build.props` it keeps 10 and fails with CS8936. Folded into
+the ADR (Package and assemblies, Diagnostics, Alternatives considered, Consequences).
+
+### Generic `RunsAfter<T>`/`RunsBefore<T>` (2026-11-26)
+
+`RunsAfterAttribute<TBehavior>` and `RunsBeforeAttribute<TBehavior>` sit beside the `typeof` forms, with the same `AttributeUsage`
+(class, `AllowMultiple`) and a `BehaviorType` property that returns `typeof(TBehavior)`. They name only closed or non-generic behaviors,
+because C# forbids an unbound generic type as a type argument (CS7003); open behaviors keep `typeof(X<,>)`. The generator treats both
+forms identically: the behavior comes from the constructor argument of the `typeof` form and from the type argument of the generic form.
+`KnownTypeNames` has `RunsAfterAttributeOfT` (``Keryx.RunsAfterAttribute`1``) and `RunsBeforeAttributeOfT`
+(``Keryx.RunsBeforeAttribute`1``). `RunsAfterBeforeFormsTests` checks that both forms, compiled against the `netstandard2.0`
+`Keryx.dll` and read back from metadata, give the same edges. Folded into the ADR (Ordering, Attribute reference, Manifest).
+
+### One analyzer assembly (2026-11-26)
+
+`Keryx.Analyzers.CodeFixes` is folded into `Keryx.Analyzers`: one analyzer assembly holds the generators, the analyzers and the code
+fixes (in its `CodeFixes` folder), and references `Microsoft.CodeAnalysis.CSharp.Workspaces`. The package ships
+`Keryx.Analyzers.dll` and `System.Text.Json.dll` in `analyzers/dotnet/cs`, and `Specular.Scanning.Cache.targets` in `build/`. RS1038 is
+suppressed in `Keryx.Analyzers.csproj` with a comment. The accepted risk: the command-line compiler does not ship Workspaces, so a
+code-fix type reached from a generator or analyzer code path fails command-line builds; code-fix types are never touched from those
+paths. Folded into the ADR (Package and assemblies, Repository layout, Diagnostics and code fixes, Alternatives considered,
+Consequences).

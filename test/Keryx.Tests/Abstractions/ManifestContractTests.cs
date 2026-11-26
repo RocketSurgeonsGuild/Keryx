@@ -10,8 +10,8 @@ namespace Keryx.Tests.Abstractions;
 ///     handler library compiles against, then reads them back from compiled metadata the way a host does (by <see cref="KnownTypeNames" />).
 /// </summary>
 /// <remarks>
-///     The named arguments set <c>init</c> properties, which need C# 9 (open question OQ-20). If those properties become <c>set</c>, the
-///     C# 8 test fails: update OQ-20 and the test together.
+///     The named arguments set <c>init</c> properties, which need C# 9. OQ-20 (decided 2026-11-26) keeps them <c>init</c>; Keryx itself
+///     requires C# 11 (KRX022). If those properties become <c>set</c>, the C# 8 test fails: update the ADR and the test together.
 /// </remarks>
 public class ManifestContractTests
 {
@@ -41,14 +41,14 @@ public class ManifestContractTests
         }
         """;
 
-    private static MetadataReference KeryxNetStandard { get; } = MetadataReference.CreateFromFile(
+    internal static MetadataReference KeryxNetStandard { get; } = MetadataReference.CreateFromFile(
         typeof(ManifestContractTests).Assembly
                                      .GetCustomAttributes<AssemblyMetadataAttribute>()
                                      .Single(static a => a.Key == "KeryxNetStandardAssembly")
                                      .Value!
     );
 
-    private static MetadataReference[] FrameworkReferences { get; } =
+    internal static MetadataReference[] FrameworkReferences { get; } =
         [.. new[] { "System.Private.CoreLib.dll", "System.Runtime.dll", "netstandard.dll" }
            .Select(static name => MetadataReference.CreateFromFile(
                         Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, name)

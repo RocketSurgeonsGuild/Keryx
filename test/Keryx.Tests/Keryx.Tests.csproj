@@ -4,9 +4,11 @@
         <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     </PropertyGroup>
     <ItemGroup>
-        <!-- Referenced as an assembly so tests drive the generator in-process; Keryx itself for the types generated code uses. -->
+        <!--
+            Referenced as an assembly so tests drive the generators, analyzers and code fixes in-process; Keryx itself for the types
+            generated code uses.
+        -->
         <ProjectReference Include="..\..\src\Keryx.Analyzers\Keryx.Analyzers.csproj" />
-        <ProjectReference Include="..\..\src\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" />
         <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
         <!--
             The netstandard2.0 Keryx.dll, built but not referenced: ManifestContractTests compile generated-style code against it, as a

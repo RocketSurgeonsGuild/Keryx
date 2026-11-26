@@ -4,7 +4,9 @@ Nov 25, 2026 · @David
 
 ## Status and decision
 
-**Status:** Accepted, 2026-11-25; amended 2026-11-26 (verification fixes and the decisions recorded in open-questions.md). This replaces the draft "Source-generated mediator library" ADR (working title "Mediator"). Every
+**Status:** Accepted, 2026-11-25; amended 2026-11-26 (verification fixes and the decisions recorded in open-questions.md, including
+the `I…PipelineBehavior` interface names, the generic `RunsAfter<T>`/`RunsBefore<T>` forms, one analyzer assembly with the code fixes
+in it, and the C# 11 floor). This replaces the draft "Source-generated mediator library" ADR (working title "Mediator"). Every
 placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
 **Decision:** Build a .NET mediator named **Keryx**. Handlers are plain `private static` methods on `partial` classes. A Roslyn
@@ -34,16 +36,20 @@ under Behaviors.
 
 One NuGet package, **`Keryx`**, contains:
 
-| Assembly                                                | TFM                              | Contents                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Keryx.dll` (`lib/`)                                    | `netstandard2.0;net10.0;net11.0` | All public types: interfaces, attributes, `Unit`, `Phase`, exceptions, runtime helpers. `IsAotCompatible` on net10+.                                                                                                                                                                                  |
-| `Keryx.Analyzers.dll` (`analyzers/dotnet/cs`)           | `netstandard2.0`                 | Incremental generators (`HandlerGenerator`, `HostGenerator`) and `DiagnosticAnalyzer`s. References `Microsoft.CodeAnalysis.CSharp` and `System.Text.Json` (shipped beside it); `Specular.Scanning.Sources` is compiled in as source (`PrivateAssets=all`). No reference to `Keryx.dll` or Workspaces. |
-| `Keryx.Analyzers.CodeFixes.dll` (`analyzers/dotnet/cs`) | `netstandard2.0`                 | `CodeFixProvider`s. References `Microsoft.CodeAnalysis.CSharp.Workspaces`.                                                                                                                                                                                                                            |
-| `System.Text.Json.dll` (`analyzers/dotnet/cs`)          | `netstandard2.0`                 | Needed at analyzer run time by `Specular.Scanning.Sources` and by the ScanCache JSON context.                                                                                                                                                                                                         |
+| Assembly                                       | TFM                              | Contents                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Keryx.dll` (`lib/`)                           | `netstandard2.0;net10.0;net11.0` | All public types: interfaces, attributes, `Unit`, `Phase`, exceptions, runtime helpers. `IsAotCompatible` on net10+.                                                                                                                                                                                                                                                      |
+| `Keryx.Analyzers.dll` (`analyzers/dotnet/cs`)  | `netstandard2.0`                 | Incremental generators (`HandlerGenerator`, `HostGenerator`), `DiagnosticAnalyzer`s and `CodeFixProvider`s. References `Microsoft.CodeAnalysis.CSharp`, `Microsoft.CodeAnalysis.CSharp.Workspaces` (code fixes only) and `System.Text.Json` (shipped beside it); `Specular.Scanning.Sources` is compiled in as source (`PrivateAssets=all`). No reference to `Keryx.dll`. |
+| `System.Text.Json.dll` (`analyzers/dotnet/cs`) | `netstandard2.0`                 | Needed at analyzer run time by `Specular.Scanning.Sources` and by the ScanCache JSON context.                                                                                                                                                                                                                                                                             |
 
-- Code fixes live in their own assembly because an assembly that contains an analyzer or generator and references Workspaces triggers
-  RS1038, and warnings are errors.
-- The analyzer assemblies have **no assembly reference** to `Keryx.dll`. They identify Keryx types by metadata name through one internal
+- The code fixes live in `Keryx.Analyzers.dll` with the generators and analyzers (decided 2026-11-26). An assembly that contains an
+  analyzer or generator and references Workspaces triggers RS1038; `Keryx.Analyzers.csproj` suppresses it in `NoWarn`, with a comment
+  giving the reason. The risk RS1038 guards against is real: the command-line compiler does not ship
+  `Microsoft.CodeAnalysis.Workspaces`, and only the IDE instantiates a `CodeFixProvider`. So code-fix types (the `CodeFixes` folder) are
+  never touched from a generator or analyzer code path: no shared static state, no shared base types, no signatures that mention a
+  Workspaces type. Code fixes may use generator and analyzer types, never the reverse. Breaking the rule fails only on the command line,
+  with a `FileNotFoundException` for the Workspaces assembly.
+- `Keryx.Analyzers.dll` has **no assembly reference** to `Keryx.dll`. It identifies Keryx types by metadata name through one internal
   `KnownTypeNames` constants class (for example `"Keryx.IRequest`1"`). A test compiles against the real `Keryx.dll`and checks that every
   entry resolves with`Compilation.GetTypeByMetadataName`.
 - Every project that references the `Keryx` package runs the generator, including contracts projects. Contracts projects opt out of
@@ -51,8 +57,14 @@ One NuGet package, **`Keryx`**, contains:
 - Analyzers do not flow through a `ProjectReference` (NuGet's default `PrivateAssets` includes `analyzers`). Every project that declares
   requests or handlers, and every host, must reference `Keryx` directly. The host warns (KRX033) about a reference that uses Keryx types
   but carries no manifest.
-- The analyzer projects compile against `Microsoft.CodeAnalysis.CSharp` 5.0.0. Consumers need the .NET 10 SDK (Roslyn 5.0) or newer,
-  whatever TFM they target. `Specular.Scanning.Sources` sets the same floor and requires C# 14 in the generator project.
+- The analyzer project compiles against `Microsoft.CodeAnalysis.CSharp` and `Microsoft.CodeAnalysis.CSharp.Workspaces` 5.0.0. Consumers
+  need the .NET 10 SDK (Roslyn 5.0) or newer, whatever TFM they target. `Specular.Scanning.Sources` sets the same floor and requires
+  C# 14 in the generator project.
+- Every project that references Keryx compiles with **C# 11 or later**: generated code and `[BehaviorOrder(..., Order = n)]` set `init`
+  properties (C# 9), and `[RunsAfter<T>]`/`[RunsBefore<T>]` are generic attributes (C# 11). The package's `build/Keryx.props` sets
+  `LangVersion` to `latest` when the project leaves it empty (a `netstandard2.0` project would otherwise get C# 7.3), the same way
+  `Specular.Scanning.Sources` defaults its own. A `LangVersion` the project or its `Directory.Build.props` sets still wins; one below
+  C# 11 is error KRX022, and the generators emit nothing in that project.
 - On `netstandard2.0`, `Keryx.dll` depends on `Microsoft.Bcl.AsyncInterfaces` and `System.Threading.Tasks.Extensions`.
 
 ### Which projects may target what
@@ -79,8 +91,8 @@ Indago-era branch:
 - Build: `build/Build.cs` file-based ModularPipelines app run with `mise run build`. Tooling in `.config/mise.toml`, git hooks in
   `.config/hk.pkl`. Hand-written GitHub workflows.
 - Folders: `src/`, `test/`, `samples/` (singular `test`), each with its own `Directory.Build.props`/`.targets`.
-- Projects: `src/Keryx`, `src/Keryx.Analyzers`, `src/Keryx.Analyzers.CodeFixes`, `test/Keryx.Tests`, `test/Keryx.Benchmarks`,
-  `samples/hosts/*`, `samples/libraries/*`.
+- Projects: `src/Keryx`, `src/Keryx.Analyzers` (generators, analyzers and, in its `CodeFixes` folder, code fixes), `test/Keryx.Tests`,
+  `test/Keryx.Benchmarks`, `samples/hosts/*`, `samples/libraries/*`.
 - Tests: TUnit on Microsoft.Testing.Platform, `TUnit.Assertions.Should`, `Verify.TUnit` snapshots in `snapshots/`,
   `Rocket.Surgery.Extensions.Testing.SourceGenerators` for generator, analyzer and code-fix tests.
 - The analyzer project has `AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` from the start (RS2008).
@@ -277,7 +289,7 @@ Keyed services require `Microsoft.Extensions.DependencyInjection.Abstractions` 8
 
 ## Diagnostics and code fixes
 
-`Keryx.Analyzers` contains two generators and a set of analyzers:
+`Keryx.Analyzers` contains two generators, a set of analyzers and the code fixes:
 
 - **`HandlerGenerator`** runs in every project. It emits handler partials and the manifest. It **never** reports diagnostics; it silently
   skips malformed handlers.
@@ -286,6 +298,7 @@ Keyed services require `Microsoft.Extensions.DependencyInjection.Abstractions` 8
   `LocationInfo` (file path, `TextSpan`, `LinePositionSpan`), turned back into a `Location` with `Location.Create` when reporting. Host
   diagnostics are reported at the source location when the symbol is in source, otherwise on the `[assembly: KeryxHost]` attribute.
 - **`DiagnosticAnalyzer`s** report every per-assembly rule.
+- **`CodeFixProvider`s** (the `CodeFixes` folder) offer the code fixes below. Only the IDE loads them (see Package and assemblies).
 
 KRX001, same-assembly KRX005 and in-source KRX008 need the whole compilation. Their descriptors carry
 `WellKnownDiagnosticTags.CompilationEnd` and are reported from `RegisterCompilationStartAction`/`RegisterCompilationEndAction` (RS1037).
@@ -295,40 +308,41 @@ compilation-end diagnostics enabled.
 Every ID has a help link. IDs are grouped: KRX001–KRX029 per-assembly rules (KRX005, KRX008 and KRX009 are also checked by the host across
 assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placement rules.
 
-| ID     | Severity             | Reported by                         | Condition                                                                                                                                                                                                                                                                                                                           |
-| ------ | -------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| KRX001 | Error                | analyzer                            | A request or stream request type has no handler in its assembly. Not reported in assemblies marked `[assembly: KeryxContracts]`, and not reported in a host (`[assembly: KeryxHost]`), where KRX030 covers the host's own request types and every referenced one.                                                                   |
-| KRX002 | Error                | analyzer                            | Handler candidate is not `private static`, or has a return type not allowed for its request kind.                                                                                                                                                                                                                                   |
-| KRX003 | Error                | analyzer                            | Handler candidate has no request/notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract request or an interface.                                                                                                                                                                         |
-| KRX004 | Error                | analyzer                            | Handler class or a containing type is not `partial`, is not `public` outside a host, or is a struct / record struct.                                                                                                                                                                                                                |
-| KRX005 | Error                | analyzer, host                      | Two handlers exist for the same request type (same assembly: analyzer; across assemblies: host, naming both handlers and assemblies).                                                                                                                                                                                               |
-| KRX006 | Error                | analyzer                            | A class directly contains more than one handler method.                                                                                                                                                                                                                                                                             |
-| KRX007 | Error                | analyzer                            | Handler class declares an instance constructor or a record primary constructor, or has injected parameters and a base type without an accessible parameterless instance constructor.                                                                                                                                                |
-| KRX008 | Error                | host (analyzer for in-source pairs) | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order. Checked once per behavior pair.                                                                                                                                                                                                              |
-| KRX009 | Error                | analyzer, host                      | A behavior attached by attribute to a method or notification type does not fit its target: wrong behavior kind, or constraints not satisfied.                                                                                                                                                                                       |
-| KRX010 | —                    | —                                   | Retired (was "request is not sealed"; dispatch is by exact type, so sealing does not matter).                                                                                                                                                                                                                                       |
-| KRX011 | Error                | analyzer                            | A type implements more than one closing of `IRequest<>`/`IStreamRequest<>`, both kinds, or a request interface and `INotification`.                                                                                                                                                                                                 |
-| KRX012 | Error                | analyzer                            | A request, stream request or notification type has type parameters, is nested in a generic type, or is a `ref struct`; or a handler class has type parameters.                                                                                                                                                                      |
-| KRX013 | Error                | analyzer                            | Handler parameter is `ref`, `in`, `out` or `params`, or there is more than one `CancellationToken`.                                                                                                                                                                                                                                 |
-| KRX014 | Error                | analyzer                            | `static` handler class has injected parameters.                                                                                                                                                                                                                                                                                     |
-| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member.                                                                                                                                                                                                                                                         |
-| KRX016 | Error                | analyzer                            | Outside a host, a request, response (including generic arguments), notification or behavior type that a pipeline needs is not effectively public.                                                                                                                                                                                   |
-| KRX017 | Warning              | analyzer                            | Handler response type differs from the request's `TResponse` only in nullability.                                                                                                                                                                                                                                                   |
-| KRX018 | Error                | analyzer                            | `[FromKeyedServices]` key is not a compile-time constant, or uses the parameterless form.                                                                                                                                                                                                                                           |
-| KRX019 | Error                | analyzer                            | Behavior class has an unsupported shape (see Behavior shapes), implements more than one Keryx behavior interface closing, is `abstract`, or implements a behavior interface method with a `virtual`, `abstract` or `override` method.                                                                                               |
-| KRX020 | Error                | analyzer                            | Behavior class does not have exactly one public constructor.                                                                                                                                                                                                                                                                        |
-| KRX021 | Info                 | analyzer                            | Struct request is boxed when sent through `ISender`; only the host's typed overload avoids it.                                                                                                                                                                                                                                      |
-| KRX030 | Error (configurable) | host                                | A request or stream request type has no handler anywhere in the composed set. Covers the host's own request types (from its syntax pipeline) and request types in referenced assemblies (from the scan), except types declared in an assembly that is itself a host (see Host control). Severity can be changed in `.editorconfig`. |
-| KRX031 | Error                | host                                | A `[KeryxHost]` project targets a framework older than `net10.0`.                                                                                                                                                                                                                                                                   |
-| KRX032 | Error                | host                                | A referenced assembly's manifest has a newer `FormatVersion` than this Keryx understands. The message says to upgrade Keryx in this project.                                                                                                                                                                                        |
-| KRX033 | Warning              | host                                | A referenced assembly references Keryx but has no `[assembly: KeryxManifest]` (the generator did not run there).                                                                                                                                                                                                                    |
-| KRX034 | Error                | host                                | A type named in a manifest cannot be resolved or is not accessible from the host (missing reference). The message names the assembly to reference.                                                                                                                                                                                  |
-| KRX035 | Info                 | host                                | Lists every global behavior applied in this host and the assembly it came from.                                                                                                                                                                                                                                                     |
-| KRX036 | Warning              | host                                | `ExcludeHandler`/`ExcludeBehavior` names a type that is not part of any pipeline.                                                                                                                                                                                                                                                   |
-| KRX037 | Info                 | host                                | A struct notification is delivered to a handler typed as a base interface or `INotification`, so it is boxed once per `Publish` (see Notifications).                                                                                                                                                                                |
-| KRX040 | Warning              | analyzer                            | `[HandlerOrder]` on a method that is not a notification handler.                                                                                                                                                                                                                                                                    |
-| KRX041 | Warning              | analyzer                            | `[PublishStrategy]` on a type that is not a notification.                                                                                                                                                                                                                                                                           |
-| KRX042 | Warning              | analyzer                            | `[Behavior]` on a class or struct that is not a notification type, or on a method that is not a handler candidate; or `[GlobalBehavior]` on a type that does not implement exactly one Keryx behavior interface closing.                                                                                                            |
+| ID     | Severity             | Reported by                         | Condition                                                                                                                                                                                                                                                                                                                               |
+| ------ | -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| KRX001 | Error                | analyzer                            | A request or stream request type has no handler in its assembly. Not reported in assemblies marked `[assembly: KeryxContracts]`, and not reported in a host (`[assembly: KeryxHost]`), where KRX030 covers the host's own request types and every referenced one.                                                                       |
+| KRX002 | Error                | analyzer                            | Handler candidate is not `private static`, or has a return type not allowed for its request kind.                                                                                                                                                                                                                                       |
+| KRX003 | Error                | analyzer                            | Handler candidate has no request/notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract request or an interface.                                                                                                                                                                             |
+| KRX004 | Error                | analyzer                            | Handler class or a containing type is not `partial`, is not `public` outside a host, or is a struct / record struct.                                                                                                                                                                                                                    |
+| KRX005 | Error                | analyzer, host                      | Two handlers exist for the same request type (same assembly: analyzer; across assemblies: host, naming both handlers and assemblies).                                                                                                                                                                                                   |
+| KRX006 | Error                | analyzer                            | A class directly contains more than one handler method.                                                                                                                                                                                                                                                                                 |
+| KRX007 | Error                | analyzer                            | Handler class declares an instance constructor or a record primary constructor, or has injected parameters and a base type without an accessible parameterless instance constructor.                                                                                                                                                    |
+| KRX008 | Error                | host (analyzer for in-source pairs) | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order. Checked once per behavior pair.                                                                                                                                                                                                                  |
+| KRX009 | Error                | analyzer, host                      | A behavior attached by attribute to a method or notification type does not fit its target: wrong behavior kind, or constraints not satisfied.                                                                                                                                                                                           |
+| KRX010 | —                    | —                                   | Retired (was "request is not sealed"; dispatch is by exact type, so sealing does not matter).                                                                                                                                                                                                                                           |
+| KRX011 | Error                | analyzer                            | A type implements more than one closing of `IRequest<>`/`IStreamRequest<>`, both kinds, or a request interface and `INotification`.                                                                                                                                                                                                     |
+| KRX012 | Error                | analyzer                            | A request, stream request or notification type has type parameters, is nested in a generic type, or is a `ref struct`; or a handler class has type parameters.                                                                                                                                                                          |
+| KRX013 | Error                | analyzer                            | Handler parameter is `ref`, `in`, `out` or `params`, or there is more than one `CancellationToken`.                                                                                                                                                                                                                                     |
+| KRX014 | Error                | analyzer                            | `static` handler class has injected parameters.                                                                                                                                                                                                                                                                                         |
+| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member.                                                                                                                                                                                                                                                             |
+| KRX016 | Error                | analyzer                            | Outside a host, a request, response (including generic arguments), notification or behavior type that a pipeline needs is not effectively public.                                                                                                                                                                                       |
+| KRX017 | Warning              | analyzer                            | Handler response type differs from the request's `TResponse` only in nullability.                                                                                                                                                                                                                                                       |
+| KRX018 | Error                | analyzer                            | `[FromKeyedServices]` key is not a compile-time constant, or uses the parameterless form.                                                                                                                                                                                                                                               |
+| KRX019 | Error                | analyzer                            | Behavior class has an unsupported shape (see Behavior shapes), implements more than one Keryx behavior interface closing, is `abstract`, or implements a behavior interface method with a `virtual`, `abstract` or `override` method.                                                                                                   |
+| KRX020 | Error                | analyzer                            | Behavior class does not have exactly one public constructor.                                                                                                                                                                                                                                                                            |
+| KRX021 | Info                 | analyzer                            | Struct request is boxed when sent through `ISender`; only the host's typed overload avoids it.                                                                                                                                                                                                                                          |
+| KRX022 | Error                | analyzer                            | The project compiles with a C# language version below 11 (Keryx needs C# 11 or later; see Package and assemblies). Reported once per compilation, in every project that references Keryx; the generators emit nothing there. Fix: remove the `LangVersion` setting (the package then defaults it to `latest`) or set it to 11 or later. |
+| KRX030 | Error (configurable) | host                                | A request or stream request type has no handler anywhere in the composed set. Covers the host's own request types (from its syntax pipeline) and request types in referenced assemblies (from the scan), except types declared in an assembly that is itself a host (see Host control). Severity can be changed in `.editorconfig`.     |
+| KRX031 | Error                | host                                | A `[KeryxHost]` project targets a framework older than `net10.0`.                                                                                                                                                                                                                                                                       |
+| KRX032 | Error                | host                                | A referenced assembly's manifest has a newer `FormatVersion` than this Keryx understands. The message says to upgrade Keryx in this project.                                                                                                                                                                                            |
+| KRX033 | Warning              | host                                | A referenced assembly references Keryx but has no `[assembly: KeryxManifest]` (the generator did not run there).                                                                                                                                                                                                                        |
+| KRX034 | Error                | host                                | A type named in a manifest cannot be resolved or is not accessible from the host (missing reference). The message names the assembly to reference.                                                                                                                                                                                      |
+| KRX035 | Info                 | host                                | Lists every global behavior applied in this host and the assembly it came from.                                                                                                                                                                                                                                                         |
+| KRX036 | Warning              | host                                | `ExcludeHandler`/`ExcludeBehavior` names a type that is not part of any pipeline.                                                                                                                                                                                                                                                       |
+| KRX037 | Info                 | host                                | A struct notification is delivered to a handler typed as a base interface or `INotification`, so it is boxed once per `Publish` (see Notifications).                                                                                                                                                                                    |
+| KRX040 | Warning              | analyzer                            | `[HandlerOrder]` on a method that is not a notification handler.                                                                                                                                                                                                                                                                        |
+| KRX041 | Warning              | analyzer                            | `[PublishStrategy]` on a type that is not a notification.                                                                                                                                                                                                                                                                               |
+| KRX042 | Warning              | analyzer                            | `[Behavior]` on a class or struct that is not a notification type, or on a method that is not a handler candidate; or `[GlobalBehavior]` on a type that does not implement exactly one Keryx behavior interface closing.                                                                                                                |
 
 **Code fixes**
 
@@ -358,14 +372,14 @@ public interface INext
     ValueTask InvokeAsync(CancellationToken cancellationToken);
 }
 
-public interface IPipelineBehavior<TRequest, TResponse>
+public interface IRequestPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
     ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
         where TNext : struct, INext<TResponse>;
 }
 
-public interface IStreamBehavior<TRequest, TItem>
+public interface IStreamPipelineBehavior<TRequest, TItem>
     where TRequest : IStreamRequest<TItem>
 {
     ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken);
@@ -374,14 +388,14 @@ public interface IStreamBehavior<TRequest, TItem>
     ValueTask OnErrorAsync(TRequest request, Exception exception); // observe only; the exception is rethrown
 }
 
-public interface IStreamWrapBehavior<TRequest, TItem>
+public interface IStreamWrapPipelineBehavior<TRequest, TItem>
     where TRequest : IStreamRequest<TItem>
 {
     IAsyncEnumerable<TItem> Handle(TRequest request, IAsyncEnumerable<TItem> next, CancellationToken cancellationToken);
 }
 
 // Wraps one whole Publish call.
-public interface INotificationBehavior<TNotification>
+public interface INotificationPipelineBehavior<TNotification>
     where TNotification : INotification
 {
     ValueTask Handle<TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
@@ -389,7 +403,7 @@ public interface INotificationBehavior<TNotification>
 }
 
 // Wraps each notification handler call separately.
-public interface INotificationHandlerBehavior<TNotification>
+public interface INotificationHandlerPipelineBehavior<TNotification>
     where TNotification : INotification
 {
     ValueTask Handle<TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
@@ -407,11 +421,11 @@ and is KRX019.
 A behavior class implements exactly one Keryx behavior interface closing, and is either:
 
 - **open** with the same arity as the interface, its type parameters mapped positionally to the interface's
-  (`AuditBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>`,
-  `LogEvents<TNotification> : INotificationBehavior<TNotification>`); or
-- **closed and non-generic** (`AuditCreate : IPipelineBehavior<CreateOrder.Command, Guid>`).
+  (`AuditBehavior<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>`,
+  `LogEvents<TNotification> : INotificationPipelineBehavior<TNotification>`); or
+- **closed and non-generic** (`AuditCreate : IRequestPipelineBehavior<CreateOrder.Command, Guid>`).
 
-Anything else (swapped parameters, partially open shapes such as `X<T> : IPipelineBehavior<TReq, Result<T>>`, several closings) is
+Anything else (swapped parameters, partially open shapes such as `X<T> : IRequestPipelineBehavior<TReq, Result<T>>`, several closings) is
 KRX019. Full type-parameter unification is future work.
 
 Each behavior has exactly one public constructor (KRX020). Its parameters are resolved with the same rules as handler parameters.
@@ -500,8 +514,21 @@ public sealed class BehaviorOrderAttribute(Phase phase) : Attribute
 public sealed class RunsAfterAttribute(Type behaviorType) : Attribute { public Type BehaviorType { get; } = behaviorType; }
 
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public sealed class RunsAfterAttribute<TBehavior> : Attribute { public Type BehaviorType => typeof(TBehavior); }
+
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class RunsBeforeAttribute(Type behaviorType) : Attribute { public Type BehaviorType { get; } = behaviorType; }
+
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public sealed class RunsBeforeAttribute<TBehavior> : Attribute { public Type BehaviorType => typeof(TBehavior); }
 ```
+
+`[RunsAfter<X>]` means exactly `[RunsAfter(typeof(X))]`, and `[RunsBefore<X>]` exactly `[RunsBefore(typeof(X))]`. The generator treats
+both forms identically: it reads the behavior from the constructor argument of the `typeof` form and from the attribute class's type
+argument of the generic form (`KnownTypeNames.RunsAfterAttribute`/`RunsAfterAttributeOfT`, and the same for `RunsBefore`), and from there
+on an edge is an edge, whichever form declared it; mixing forms on one class is fine. C# does not allow an unbound generic type as a type
+argument (`[RunsAfter<X<>>]` is CS7003), so the generic form names only closed or non-generic behaviors. An open behavior is named with
+`typeof(X<,>)`. The generic form needs C# 11, which is the Keryx floor anyway (KRX022).
 
 Position belongs to the behavior class. Attachment sites cannot override phase or order in v1. Users can pick values between phases,
 such as `(Phase)250`.
@@ -514,7 +541,8 @@ such as `(Phase)250`.
 4. Any remaining tie is broken by ordinal fully qualified type name.
 
 `RunsAfter`/`RunsBefore` are also checked against every (phase, order) bucket: an edge that agrees with phase and order is a no-op; an
-edge that contradicts them is KRX008; a cycle is KRX008. An open `typeof(X<,>)` matches every closing of `X`. An edge to a behavior that is
+edge that contradicts them is KRX008; a cycle is KRX008. An open `typeof(X<,>)` matches every closing of `X`; a closed one, in either form,
+matches only that closing. An edge to a behavior that is
 absent from a given pipeline is ignored. Contradictions are checked once per behavior pair, not once per pipeline.
 
 ## Streaming
@@ -523,7 +551,7 @@ A stream request implements `IStreamRequest<TItem>`. Its handler follows the nor
 
 **No stream behaviors:** `Stream` returns the handler's enumerable as is. No extra allocation.
 
-**Fused stream behaviors.** All `IStreamBehavior` hooks of a pipeline are fused into one generated async iterator:
+**Fused stream behaviors.** All `IStreamPipelineBehavior` hooks of a pipeline are fused into one generated async iterator:
 
 - `OnStartAsync` runs outer → inner, lazily on the first `MoveNextAsync`, not when `Stream()` is called.
 - Items travel outward from the handler: `OnItem` runs inner → outer. Returning `false` drops the item, and outer hooks do not see it.
@@ -538,9 +566,9 @@ A stream request implements `IStreamRequest<TItem>`. Its handler follows the nor
   `WithCancellation` token only when both can be cancelled and differ; that link allocates one `CancellationTokenSource` (a documented
   exception in the Performance contract).
 
-**`IStreamWrapBehavior`** receives and returns the whole `IAsyncEnumerable<TItem>`. It splits fusion at its position: hooks inside it are
-fused into one segment, hooks outside it into another. It costs whatever its own enumerable allocates plus, when hooks sit on both sides
-of it, one more fused segment iterator.
+**`IStreamWrapPipelineBehavior`** receives and returns the whole `IAsyncEnumerable<TItem>`. It splits fusion at its position: hooks inside
+it are fused into one segment, hooks outside it into another. It costs whatever its own enumerable allocates plus, when hooks sit on both
+sides of it, one more fused segment iterator.
 
 Null and unknown stream requests are validated synchronously in a non-iterator wrapper before the iterator is returned.
 
@@ -554,8 +582,8 @@ for how this avoids boxing struct notifications).
 **Handlers.** Same rules as request handlers, returning `ValueTask` or `Task`. Any number of handlers per notification, across
 assemblies. Zero handlers is valid.
 
-**Zero handlers.** For a notification type the host knows, the per-publish pipeline (`INotificationBehavior`s) still runs when there are
-no handlers, so logging and outbox behaviors see every publish. `Publish` completes immediately only when the type has neither handlers
+**Zero handlers.** For a notification type the host knows, the per-publish pipeline (`INotificationPipelineBehavior`s) still runs when there
+are no handlers, so logging and outbox behaviors see every publish. `Publish` completes immediately only when the type has neither handlers
 nor per-publish behaviors, or when the runtime type is unknown to the host.
 
 **Polymorphic handlers.** A handler whose parameter is a base class or interface (`Handle(IDomainEvent e)`), or `INotification` itself
@@ -586,10 +614,10 @@ token, so each can observe it. An `OperationCanceledException` thrown by a handl
 
 **Behaviors.**
 
-- `INotificationHandlerBehavior<T>` wraps each handler call. Attached per handler method, per assembly (the handler's assembly) or
-  globally.
-- `INotificationBehavior<T>` wraps the whole `Publish` call, including all handlers and the strategy. Attached on the notification type,
-  per assembly (the notification type's assembly) or globally.
+- `INotificationHandlerPipelineBehavior<T>` wraps each handler call. Attached per handler method, per assembly (the handler's assembly)
+  or globally.
+- `INotificationPipelineBehavior<T>` wraps the whole `Publish` call, including all handlers and the strategy. Attached on the
+  notification type, per assembly (the notification type's assembly) or globally.
 - Both use phases, order, constraints and exclusion exactly like request behaviors.
 - `TNotification` is always the **concrete published type**, also for a polymorphic handler. Constraints are checked against it.
 - Under the parallel strategy each handler's per-handler pipeline runs concurrently; failures go into the `AggregateException`.
@@ -708,9 +736,9 @@ public sealed class KeryxManifestAttribute : Attribute
 }
 ```
 
-- Global behaviors need no extra attribute: `[GlobalBehavior]`, `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` are already on the public
-  behavior class. Per-publish behaviors attached to a notification type are on the public notification type. Assembly-level `[Behavior]`
-  attributes are read from the assembly.
+- Global behaviors need no extra attribute: `[GlobalBehavior]`, `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` (either form) are already on
+  the public behavior class. Per-publish behaviors attached to a notification type are on the public notification type. Assembly-level
+  `[Behavior]` attributes are read from the assembly.
 - Response type, constructor parameters and keyed-service keys are derived from the public request, handler and behavior types; they are
   not duplicated in the attribute.
 - Host-internal handlers are not described by a manifest.
@@ -774,7 +802,8 @@ assemblies strip private members). That is why the generator copies everything t
 | `[Behavior(Type)]`                                 | method (handler), class/struct (notification), assembly; multiple | Attaches a behavior. Elsewhere it is KRX042.                                                                    |
 | `[GlobalBehavior]`                                 | class (behavior)                                                  | Applies the behavior to every matching target in every host that references it. On a non-behavior it is KRX042. |
 | `[BehaviorOrder(Phase) { Order }]`                 | class                                                             | Behavior position.                                                                                              |
-| `[RunsAfter(Type)]`, `[RunsBefore(Type)]`          | class; multiple                                                   | Relative order inside a (phase, order) bucket.                                                                  |
+| `[RunsAfter(Type)]`, `[RunsBefore(Type)]`          | class; multiple                                                   | Relative order inside a (phase, order) bucket. `typeof` form: open or closed behaviors.                         |
+| `[RunsAfter<T>]`, `[RunsBefore<T>]`                | class; multiple                                                   | Same as the `typeof` form, for closed or non-generic behaviors only.                                            |
 | `[assembly: ExcludeBehavior(Type)]`                | assembly; multiple                                                | Host removes a behavior from all pipelines.                                                                     |
 | `[assembly: ExcludeHandler(Type)]`                 | assembly; multiple                                                | Host ignores a referenced handler class.                                                                        |
 | `[PublishStrategy(PublishStrategy)]`               | class/struct (notification)                                       | Sequential (default) or parallel publish.                                                                       |
@@ -812,8 +841,8 @@ These replace the draft's "minimal allocations" and the handoff's "must not allo
   uses `PoolingAsyncValueTaskMethodBuilder` on net10+ and must add 0 bytes in steady state; a benchmark checks it. Typed `IRequest`
   overloads return `ValueTask<Unit>`, so they add no second adapter.
 - **Stream:** 0 extra allocations with no stream behaviors. With stream behaviors, per `Stream` call: one iterator object per fused hook
-  segment (one segment when there is no `IStreamWrapBehavior`), plus whatever each `IStreamWrapBehavior`'s own enumerable allocates.
-  Documented exception: one linked `CancellationTokenSource` when the `Stream()` token and the `WithCancellation` token are both
+  segment (one segment when there is no `IStreamWrapPipelineBehavior`), plus whatever each `IStreamWrapPipelineBehavior`'s own enumerable
+  allocates. Documented exception: one linked `CancellationTokenSource` when the `Stream()` token and the `WithCancellation` token are both
   cancellable and differ. 0 per item.
 - **Publish:** 0 extra allocations for a sequential publish with synchronously completing handlers. Parallel: 0 B when every handler
   pipeline completes synchronously; otherwise one array plus one `AsTask()` per pending `ValueTask`, plus what `Task.WhenAll` allocates.
@@ -865,8 +894,8 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   across assemblies.
 - **Delegate-chain pipeline:** rejected because it allocates per call.
 - **Nested link structs** (each link embeds the next): rejected; struct copying grows with depth. Flat links instead.
-- **Behaviors resolved through `IPipelineBehavior<,>` with open-generic DI registration:** rejected; generic virtual dispatch per link and
-  not AOT-safe for value-type responses.
+- **Behaviors resolved through `IRequestPipelineBehavior<,>` with open-generic DI registration:** rejected; generic virtual dispatch per
+  link and not AOT-safe for value-type responses.
 - **Polymorphic request dispatch:** rejected; exact-type dispatch is simpler and as fast whether or not a request is sealed.
 - **Integer `Order` only:** rejected because numbers collide across method, assembly and global scopes.
 - **Open set of user-defined phases:** rejected for v1. A fixed enum with gaps keeps ordering globally consistent.
@@ -874,7 +903,15 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   and type names round-trip poorly. Type-level attributes bind `typeof` arguments directly.
 - **Specular ScanCache as the manifest itself:** rejected as the _source_. The cache lives in the host's `obj/` and cannot be written by a
   library about itself. It is used as the host-side cache of the attribute-derived manifest.
-- **One analyzer + generator + code-fix assembly:** rejected (RS1038).
+- **A separate `Keryx.Analyzers.CodeFixes` assembly for the code fixes:** the original choice, to keep RS1038 quiet. Replaced on
+  2026-11-26 by one analyzer assembly that holds the code fixes too; RS1038 is suppressed and the rule in Package and assemblies keeps
+  code-fix types off every command-line code path.
+- **MediatR-style interface names (`IPipelineBehavior`, `INotificationBehavior`, `IStreamBehavior`, ...):** used until 2026-11-26, then
+  renamed to one pattern, `I{Kind}PipelineBehavior` (`IRequestPipelineBehavior`, `INotificationPipelineBehavior`,
+  `INotificationHandlerPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamWrapPipelineBehavior`), so every behavior interface follows
+  the same pattern and names the pipeline it belongs to.
+- **`set` instead of `init` on attribute properties, to lower the language floor to C# 8:** rejected 2026-11-26 (open-questions OQ-20).
+  The generic ordering attributes need C# 11 regardless, and `build/Keryx.props` defaults `LangVersion` to `latest`.
 - **Separate `Keryx.Abstractions` package:** rejected in favor of one `Keryx` package; contracts projects use `[assembly: KeryxContracts]`.
 
 ## Consequences
@@ -886,6 +923,9 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - Pipelines produce more generated code, and generic struct specialization adds code size.
 - Most mistakes surface as compile errors rather than runtime failures.
 - Keryx depends on a prerelease of `Specular.Scanning.Sources` (0.4.3-beta.2) and requires the .NET 10 SDK.
+- Every project that references Keryx compiles with C# 11 or later (KRX022); the package defaults `LangVersion` to `latest`.
+- The code fixes share an assembly with the generators, so a code-fix type reached from a generator or analyzer path breaks command-line
+  builds; the rule in Package and assemblies, not a compiler check, prevents it.
 - The generator is the bulk of the work: discovery, manifest reading, ordering and constraint evaluation need thorough tests.
 
 ## Answered open questions

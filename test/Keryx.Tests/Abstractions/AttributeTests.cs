@@ -17,6 +17,8 @@ public class AttributeTests
     [Arguments(typeof(BehaviorOrderAttribute), AttributeTargets.Class, false)]
     [Arguments(typeof(RunsAfterAttribute), AttributeTargets.Class, true)]
     [Arguments(typeof(RunsBeforeAttribute), AttributeTargets.Class, true)]
+    [Arguments(typeof(RunsAfterAttribute<>), AttributeTargets.Class, true)]
+    [Arguments(typeof(RunsBeforeAttribute<>), AttributeTargets.Class, true)]
     [Arguments(typeof(ExcludeBehaviorAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(ExcludeHandlerAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(PublishStrategyAttribute), AttributeTargets.Class | AttributeTargets.Struct, false)]
@@ -59,7 +61,9 @@ public class AttributeTests
                              "KeryxManifestAttribute",
                              "PublishStrategyAttribute",
                              "RunsAfterAttribute",
+                             "RunsAfterAttribute`1",
                              "RunsBeforeAttribute",
+                             "RunsBeforeAttribute`1",
                          ]
                      );
     }
@@ -81,6 +85,8 @@ public class AttributeTests
     {
         await Assert.That(new RunsAfterAttribute(typeof(List<>)).BehaviorType).IsEqualTo(typeof(List<>));
         await Assert.That(new RunsBeforeAttribute(typeof(string)).BehaviorType).IsEqualTo(typeof(string));
+        await Assert.That(new RunsAfterAttribute<List<int>>().BehaviorType).IsEqualTo(typeof(List<int>));
+        await Assert.That(new RunsBeforeAttribute<string>().BehaviorType).IsEqualTo(typeof(string));
         await Assert.That(new BehaviorAttribute(typeof(Dictionary<,>)).BehaviorType).IsEqualTo(typeof(Dictionary<,>));
         await Assert.That(new ExcludeBehaviorAttribute(typeof(int)).BehaviorType).IsEqualTo(typeof(int));
         await Assert.That(new ExcludeHandlerAttribute(typeof(object)).HandlerType).IsEqualTo(typeof(object));

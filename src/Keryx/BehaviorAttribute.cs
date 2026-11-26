@@ -6,8 +6,11 @@ namespace Keryx;
 /// <remarks>
 ///     <list type="bullet">
 ///         <item>On a request or stream request handler method: a request or stream behavior for that handler.</item>
-///         <item>On a notification handler method: an <see cref="INotificationHandlerBehavior{TNotification}" /> for that handler.</item>
-///         <item>On a notification type: an <see cref="INotificationBehavior{TNotification}" /> for every publish of it.</item>
+///         <item>
+///             On a notification handler method: an <see cref="INotificationHandlerPipelineBehavior{TNotification}" /> for that
+///             handler.
+///         </item>
+///         <item>On a notification type: an <see cref="INotificationPipelineBehavior{TNotification}" /> for every publish of it.</item>
 ///         <item>On the assembly: applies to every matching target in that assembly.</item>
 ///     </list>
 ///     Anywhere else it is KRX042. A behavior attached to a method or notification type that does not match it is KRX009.

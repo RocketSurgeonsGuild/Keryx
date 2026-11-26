@@ -49,7 +49,6 @@
     <File Path="src/Directory.Build.targets" />
     <Project Path="src/Keryx/Keryx.csproj" />
     <Project Path="src/Keryx.Analyzers/Keryx.Analyzers.csproj" />
-    <Project Path="src/Keryx.Analyzers.CodeFixes/Keryx.Analyzers.CodeFixes.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <File Path="samples/Directory.Build.props" />

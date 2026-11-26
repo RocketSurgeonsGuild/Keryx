@@ -12,12 +12,13 @@ namespace Keryx;
 ///     </para>
 ///     <para>
 ///         A behavior class is either open with the same type parameters (<c>AuditBehavior&lt;TRequest, TResponse&gt;</c>) or closed and
-///         non-generic (<c>AuditCreate : IPipelineBehavior&lt;CreateOrder.Command, Guid&gt;</c>), and has exactly one public constructor.
+///         non-generic (<c>AuditCreate : IRequestPipelineBehavior&lt;CreateOrder.Command, Guid&gt;</c>), and has exactly one public
+///         constructor.
 ///     </para>
 /// </remarks>
 /// <typeparam name="TRequest">The request type.</typeparam>
 /// <typeparam name="TResponse">The response type. <see cref="Unit" /> for an <see cref="IRequest" />.</typeparam>
-public interface IPipelineBehavior<TRequest, TResponse>
+public interface IRequestPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
     /// <summary>

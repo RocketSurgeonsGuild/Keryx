@@ -8,7 +8,7 @@ namespace Keryx;
 ///     knows, it runs even when there are no handlers. Implement <see cref="Handle{TNext}" /> implicitly as a public, non-virtual method.
 /// </remarks>
 /// <typeparam name="TNotification">The concrete published notification type.</typeparam>
-public interface INotificationBehavior<TNotification>
+public interface INotificationPipelineBehavior<TNotification>
     where TNotification : INotification
 {
     /// <summary>
@@ -32,7 +32,7 @@ public interface INotificationBehavior<TNotification>
 ///     method.
 /// </remarks>
 /// <typeparam name="TNotification">The concrete published notification type.</typeparam>
-public interface INotificationHandlerBehavior<TNotification>
+public interface INotificationHandlerPipelineBehavior<TNotification>
     where TNotification : INotification
 {
     /// <summary>

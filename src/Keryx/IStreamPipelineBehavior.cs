@@ -18,7 +18,7 @@ namespace Keryx;
 /// </remarks>
 /// <typeparam name="TRequest">The stream request type.</typeparam>
 /// <typeparam name="TItem">The item type.</typeparam>
-public interface IStreamBehavior<TRequest, TItem>
+public interface IStreamPipelineBehavior<TRequest, TItem>
     where TRequest : IStreamRequest<TItem>
 {
     /// <summary>
@@ -62,12 +62,12 @@ public interface IStreamBehavior<TRequest, TItem>
 ///     A behavior that receives and returns the whole stream of a stream request.
 /// </summary>
 /// <remarks>
-///     A wrap behavior splits hook fusion at its position: <see cref="IStreamBehavior{TRequest,TItem}" /> hooks inside it are fused into one
-///     iterator, and hooks outside it into another.
+///     A wrap behavior splits hook fusion at its position: <see cref="IStreamPipelineBehavior{TRequest,TItem}" /> hooks inside it are fused
+///     into one iterator, and hooks outside it into another.
 /// </remarks>
 /// <typeparam name="TRequest">The stream request type.</typeparam>
 /// <typeparam name="TItem">The item type.</typeparam>
-public interface IStreamWrapBehavior<TRequest, TItem>
+public interface IStreamWrapPipelineBehavior<TRequest, TItem>
     where TRequest : IStreamRequest<TItem>
 {
     /// <summary>
