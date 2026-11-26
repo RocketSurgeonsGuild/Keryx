@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Specular.Scanning;
 
 namespace Keryx.Analyzers.Hosts;
 
@@ -30,56 +31,14 @@ internal static class HostModelFactory
         var hostAttribute = compilation.Assembly.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, symbols.KeryxHostAttribute));
         var runtime = compilation.ReferencedAssemblyNames.FirstOrDefault(static identity => identity.Name == SystemRuntime)
          ?? compilation.ObjectType.ContainingAssembly?.Identity;
-        var catalog = BehaviorCatalog.For(compilation, symbols);
         return new(
             true,
             compilation.AssemblyName ?? "",
             hostAttribute is null ? null : LocationInfo.From(HandlerAnalysis.AttributeLocation(hostAttribute)),
             runtime?.Name,
-            runtime?.Version,
-            GlobalBehaviors(catalog),
-            Exclusions(catalog)
+            runtime?.Version
         );
     }
-
-    /// <summary>
-    ///     The global behaviors the host applies, for KRX035: every <c>[GlobalBehavior]</c> the behavior rules accept that no
-    ///     <c>ExcludeBehavior</c> removes entirely (an exclusion of one closing of an open global behavior leaves the others). Phase 7 adds the
-    ///     referenced ones.
-    /// </summary>
-    private static ImmutableArray<GlobalBehaviorModel> GlobalBehaviors(BehaviorCatalog catalog)
-    {
-        var excluded = new HashSet<string>(catalog.Exclusions.Select(static e => BehaviorOrdering.Operand(e.Type)), StringComparer.Ordinal);
-        var globals = ImmutableArray.CreateBuilder<GlobalBehaviorModel>();
-        foreach (var (type, attribute) in catalog.GlobalBehaviors)
-        {
-            if (catalog.Shape(type) is null || excluded.Contains(BehaviorOrdering.DefinitionOperand(type)))
-            {
-                continue;
-            }
-
-            globals.Add(
-                new(
-                    type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                    type.ContainingAssembly?.Name ?? "",
-                    LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute) ?? type.Locations.FirstOrDefault())
-                )
-            );
-        }
-
-        return globals.ToImmutable();
-    }
-
-    /// <summary>The host's <c>ExcludeBehavior</c> entries, for KRX036.</summary>
-    private static ImmutableArray<ExclusionModel> Exclusions(BehaviorCatalog catalog) =>
-    [
-        .. catalog.Exclusions.Select(static e => new ExclusionModel(
-                                         BehaviorOrdering.Operand(e.Type),
-                                         e.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                                         LocationInfo.From(HandlerAnalysis.AttributeLocation(e.Attribute))
-                                     )
-                    ),
-    ];
 
     public static HostBuildProperties ReadBuildProperties(AnalyzerConfigOptionsProvider options) =>
         new(
@@ -95,9 +54,7 @@ internal static class HostModelFactory
                 Namespace(properties.RootNamespace, compilation.AssemblyName),
                 compilation.AssemblyName,
                 compilation.HostAttribute,
-                UnsupportedTargetFramework(properties, compilation),
-                compilation.GlobalBehaviors,
-                compilation.Exclusions
+                UnsupportedTargetFramework(properties, compilation)
             )
             : HostSettings.Disabled;
 
@@ -187,14 +144,15 @@ internal static class HostModelFactory
     }
 
     /// <summary>
-    ///     The concrete notification type a declaration declares, with its publish strategy and per-publish behaviors, or nothing (ADR 0001,
-    ///     Notifications). The host knows every notification type declared in its source, so its per-publish pipeline runs even when it has no
-    ///     handlers (OQ-18).
+    ///     The metadata name of the concrete notification type a declaration declares, or nothing (ADR 0001, Notifications). The host knows
+    ///     every notification type declared in its source that generated code can reach, so its per-publish pipeline runs even when it has no
+    ///     handlers (OQ-18); the composition step resolves the name and composes its per-publish behaviors.
     /// </summary>
-    public static HostNotificationModel? CreateNotification(GeneratorSyntaxContext context, CancellationToken cancellationToken) =>
+    public static string? CreateNotification(GeneratorSyntaxContext context, CancellationToken cancellationToken) =>
         context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is INamedTypeSymbol type
      && KeryxSymbols.Create(context.SemanticModel.Compilation) is { } symbols
-            ? BehaviorCatalog.For(symbols.Compilation, symbols).Notification(type)
+     && MessageType.Classify(type, symbols) is { IsNotificationOnly: true, IsConcrete: true, IsUnsupportedShape: false }
+            ? ScanSymbolNames.GetFullMetadataName(type)
             : null;
 
     /// <summary>
@@ -210,15 +168,38 @@ internal static class HostModelFactory
         }
 
         var handledType = HandlerAnalysis.HandledRequestType(method, symbols) is { } requestType ? CSharpText.TypeOf(requestType) : null;
-        return new(handledType, CreateHandler(method, symbols));
+        return new(handledType, ScanSymbolNames.GetFullMetadataName(method.ContainingType), LocationInfo.From(method.Locations.FirstOrDefault()));
     }
 
     /// <summary>
-    ///     The host's model of a handler, or <see langword="null" /> when the handler generator generates nothing for it in a host (a rule
-    ///     is broken, or the class or its signature is narrower than <c>internal</c>; OQ-24, OQ-29).
+    ///     The handler method an entry of the syntax pipeline stands for, found again in the compilation by its class and location, or
+    ///     <see langword="null" /> when it is gone.
     /// </summary>
-    public static HostHandlerModel? CreateHandler(IMethodSymbol method, KeryxSymbols symbols)
+    public static IMethodSymbol? FindHandler(HostHandlerEntry entry, KeryxSymbols symbols)
     {
+        if (symbols.Compilation.Assembly.GetTypeByMetadataName(entry.HandlerClass) is not { } type)
+        {
+            return null;
+        }
+
+        foreach (var method in HandlerAnalysis.GetCandidates(type, symbols))
+        {
+            if (Equals(LocationInfo.From(method.Locations.FirstOrDefault()), entry.Location))
+            {
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     The host's model of one of its own handlers, or <see langword="null" /> when the handler generator generates nothing for it in a host
+    ///     (a rule is broken, or the class or its signature is narrower than <c>internal</c>; OQ-24, OQ-29).
+    /// </summary>
+    public static HostHandlerModel? CreateHandler(IMethodSymbol method, BehaviorCatalog catalog)
+    {
+        var symbols = catalog.Symbols;
         if (HandlerModelFactory.Create(method, symbols) is not { } model
          || model.ClassAccess == AccessLevel.Restricted
          || model.SignatureAccess == AccessLevel.Restricted)
@@ -251,13 +232,15 @@ internal static class HostModelFactory
             return null;
         }
 
-        var catalog = BehaviorCatalog.For(symbols.Compilation, symbols);
+        var attached = AttachedBehaviors(method, symbols);
         var classified = MessageType.Classify(messageType, symbols);
         var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
         var (behaviors, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
-            ? PipelineBehaviors.For(method, target, catalog)
+            ? PipelineBehaviors.For(attached, method.ContainingAssembly, target, catalog)
             : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
-        var deliveries = model.Kind == HandlerKind.Notification ? Deliveries(method, messageType, catalog) : ImmutableArray<NotificationDeliveryModel>.Empty;
+        var deliveries = model.Kind == HandlerKind.Notification
+            ? Deliveries(attached, method.ContainingAssembly, messageType, catalog)
+            : ImmutableArray<NotificationDeliveryModel>.Empty;
 
         return new(
             model.HandlerClass,
@@ -276,14 +259,179 @@ internal static class HostModelFactory
     }
 
     /// <summary>
-    ///     The concrete notification types a notification handler receives (ADR 0001, Polymorphic handlers): every notification type the host
-    ///     knows that converts to the handler's parameter type (identity, implicit reference or boxing conversion), each with the per-handler
-    ///     behaviors closed over it. The host knows the notification types declared in its source and the parameter type of each of its
-    ///     notification handlers when that is a concrete notification (<see cref="BehaviorCatalog.KnownNotifications" />, OQ-42; Phase 7 adds
-    ///     the ones in referenced assemblies), the same set for every handler. An attached behavior whose constraints do not hold for one
-    ///     concrete type is skipped for that type (OQ-40).
+    ///     The host's model of a referenced handler, from its manifest entry (ADR 0001, Manifest): what it handles and its attached behaviors
+    ///     come from <c>[KeryxHandler]</c>, its response type from the request type, its injected parameters from the generated public
+    ///     constructor (which copies <c>[FromKeyedServices]</c> and default values). <see langword="null" />, with the reason in
+    ///     <paramref name="problem" />, when the entry does not describe a handler the host can compose (a kind that does not fit the target as
+    ///     the host resolves it, or not exactly one public constructor for a handler with injected parameters); the host reports it (KRX034).
     /// </summary>
-    private static ImmutableArray<NotificationDeliveryModel> Deliveries(IMethodSymbol method, ITypeSymbol parameterType, BehaviorCatalog catalog)
+    public static HostHandlerModel? CreateReferencedHandler(
+        INamedTypeSymbol handlerClass,
+        ITypeSymbol target,
+        HandlerKind kind,
+        ImmutableArray<ITypeSymbol> attached,
+        int order,
+        bool staticInvoker,
+        BehaviorCatalog catalog,
+        out string? problem
+    )
+    {
+        var classified = MessageType.Classify(target, catalog.Symbols);
+        var fits = kind switch
+        {
+            HandlerKind.Request => classified is { IsRequest: true, IsConcrete: true, IsUnsupportedShape: false },
+            HandlerKind.Stream => classified is { IsStream: true, IsConcrete: true, IsUnsupportedShape: false },
+            HandlerKind.Notification => classified is { IsNotificationOnly: true, IsUnsupportedShape: false },
+            _ => false,
+        };
+        if (!fits)
+        {
+            problem = $"the manifest describes {KindText(kind)} of '{target.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}', but that type is not {MessageText(kind)} this host can dispatch";
+            return null;
+        }
+
+        var services = ImmutableArray.CreateBuilder<ServiceParameterModel>();
+        if (!staticInvoker)
+        {
+            if (handlerClass.InstanceConstructors.Where(static c => c.DeclaredAccessibility == Accessibility.Public).ToArray() is not [var constructor])
+            {
+                problem = "the class does not have exactly one public constructor for the host to call";
+                return null;
+            }
+
+            services.AddRange(constructor.Parameters.Select(static p => Service(p.Type, HandlerModelFactory.ServiceKey(p), CSharpText.DefaultValue(p))));
+        }
+
+        var responseType = kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
+        var (behaviors, usedExclusions) = PipelineBehaviors.Target(kind, target, responseType) is { } pipelineTarget
+            ? PipelineBehaviors.For(attached, handlerClass.ContainingAssembly, pipelineTarget, catalog)
+            : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
+        var deliveries = kind == HandlerKind.Notification
+            ? Deliveries(attached, handlerClass.ContainingAssembly, target, catalog)
+            : ImmutableArray<NotificationDeliveryModel>.Empty;
+
+        problem = null;
+        return new(
+            CSharpText.Type(handlerClass),
+            kind,
+            CSharpText.TypeOf(target),
+            target.IsValueType,
+            target.IsValueType || target.IsSealed,
+            responseType is null ? null : CSharpText.Type(responseType),
+            staticInvoker,
+            services.ToImmutable(),
+            behaviors,
+            usedExclusions,
+            kind == HandlerKind.Notification ? order : 0,
+            deliveries
+        );
+    }
+
+    /// <summary>
+    ///     KRX009 as the host checks it for a referenced handler (ADR 0001, Diagnostics: KRX009 for pairs involving referenced behaviors): each
+    ///     behavior its manifest attaches (<c>KeryxHandler.Behaviors</c>) that does not fit the target as the host resolves it, with the
+    ///     reason, as the analyzer checks the host's own handlers: not a Keryx behavior, the wrong behavior kind, or (for a request, a stream
+    ///     request or a concrete notification) constraints that do not hold. A polymorphic notification handler's behaviors are checked for
+    ///     their kind only; the host skips them per concrete type they do not fit (OQ-40). A behavior class the behavior rules reject is the
+    ///     library's KRX019/KRX020 and is not reported again.
+    /// </summary>
+    public static IEnumerable<(ITypeSymbol Behavior, string Reason)> UnfitAttachedBehaviors(
+        ImmutableArray<ITypeSymbol> attached,
+        ITypeSymbol target,
+        HandlerKind kind,
+        BehaviorCatalog catalog
+    )
+    {
+        var symbols = catalog.Symbols;
+        var classified = MessageType.Classify(target, symbols);
+        (BehaviorTarget Target, bool CheckConstraints)? fit = kind switch
+        {
+            HandlerKind.Request when classified.ResponseType is { } response => (new(BehaviorTargetKind.Request, [target, response]), true),
+            HandlerKind.Stream when classified.ItemType is { } item => (new(BehaviorTargetKind.Stream, [target, item]), true),
+            HandlerKind.Notification => (new(BehaviorTargetKind.NotificationHandler, [target]), classified.IsConcrete),
+            _ => null,
+        };
+        if (fit is not { } checkedTarget)
+        {
+            yield break;
+        }
+
+        foreach (var behavior in attached)
+        {
+            if (behavior is not INamedTypeSymbol named || BehaviorShapes.Interfaces(named.OriginalDefinition, symbols).IsEmpty)
+            {
+                yield return (behavior, "it is not a Keryx behavior");
+                continue;
+            }
+
+            if (catalog.Shape(named) is not { } shape)
+            {
+                continue;
+            }
+
+            var fits = checkedTarget.CheckConstraints
+                ? BehaviorMatching.TryClose(named, shape, checkedTarget.Target, catalog.Compilation, out _, out var reason)
+                : FitsKind(shape, checkedTarget.Target, out reason);
+            if (!fits)
+            {
+                yield return (behavior, reason);
+            }
+        }
+
+        static bool FitsKind(BehaviorShape shape, BehaviorTarget target, out string reason)
+        {
+            reason = $"it does not implement {target.ExpectedInterfaces}";
+            return target.Accepts(shape.Kind);
+        }
+    }
+
+    private static string KindText(HandlerKind kind) =>
+        kind switch
+        {
+            HandlerKind.Request => "a request handler",
+            HandlerKind.Stream => "a stream request handler",
+            HandlerKind.Notification => throw new NotImplementedException(),
+            _ => "a notification handler",
+        };
+
+    private static string MessageText(HandlerKind kind) =>
+        kind switch
+        {
+            HandlerKind.Request => "a request",
+            HandlerKind.Stream => "a stream request",
+            HandlerKind.Notification => throw new NotImplementedException(),
+            _ => "a notification",
+        };
+
+    /// <summary>The behaviors attached to a handler method with <c>[Behavior]</c>, in declaration order.</summary>
+    private static ImmutableArray<ITypeSymbol> AttachedBehaviors(IMethodSymbol handler, KeryxSymbols symbols)
+    {
+        var attached = ImmutableArray.CreateBuilder<ITypeSymbol>();
+        foreach (var attribute in handler.GetAttributes())
+        {
+            if (KeryxSymbols.IsAttribute(attribute, symbols.BehaviorAttribute)
+             && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: ITypeSymbol type }])
+            {
+                attached.Add(type);
+            }
+        }
+
+        return attached.ToImmutable();
+    }
+
+    /// <summary>
+    ///     The concrete notification types a notification handler receives (ADR 0001, Polymorphic handlers): every notification type the host
+    ///     knows (<see cref="BehaviorCatalog.KnownNotifications" />: declared in its source, taken by its own or its referenced handlers, or
+    ///     declared in its references; OQ-42) that converts to the handler's parameter type (identity, implicit reference or boxing
+    ///     conversion), each with the per-handler behaviors closed over it. An attached behavior whose constraints do not hold for one concrete
+    ///     type is skipped for that type (OQ-40).
+    /// </summary>
+    private static ImmutableArray<NotificationDeliveryModel> Deliveries(
+        ImmutableArray<ITypeSymbol> attached,
+        IAssemblySymbol? handlerAssembly,
+        ITypeSymbol parameterType,
+        BehaviorCatalog catalog
+    )
     {
         var deliveries = new SortedDictionary<string, NotificationDeliveryModel>(StringComparer.Ordinal);
         foreach (var notification in catalog.KnownNotifications)
@@ -295,7 +443,7 @@ internal static class HostModelFactory
                 continue;
             }
 
-            var (behaviors, usedExclusions) = PipelineBehaviors.For(method, new(BehaviorTargetKind.NotificationHandler, [notification]), catalog);
+            var (behaviors, usedExclusions) = PipelineBehaviors.For(attached, handlerAssembly, new(BehaviorTargetKind.NotificationHandler, [notification]), catalog);
             deliveries.Add(model.Type, new(model, behaviors, usedExclusions));
         }
 

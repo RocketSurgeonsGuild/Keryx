@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        A console host ([assembly: KeryxHost]): its generated KeryxMediator and AddKeryx() compose its own handlers with those of
+        Keryx.Samples.Orders, read from that library's manifest (ADR 0001, Cross-assembly discovery). It runs a short scenario and exits with
+        a non-zero code when anything is off. CI publishes it with Native AOT and runs the binary (ADR 0001, AOT verification).
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+        <!--
+            Native AOT, set here rather than with -p:PublishAot=true, which would also reach the netstandard2.0 projects it references
+            (NETSDK1207). A build runs the trim and AOT analyzers; `dotnet publish` produces the native binary.
+        -->
+        <PublishAot>true</PublishAot>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="../../libraries/Keryx.Samples.Contracts/Keryx.Samples.Contracts.csproj" />
+        <ProjectReference Include="../../libraries/Keryx.Samples.Orders/Keryx.Samples.Orders.csproj" />
+    </ItemGroup>
+</Project>

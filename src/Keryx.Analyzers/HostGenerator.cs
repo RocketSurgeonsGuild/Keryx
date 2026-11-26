@@ -9,7 +9,8 @@ using Specular.Scanning;
 namespace Keryx.Analyzers;
 
 /// <summary>
-///     Generates a host's mediator and <c>AddKeryx()</c> (ADR 0001, Generated host) and reports the host-only rules. Active only with
+///     Generates a host's mediator and <c>AddKeryx()</c> (ADR 0001, Generated host) from its own handlers and those of its references (ADR
+///     0001, Cross-assembly discovery), and reports the host-only rules. Active only with
 ///     <c>[assembly: KeryxHost]</c>; it emits and reports nothing below C# 11, so KRX022 stays the only error there, and it emits nothing in
 ///     a host that targets a framework older than <c>net10.0</c>, where it reports KRX031 (OQ-32). Diagnostics are reported on the syntax
 ///     tree of their source location, so per-file analyzer config (<c>.editorconfig</c>) applies to them (OQ-35).
@@ -72,20 +73,48 @@ public sealed class HostGenerator : IIncrementalGenerator
                            .Select(static (notification, _) => notification!)
                            .WithTrackingName(TrackingNames.HostNotifications);
 
-        var sources = settings
-                     .Combine(handlers.Collect().WithTrackingName(TrackingNames.HostHandlerList))
-                     .WithTrackingName(TrackingNames.HostSettingsAndHandlers)
-                     .Combine(requests.Collect().WithTrackingName(TrackingNames.HostRequestList))
-                     .WithTrackingName(TrackingNames.HostSettingsHandlersAndRequests)
-                     .Combine(notifications.Collect().WithTrackingName(TrackingNames.HostNotificationList))
-                     .WithTrackingName(TrackingNames.HostSources);
+        // The references, read with one Scan call (ADR 0001, How the host reads it): the three requests are built from the compilation, and
+        // the transform projects each referenced assembly's manifest, cached per assembly in Specular's ScanCache.
+        var scanRequests = context
+                          .CompilationProvider.Select(static (compilation, _) => ReferenceScan.CreateRequests(compilation))
+                          .WithTrackingName(TrackingNames.HostScanRequests)
+                          .SelectMany(static (requests, _) => requests.AsImmutableArray())
+                          .WithTrackingName(TrackingNames.HostScanRequest);
 
-        context.RegisterSourceOutput(sources, static (production, inputs) => Produce(production, inputs.Left.Left.Left, inputs.Left.Left.Right, inputs.Right));
+        var references = context.Scan(ReferenceScan.ConsumerId, scanRequests, ReferenceScan.Transform);
+
+        var compositionInputs = settings
+                               .Combine(handlers.Collect().WithTrackingName(TrackingNames.HostHandlerList))
+                               .WithTrackingName(TrackingNames.HostSettingsAndHandlers)
+                               .Combine(notifications.Collect().WithTrackingName(TrackingNames.HostNotificationList))
+                               .WithTrackingName(TrackingNames.HostSettingsHandlersAndNotifications)
+                               .Combine(references)
+                               .WithTrackingName(TrackingNames.HostCompositionInputs);
+
+        // Composing resolves the references' manifests in the compilation, so it runs on every compilation; its output is equatable, so the
+        // source output stays cached while nothing it describes changed.
+        var composition = compositionInputs
+                         .Combine(context.CompilationProvider)
+                         .WithTrackingName(TrackingNames.HostCompositionAndCompilation)
+                         .Select(static (inputs, cancellationToken) => HostComposer.Compose(
+                                     inputs.Left.Left.Left.Left,
+                                     inputs.Left.Left.Left.Right,
+                                     inputs.Left.Left.Right,
+                                     inputs.Left.Right,
+                                     inputs.Right,
+                                     cancellationToken
+                                 )
+                          )
+                         .WithTrackingName(TrackingNames.HostSources);
+
+        context.RegisterSourceOutput(composition, static (production, model) => Produce(production, model));
 
         // Diagnostics have their own output: they are computed from the cached models, and only reporting them reads the compilation, to
         // put each one on its syntax tree so per-file .editorconfig severity applies (OQ-35). The source output above stays cached.
-        var diagnostics = sources
-                         .Select(static (inputs, _) => CreateDiagnostics(inputs.Left.Left.Left, inputs.Left.Left.Right, inputs.Left.Right, inputs.Right))
+        var diagnostics = composition
+                         .Combine(requests.Collect().WithTrackingName(TrackingNames.HostRequestList))
+                         .WithTrackingName(TrackingNames.HostDiagnosticsInputs)
+                         .Select(static (inputs, _) => CreateDiagnostics(inputs.Left, inputs.Right))
                          .WithTrackingName(TrackingNames.HostDiagnostics);
 
         context.RegisterSourceOutput(
@@ -94,49 +123,43 @@ public sealed class HostGenerator : IIncrementalGenerator
         );
     }
 
-    private static void Produce(
-        SourceProductionContext production,
-        HostSettings settings,
-        ImmutableArray<HostHandlerEntry> handlers,
-        ImmutableArray<HostNotificationModel> notifications
-    )
+    private static void Produce(SourceProductionContext production, HostModel model)
     {
+        var settings = model.Settings;
         if (!settings.Enabled || settings.UnsupportedTargetFramework is not null)
         {
             return;
         }
 
-        var composition = HostComposition.Create(handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>(), notifications);
+        var composition = HostComposition.Create(model.Handlers, model.Notifications);
         production.AddSource(HostEmitter.MediatorHintName, HostEmitter.Mediator(settings, composition));
         production.AddSource(HostEmitter.ServiceCollectionExtensionsHintName, HostEmitter.ServiceCollectionExtensions(settings, composition));
     }
 
     /// <summary>
-    ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline), then KRX031, then
-    ///     KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks in-source pairs), KRX035 for each global
-    ///     behavior, KRX036 for each <c>ExcludeBehavior</c> that removed nothing and KRX037 for each struct notification that handlers typed
-    ///     as an interface receive. A request whose handler candidate breaks a rule counts as handled: the analyzers report the handler.
+    ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline) and for the referenced
+    ///     ones (from the scan, except those declared in another host), then KRX031, then the composition's own (KRX005 across assemblies,
+    ///     KRX032, KRX033, KRX034, KRX036 for <c>ExcludeHandler</c>), then KRX008 for behavior pairs that involve a referenced behavior (the
+    ///     analyzer checks in-source pairs), KRX035 for each global behavior, KRX036 for each <c>ExcludeBehavior</c> that removed nothing and
+    ///     KRX037 for each struct notification that handlers typed as an interface receive. A request whose handler candidate breaks a rule
+    ///     counts as handled: the analyzers report the handler.
     /// </summary>
-    private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(
-        HostSettings settings,
-        ImmutableArray<HostHandlerEntry> handlers,
-        ImmutableArray<HostRequestModel> requests,
-        ImmutableArray<HostNotificationModel> notifications
-    )
+    private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(HostModel model, ImmutableArray<HostRequestModel> requests)
     {
+        var settings = model.Settings;
         if (!settings.Enabled)
         {
             return ImmutableArray<HostDiagnosticModel>.Empty;
         }
 
         var diagnostics = ImmutableArray.CreateBuilder<HostDiagnosticModel>();
-        var handled = new HashSet<string>(handlers.Select(static entry => entry.HandledType).OfType<string>(), StringComparer.Ordinal);
+        var handled = new HashSet<string>(model.HandledRequests, StringComparer.Ordinal);
         var reported = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var request in requests.OrderBy(static r => r.Type, StringComparer.Ordinal))
+        foreach (var request in requests.OrderBy(static r => r.Type, StringComparer.Ordinal).Concat(model.ReferencedRequests))
         {
             if (!handled.Contains(request.Type) && reported.Add(request.Type))
             {
-                diagnostics.Add(new(Descriptors.UnhandledRequestInHost, request.Location, ImmutableArray.Create(request.DisplayName)));
+                diagnostics.Add(new(Descriptors.UnhandledRequestInHost, request.Location ?? settings.HostAttribute, ImmutableArray.Create(request.DisplayName)));
             }
         }
 
@@ -145,11 +168,13 @@ public sealed class HostGenerator : IIncrementalGenerator
             diagnostics.Add(new(Descriptors.HostTargetFrameworkTooOld, settings.HostAttribute, ImmutableArray.Create(settings.AssemblyName, framework)));
         }
 
-        var models = handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>().ToArray();
-        var composition = HostComposition.Create(models, notifications);
+        diagnostics.AddRange(model.Diagnostics);
+
+        var models = model.Handlers;
+        var composition = HostComposition.Create(models, model.Notifications);
         diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(settings, composition));
 
-        foreach (var global in settings.GlobalBehaviors)
+        foreach (var global in model.GlobalBehaviors)
         {
             diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(global.Name, global.Assembly)));
         }
@@ -157,10 +182,10 @@ public sealed class HostGenerator : IIncrementalGenerator
         var used = new HashSet<string>(
             models
                .SelectMany(static m => m.UsedExclusions.Concat(m.Deliveries.SelectMany(static d => d.UsedExclusions.Concat(d.Notification.UsedExclusions))))
-               .Concat(notifications.SelectMany(static n => n.UsedExclusions)),
+               .Concat(model.Notifications.SelectMany(static n => n.UsedExclusions)),
             StringComparer.Ordinal
         );
-        foreach (var exclusion in settings.Exclusions)
+        foreach (var exclusion in model.BehaviorExclusions)
         {
             if (!used.Contains(exclusion.Operand))
             {

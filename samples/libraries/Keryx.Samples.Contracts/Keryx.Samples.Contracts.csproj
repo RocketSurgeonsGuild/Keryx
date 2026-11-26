@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        A contracts assembly (ADR 0001, Which projects may target what): requests, a stream request and notifications, with their handlers in
+        Keryx.Samples.Orders. netstandard2.0, as contracts shared with older clients often are; [assembly: KeryxContracts] turns off KRX001.
+    -->
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+    </PropertyGroup>
+    <ItemGroup>
+        <!-- The repository-wide alias names an attribute netstandard2.0 does not have. -->
+        <Using Remove="System.Diagnostics.CodeAnalysis.NotNullAttribute" />
+    </ItemGroup>
+</Project>

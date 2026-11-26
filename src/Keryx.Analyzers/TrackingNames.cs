@@ -69,28 +69,46 @@ internal static class TrackingNames
     /// <summary><see cref="HostRequests" />, collected.</summary>
     public const string HostRequestList = "Keryx.Host.RequestList";
 
-    /// <summary>Every type declaration with a base list projected to a concrete notification model, or nothing.</summary>
+    /// <summary>Every type declaration with a base list projected to the metadata name of a concrete notification type, or nothing.</summary>
     public const string HostNotificationCandidates = "Keryx.Host.NotificationCandidates";
 
     /// <summary>The <see cref="HostNotificationCandidates" /> that are concrete notifications (still typed as nullable).</summary>
     public const string HostNotificationModels = "Keryx.Host.NotificationModels";
 
-    /// <summary>The notification types declared in the host, with their publish strategy and per-publish behaviors.</summary>
+    /// <summary>The metadata names of the concrete notification types declared in the host.</summary>
     public const string HostNotifications = "Keryx.Host.Notifications";
 
     /// <summary><see cref="HostNotifications" />, collected.</summary>
     public const string HostNotificationList = "Keryx.Host.NotificationList";
 
+    /// <summary>
+    ///     The three scan requests of the host's one <c>Scan</c> call over its references, built from the compilation (fed directly by the
+    ///     compilation, so it always runs).
+    /// </summary>
+    public const string HostScanRequests = "Keryx.Host.ScanRequests";
+
+    /// <summary>The scan requests, one per item.</summary>
+    public const string HostScanRequest = "Keryx.Host.ScanRequest";
+
     /// <summary>The settings combined with <see cref="HostHandlerList" />.</summary>
     public const string HostSettingsAndHandlers = "Keryx.Host.SettingsAndHandlers";
 
-    /// <summary><see cref="HostSettingsAndHandlers" /> combined with <see cref="HostRequestList" />.</summary>
-    public const string HostSettingsHandlersAndRequests = "Keryx.Host.SettingsHandlersAndRequests";
+    /// <summary><see cref="HostSettingsAndHandlers" /> combined with <see cref="HostNotificationList" />.</summary>
+    public const string HostSettingsHandlersAndNotifications = "Keryx.Host.SettingsHandlersAndNotifications";
 
-    /// <summary>The settings, handlers, request types and notification types combined: the input of the host's source output.</summary>
+    /// <summary><see cref="HostSettingsHandlersAndNotifications" /> combined with the scan's projection of the references.</summary>
+    public const string HostCompositionInputs = "Keryx.Host.CompositionInputs";
+
+    /// <summary><see cref="HostCompositionInputs" /> combined with the compilation, to resolve the references (fed by the compilation).</summary>
+    public const string HostCompositionAndCompilation = "Keryx.Host.CompositionAndCompilation";
+
+    /// <summary>The composed host (own and referenced handlers, notifications, behaviors): the input of the host's source output.</summary>
     public const string HostSources = "Keryx.Host.Sources";
 
-    /// <summary>The host diagnostics (KRX008, KRX030, KRX031, KRX035, KRX036, KRX037), computed from <see cref="HostSources" />.</summary>
+    /// <summary>The composed host combined with <see cref="HostRequestList" />, before the diagnostics are computed.</summary>
+    public const string HostDiagnosticsInputs = "Keryx.Host.DiagnosticsInputs";
+
+    /// <summary>The host diagnostics (KRX005, KRX008, KRX030 to KRX037), computed from <see cref="HostDiagnosticsInputs" />.</summary>
     public const string HostDiagnostics = "Keryx.Host.Diagnostics";
 
     /// <summary><see cref="HostDiagnostics" /> combined with the compilation, to report them on their syntax trees (fed by the compilation).</summary>

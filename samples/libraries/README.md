@@ -1,3 +1,11 @@
 # Sample libraries
 
-Class libraries with handlers, requests and behaviors, used by the hosts to exercise cross-assembly discovery (ADR 0001, phase 7).
+Class libraries the sample hosts reference, to exercise cross-assembly discovery (ADR 0001, Cross-assembly discovery). Each references
+Keryx itself, so the handler generator runs there and the library carries its manifest (`[assembly: KeryxManifest]` and a
+`[KeryxHandler]` on each public handler class).
+
+- `Keryx.Samples.Contracts` (`netstandard2.0`): requests (`PlaceOrder`, `GetOrder`, `CancelOrder`), a stream request (`ListOrders`) and
+  notifications (`IOrderEvent`, `OrderPlaced`, `OrderCancelled`). `[assembly: KeryxContracts]` turns off KRX001 there.
+- `Keryx.Samples.Orders` (`net10.0`): the handlers of those contracts, a `[GlobalBehavior]` (`LoggingBehavior<,>`, applied in every host
+  that references the library), a behavior attached to one handler (`ValidateQuantity`), and notification handlers, one of them
+  polymorphic (`AuditOrderEvents`, typed with `IOrderEvent`).

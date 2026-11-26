@@ -10,7 +10,8 @@ namespace Keryx.Tests.Hosts;
 ///     both host sources <c>Cached</c> or <c>Unchanged</c>; adding a request handler, a global behavior or a notification type a polymorphic
 ///     handler receives produces <c>Modified</c> host sources. The diagnostics
 ///     output reads the compilation to report on syntax trees (OQ-35), so it reruns on every edit and is not asserted; the diagnostics
-///     themselves are a cached step. (The scan and manifest parts of the test come with cross-assembly discovery.)
+///     themselves are a cached step. With references, every step after the scan stays cached on an unrelated edit, and swapping in a reference
+///     whose manifest changed produces <c>Modified</c> host sources.
 /// </summary>
 public class HostGeneratorIncrementalTests
 {
@@ -51,7 +52,13 @@ public class HostGeneratorIncrementalTests
         """;
 
     /// <summary>Steps fed directly by the compilation always run, and are not asserted (ADR 0001).</summary>
-    private static readonly string[] CompilationFedSteps = [TrackingNames.HostCompilation, TrackingNames.HostDiagnosticsAndCompilation];
+    private static readonly string[] CompilationFedSteps =
+    [
+        TrackingNames.HostCompilation,
+        TrackingNames.HostScanRequests,
+        TrackingNames.HostCompositionAndCompilation,
+        TrackingNames.HostDiagnosticsAndCompilation,
+    ];
 
     private static readonly string[] NamedSteps =
     [
@@ -72,9 +79,14 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostNotificationModels,
         TrackingNames.HostNotifications,
         TrackingNames.HostNotificationList,
+        TrackingNames.HostScanRequests,
+        TrackingNames.HostScanRequest,
         TrackingNames.HostSettingsAndHandlers,
-        TrackingNames.HostSettingsHandlersAndRequests,
+        TrackingNames.HostSettingsHandlersAndNotifications,
+        TrackingNames.HostCompositionInputs,
+        TrackingNames.HostCompositionAndCompilation,
         TrackingNames.HostSources,
+        TrackingNames.HostDiagnosticsInputs,
         TrackingNames.HostDiagnostics,
         TrackingNames.HostDiagnosticsAndCompilation,
     ];
@@ -206,6 +218,65 @@ public class HostGeneratorIncrementalTests
         await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
         await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
                     .Contains("private __Notification1 __CreateNotification1()");
+    }
+
+    [Test]
+    public async Task With_References_An_Unrelated_Edit_Leaves_Every_Step_After_The_Scan_Cached_Or_Unchanged(CancellationToken cancellationToken)
+    {
+        var contracts = TestLibraries.Reference("Contracts", CrossAssemblyTests.Contracts);
+        var orders = TestLibraries.Reference("Orders", CrossAssemblyTests.Orders, [contracts]);
+        var compilation = Compile(Host).AddReferences(contracts, orders);
+        var driver = Run(compilation, cancellationToken);
+        await Assert.That(driver.GetRunResult().Results.Single().GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
+                    .Contains("Send(global::Contracts.CreateOrder request");
+
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText("namespace Sample; public sealed class Unrelated { public int Value { get; set; } }", ParseOptions, "Unrelated.cs", cancellationToken: cancellationToken)
+            ),
+            cancellationToken
+        );
+        var result = driver.GetRunResult().Results.Single();
+
+        foreach (var name in (string[])[Specular.Scanning.ScanTrackingNames.Output, .. NamedSteps.Except(CompilationFedSteps)])
+        {
+            var reasons = result.TrackedSteps[name].SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+            await Assert.That(reasons).IsNotEmpty().Because(name);
+            await Assert.That(reasons.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
+                        .IsTrue()
+                        .Because($"{name}: {string.Join(", ", reasons.Select(static r => r.ToString()))}");
+        }
+
+        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        await Assert.That(outputs).IsNotEmpty();
+        await Assert.That(outputs.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
+                    .IsTrue()
+                    .Because(string.Join(", ", outputs.Select(static r => r.ToString())));
+    }
+
+    [Test]
+    public async Task Swapping_In_A_Reference_With_A_Changed_Manifest_Modifies_The_Host_Sources(CancellationToken cancellationToken)
+    {
+        var contracts = TestLibraries.Reference("Contracts", CrossAssemblyTests.Contracts);
+        var orders = TestLibraries.Reference("Orders", CrossAssemblyTests.Orders, [contracts]);
+        var compilation = Compile(Host).AddReferences(contracts, orders);
+        var driver = Run(compilation, cancellationToken);
+
+        // The same library, rebuilt with one more handler: its manifest changed.
+        var rebuilt = TestLibraries.Reference(
+            "Orders",
+            CrossAssemblyTests.Orders + "\npublic sealed record Archive : IRequest;\npublic static partial class ArchiveHandler { private static void Handle(Archive request) { } }\n",
+            [contracts]
+        );
+        driver = driver.RunGenerators(compilation.ReplaceReference(orders, rebuilt), cancellationToken);
+        var result = driver.GetRunResult().Results.Single();
+
+        await Assert.That(result.TrackedSteps[Specular.Scanning.ScanTrackingNames.Output].SelectMany(static s => s.Outputs).Select(static o => o.Reason))
+                    .Contains(IncrementalStepRunReason.Modified);
+        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
+                    .Contains("Send(global::Orders.Archive request");
     }
 
     /// <summary>The runs of the output that adds the host sources (fed by <see cref="TrackingNames.HostSources" />).</summary>

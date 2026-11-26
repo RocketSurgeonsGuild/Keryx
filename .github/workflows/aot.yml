@@ -1,8 +1,9 @@
 name: Native AOT
 
-# Publishes every sample host (samples/hosts/*/*.csproj) with Native AOT for each target framework and fails on any trim or AOT
-# warning (IL2xxx/IL3xxx), which the repository's warnings-as-errors policy promotes. Until the sample hosts exist (ADR 0001,
-# phase 7) the job finds none and does nothing.
+# Publishes every sample host (samples/hosts/*/*.csproj) with Native AOT for each target framework, fails on any trim or AOT
+# warning (IL2xxx/IL3xxx), which the repository's warnings-as-errors policy promotes, and runs the published binary, which exits
+# non-zero when its scenario fails (ADR 0001, AOT verification). Each host sets PublishAot in its project file: passed as a global
+# property it would also reach the netstandard2.0 libraries the host references (NETSDK1207).
 on:
     push:
         branches:
@@ -53,12 +54,25 @@ jobs:
                   cache_save: false
                   experimental: true
                   github_token: ${{ secrets.GITHUB_TOKEN }}
-            - name: ⚙️ Publish hosts (Native AOT)
+            - name: ⚙️ Publish and run hosts (Native AOT)
               if: steps.hosts.outputs.count != '0'
               run: |
+                  set -euo pipefail
                   shopt -s nullglob
                   for host in samples/hosts/*/*.csproj; do
+                      name="$(basename "$host" .csproj)"
                       for framework in net10.0 net11.0; do
-                          dotnet publish "$host" -c Release -f "$framework" -p:PublishAot=true -p:TreatWarningsAsErrors=true -p:TrimmerSingleWarn=false --disable-build-servers
+                          output="artifacts/aot/$name/$framework"
+                          log="artifacts/aot/$name-$framework.log"
+                          mkdir -p "$(dirname "$log")"
+                          dotnet publish "$host" -c Release -f "$framework" -o "$output" -p:TreatWarningsAsErrors=true -p:TrimmerSingleWarn=false --disable-build-servers 2>&1 | tee "$log"
+                          # Belt and braces: warnings as errors already fails the publish on any IL2xxx/IL3xxx warning.
+                          if grep -E "(warning|error) IL[23][0-9]{3}" "$log"; then
+                              echo "::error title=Native AOT::$name ($framework) has trim or AOT warnings."
+                              exit 1
+                          fi
+                          echo "::group::Run $name ($framework)"
+                          "$output/$name"
+                          echo "::endgroup::"
                       done
                   done

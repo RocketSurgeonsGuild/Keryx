@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Specular.Scanning;
@@ -6,9 +7,9 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     One handler as the host composes it into a pipeline: what it handles, how to call it and how to construct it. It holds only what the
-///     host needs, in a form that does not depend on where the handler came from: the host's own handlers are projected from its syntax
-///     pipeline (<see cref="HostModelFactory" />), and referenced handlers will be projected from their manifests (Phase 7) into the same
-///     record, so the emitter does not care which.
+///     host needs, in a form that does not depend on where the handler came from: the host's own handlers are found by its syntax pipeline,
+///     referenced handlers are read from their manifests, and both are projected into the same record (<see cref="HostModelFactory" />), so
+///     the emitter does not care which.
 /// </summary>
 /// <param name="HandlerClass">The handler class, fully qualified with <c>global::</c>.</param>
 /// <param name="Kind">What the handler handles.</param>
@@ -132,7 +133,7 @@ internal sealed record BehaviorEdgeModel(OrderingEdge Edge, LocationInfo? Locati
 /// <param name="Location">The <c>[GlobalBehavior]</c> attribute, when it is in source.</param>
 internal sealed record GlobalBehaviorModel(string Name, string Assembly, LocationInfo? Location);
 
-/// <summary>An <c>[assembly: ExcludeBehavior(typeof(X))]</c> entry of the host, for KRX036.</summary>
+/// <summary>An <c>[assembly: ExcludeBehavior(typeof(X))]</c> or <c>[assembly: ExcludeHandler(typeof(X))]</c> entry of the host, for KRX036.</summary>
 /// <param name="Operand">The excluded type's <c>typeof</c> operand, as <see cref="HostHandlerModel.UsedExclusions" /> lists it.</param>
 /// <param name="Display">The excluded type's display name.</param>
 /// <param name="Location">The attribute.</param>
@@ -166,15 +167,17 @@ internal sealed record ServiceParameterModel(
 );
 
 /// <summary>
-///     What the host's syntax pipeline found for one handler candidate.
+///     What the host's syntax pipeline found for one handler candidate: enough to count its request as handled and to find the method again
+///     in the composition step, which composes its pipeline with the behaviors and notification types of the host's references.
 /// </summary>
 /// <param name="HandledType">
 ///     The concrete request or stream request type the candidate takes, fully qualified, even when the candidate breaks a rule: a malformed
 ///     handler is reported by the analyzers, and KRX030 does not add a second error for its request. <see langword="null" /> for a
 ///     notification handler or when the candidate has no single concrete request parameter.
 /// </param>
-/// <param name="Handler">The handler, or <see langword="null" /> when Keryx generates nothing for it in a host.</param>
-internal sealed record HostHandlerEntry(string? HandledType, HostHandlerModel? Handler);
+/// <param name="HandlerClass">The metadata name of the handler class (<c>Ns.Outer+Inner</c>).</param>
+/// <param name="Location">The handler method's declaration, which tells it apart from other candidates of its class.</param>
+internal sealed record HostHandlerEntry(string? HandledType, string HandlerClass, LocationInfo? Location);
 
 /// <summary>
 ///     A request or stream request type declared in the host, for KRX030.
@@ -205,17 +208,7 @@ internal sealed record HostDiagnosticModel(Microsoft.CodeAnalysis.DiagnosticDesc
 /// <param name="UnsupportedTargetFramework">
 ///     The target framework KRX031 reports when it is older than <c>net10.0</c>, or <see langword="null" /> when it is supported.
 /// </param>
-/// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), for KRX035.</param>
-/// <param name="Exclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
-internal sealed record HostSettings(
-    bool Enabled,
-    string Namespace,
-    string AssemblyName,
-    LocationInfo? HostAttribute,
-    string? UnsupportedTargetFramework,
-    EquatableArray<GlobalBehaviorModel> GlobalBehaviors = default,
-    EquatableArray<ExclusionModel> Exclusions = default
-)
+internal sealed record HostSettings(bool Enabled, string Namespace, string AssemblyName, LocationInfo? HostAttribute, string? UnsupportedTargetFramework)
 {
     public static HostSettings Disabled { get; } = new(false, "", "", null, null);
 }
@@ -228,17 +221,7 @@ internal sealed record HostSettings(
 /// <param name="HostAttribute">Where <c>[assembly: KeryxHost]</c> is.</param>
 /// <param name="RuntimeAssemblyName">The name of the referenced runtime assembly used when the target framework properties are absent.</param>
 /// <param name="RuntimeAssemblyVersion">Its version, or <see langword="null" /> when no runtime assembly is referenced.</param>
-/// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), for KRX035.</param>
-/// <param name="Exclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
-internal sealed record HostCompilationInfo(
-    bool IsHost,
-    string AssemblyName,
-    LocationInfo? HostAttribute,
-    string? RuntimeAssemblyName,
-    Version? RuntimeAssemblyVersion,
-    EquatableArray<GlobalBehaviorModel> GlobalBehaviors = default,
-    EquatableArray<ExclusionModel> Exclusions = default
-);
+internal sealed record HostCompilationInfo(bool IsHost, string AssemblyName, LocationInfo? HostAttribute, string? RuntimeAssemblyName, Version? RuntimeAssemblyVersion);
 
 /// <summary>
 ///     The MSBuild properties the host generator reads (<c>build/Keryx.props</c> makes them compiler visible).
@@ -247,3 +230,51 @@ internal sealed record HostCompilationInfo(
 /// <param name="TargetFrameworkIdentifier"><c>TargetFrameworkIdentifier</c>, or <see langword="null" /> when absent or empty.</param>
 /// <param name="TargetFrameworkVersion"><c>TargetFrameworkVersion</c>, or <see langword="null" /> when absent or empty.</param>
 internal sealed record HostBuildProperties(string? RootNamespace, string? TargetFrameworkIdentifier, string? TargetFrameworkVersion);
+
+/// <summary>
+///     Everything the host composes from its own source and its references (ADR 0001, How the host reads it), computed in one step that
+///     resolves the references' manifests in the compilation. It holds no symbols, so the source output stays cached while it is unchanged.
+/// </summary>
+/// <param name="Settings">The host generator's settings.</param>
+/// <param name="Handlers">
+///     The handlers the host composes: its own, then the referenced ones its <c>ExcludeHandler</c> entries keep, each once. A request type
+///     handled in more than one assembly is KRX005 (in <paramref name="Diagnostics" />) and is dispatched by neither.
+/// </param>
+/// <param name="Notifications">
+///     The concrete notification types declared in the host's source and in its references, with their per-publish behaviors, ordered by
+///     type.
+/// </param>
+/// <param name="HandledRequests">
+///     Every request and stream request type that has a handler in the composed set, malformed or excluded-by-error ones included, fully
+///     qualified (KRX030).
+/// </param>
+/// <param name="ReferencedRequests">The request and stream request types of the references that KRX030 covers, ordered by type.</param>
+/// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), own and referenced, for KRX035.</param>
+/// <param name="BehaviorExclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
+/// <param name="Diagnostics">
+///     The diagnostics found while composing: KRX005 across assemblies, KRX032, KRX033, KRX034, and KRX036 for <c>ExcludeHandler</c>.
+/// </param>
+internal sealed record HostModel(
+    HostSettings Settings,
+    EquatableArray<HostHandlerModel> Handlers,
+    EquatableArray<HostNotificationModel> Notifications,
+    EquatableArray<string> HandledRequests,
+    EquatableArray<HostRequestModel> ReferencedRequests,
+    EquatableArray<GlobalBehaviorModel> GlobalBehaviors,
+    EquatableArray<ExclusionModel> BehaviorExclusions,
+    EquatableArray<HostDiagnosticModel> Diagnostics
+)
+{
+    /// <summary>A host that composes nothing (not a host, or the generator is off).</summary>
+    public static HostModel Empty(HostSettings settings) =>
+        new(
+            settings,
+            ImmutableArray<HostHandlerModel>.Empty,
+            ImmutableArray<HostNotificationModel>.Empty,
+            ImmutableArray<string>.Empty,
+            ImmutableArray<HostRequestModel>.Empty,
+            ImmutableArray<GlobalBehaviorModel>.Empty,
+            ImmutableArray<ExclusionModel>.Empty,
+            ImmutableArray<HostDiagnosticModel>.Empty
+        );
+}

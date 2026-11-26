@@ -82,6 +82,18 @@ internal static class Descriptors
         customTags: WellKnownDiagnosticTags.CompilationEnd
     );
 
+    /// <summary>KRX005 as the host reports it: handlers of one request type in more than one assembly of its composed set.</summary>
+    public static readonly DiagnosticDescriptor DuplicateHandlerInHost = new(
+        "KRX005",
+        "Request has more than one handler",
+        "Request type '{0}' has more than one handler in this host: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A request or stream request has exactly one handler in the application. To replace a handler from a referenced assembly, exclude it with [assembly: ExcludeHandler(typeof(...))] and provide your own.",
+        helpLinkUri: HelpLinkBase + "krx005"
+    );
+
     public static readonly DiagnosticDescriptor MultipleHandlersInClass = new(
         "KRX006",
         "Class contains more than one handler",
@@ -286,6 +298,54 @@ internal static class Descriptors
         isEnabledByDefault: true,
         description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework.",
         helpLinkUri: HelpLinkBase + "krx031"
+    );
+
+    public static readonly DiagnosticDescriptor NewerManifestFormat = new(
+        "KRX032",
+        "Referenced assembly has a newer Keryx manifest",
+        "Assembly '{0}' carries a Keryx manifest of format version {1}, but the Keryx in this project reads format versions up to {2}; upgrade Keryx in this project",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The referenced assembly was built with a newer Keryx, whose manifest this host cannot read. Its handlers, behaviors and requests are left out until Keryx is upgraded in the host.",
+        helpLinkUri: HelpLinkBase + "krx032"
+    );
+
+    public static readonly DiagnosticDescriptor MissingManifest = new(
+        "KRX033",
+        "Referenced assembly uses Keryx but has no manifest",
+        "Assembly '{0}' references Keryx but has no Keryx manifest, so the Keryx generator did not run there and its handlers are not part of this host; reference the Keryx package directly from that project",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Analyzers do not flow through a ProjectReference, so every project that declares requests or handlers references the Keryx package itself. Without it the generator does not run there and the host cannot see its handlers.",
+        helpLinkUri: HelpLinkBase + "krx033"
+    );
+
+    public static readonly DiagnosticDescriptor UnresolvedManifestType = new(
+        "KRX034",
+        "Type in a Keryx manifest cannot be resolved",
+        "Type '{0}', which the Keryx manifest of '{1}' needs, cannot be resolved or is not accessible from this host; reference assembly '{2}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A referenced handler or behavior names a type from an assembly the host does not reference (for example a contracts assembly hidden with PrivateAssets). The handler is left out of the host until the assembly is referenced.",
+        helpLinkUri: HelpLinkBase + "krx034"
+    );
+
+    /// <summary>
+    ///     KRX034 for a referenced handler whose manifest entry resolves but no longer describes a handler the host can compose with the types it
+    ///     resolves (typically a library built against another version of a contracts assembly than the host references; OQ-47).
+    /// </summary>
+    public static readonly DiagnosticDescriptor ManifestEntryDoesNotFit = new(
+        "KRX034",
+        "Type in a Keryx manifest cannot be resolved",
+        "Handler '{0}' in the Keryx manifest of '{1}' does not fit the types this host resolves: {2}; build '{1}' against the assemblies this host references",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A referenced handler's manifest entry names types that resolve in the host, but not to the shapes the handler was built against (for example a request that became a stream request in a newer contracts assembly). The handler is left out of the host until its assembly is rebuilt against the same references.",
+        helpLinkUri: HelpLinkBase + "krx034"
     );
 
     public static readonly DiagnosticDescriptor GlobalBehaviorApplied = new(

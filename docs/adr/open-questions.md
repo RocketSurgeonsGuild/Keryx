@@ -519,6 +519,8 @@ assembly (typically a contracts assembly).
   types reach polymorphic handlers only through (b) until Phase 7. A typed `Publish` overload is generated for every known type, also for
   one that has neither handlers nor per-publish behaviors (it completes immediately).
 - **Proposal:** keep (a) and (b) and add the scanned referenced notification types in Phase 7, as the ADR's third scan describes.
+  (Phase 7 does so: the public concrete notification types of every referenced assembly that references Keryx, from the third scan, and
+  the concrete notification types referenced handlers take, are known too, each with a typed `Publish` overload.)
 
 ### OQ-43: Exceptions from per-publish behaviors, and derived notifications of unknown types
 
@@ -546,6 +548,101 @@ cannot name it. OQ-42 generates a typed `Publish` overload for every notificatio
   file-local behavior is skipped by the host and reported where the host already reports a behavior narrower than `internal` (KRX016
   with "at least internal", for `[GlobalBehavior]` and attached behaviors).
 - **Proposal:** confirm, and say in the ADR that "narrower than `internal`" includes file-local types.
+
+### OQ-45: `ExcludeHandler` naming a type that is not a referenced handler class
+
+The ADR's Attribute reference says `ExcludeHandler` makes the "host ignore a referenced handler class", and KRX036 covers an exclusion that
+"names a type that is not part of any pipeline". It does not say what happens when the type is one of the host's own handler classes,
+which is part of a pipeline.
+
+- **Interim:** `ExcludeHandler` removes only handler classes that come from references (their `[KeryxHandler]` manifest entries). Naming
+  the host's own handler class, or any type that is not a referenced handler class the host would otherwise compose, has no effect and is
+  KRX036 on the attribute. Excluding a referenced handler without providing another one leaves its request unhandled (KRX030). The
+  exclusion is matched against the manifest's name of the handler class (assembly and metadata name) before anything else of the entry is
+  resolved, so an excluded handler whose types the host cannot resolve (its request, attached behaviors or constructor parameters, as in a
+  test host without the handler's infrastructure) reports no KRX034, and the exclusion counts as used (no KRX036).
+- **Proposal:** confirm, and say "a referenced handler class" in the KRX036 row. Alternative: let `ExcludeHandler` remove the host's own
+  handlers too (deleting the handler does the same).
+
+### OQ-46: Where the host composes its pipelines once references take part
+
+The ADR has the scan's transform project each referenced assembly's attributes into equatable records cached per MVID, and the host's
+own handlers come from its syntax pipeline. It does not say where pipelines are composed. Composing (closing behaviors, checking
+constraints, polymorphic expansion) needs symbols, and the host's own handlers need the references' global behaviors and notification
+types, which a syntax-provider transform cannot see (it never sees the scan's output).
+
+- **Interim:** the transform produces only the per-assembly projection, which names types by assembly and metadata name (handler classes
+  with their `[KeryxHandler]` arguments, global behaviors, request and notification types, the assembly's `[assembly: Behavior]`s, the
+  manifest's format version and whether the assembly is a host). One composition step combines the settings, the host's own handler
+  entries and notification type names from the syntax pipeline, and the projection with the compilation, resolves the names, and composes
+  every pipeline, own and referenced, into one equatable `HostModel`. It is fed by the compilation, so it runs on every compilation, as the
+  syntax transforms that composed the host's own handlers did before; the source output stays cached while the model is unchanged
+  (`Unchanged`), and the incremental tests assert that. The syntax pipeline's handler step now carries only what identifies a handler
+  (the request it handles, its class's metadata name and its location).
+- **Proposal:** confirm and describe the composition step in the ADR's How the host reads it section.
+
+### OQ-47: What KRX034 covers, and what the host does with the handler
+
+KRX034 is "a type named in a manifest cannot be resolved or is not accessible from the host". Generated code also names types the host
+derives from a referenced handler (its response or item type, and its generated constructor's parameter types), which can come from an
+assembly the host does not reference just as well.
+
+- **Interim:** KRX034 is reported for every type a referenced manifest names (the handler class, `TargetType`, `Behaviors`, global
+  behaviors, `[assembly: Behavior]` types, request and notification types) that does not resolve, has a type argument that does not
+  resolve, or is not accessible from the host, and also for a missing response, item or constructor parameter type of a referenced
+  handler, and for a missing parameter type of a public constructor of any behavior from another assembly that the host would register
+  (global, `[assembly: Behavior]`, attached through `KeryxHandler.Behaviors`, and `[Behavior]` on a referenced notification type, which is
+  read from the type rather than the manifest; the generated factory names those types too). Each type is reported once per manifest
+  assembly, on `[assembly: KeryxHost]`, naming the assembly to reference (the one the metadata names for the missing type). The handler is
+  left out of the host; when its request type resolves, the request still counts as handled, so KRX030 does not add a second error. A
+  global or assembly behavior that fails is left out (and a global one is not listed by KRX035); an attached behavior that fails leaves its
+  handler out too, so the handler's pipeline does not change silently.
+  KRX034 also covers a referenced handler whose entry resolves but no longer describes a handler the host can compose with the types it
+  resolves (its `Kind` does not fit the target, for example a request that became a stream request in the contracts assembly the host
+  references, or a handler class without exactly one public constructor), through a second descriptor with the same ID and its own message
+  ("Handler 'X' in the Keryx manifest of 'Lib' does not fit the types this host resolves: ...; build 'Lib' against the assemblies this host
+  references"). The handler is left out, and its request still counts as handled, as above; before this, such a handler was dropped with no
+  diagnostic and `Send` threw `KeryxHandlerNotFoundException` at run time.
+- **Proposal:** confirm and extend the KRX034 row: "..., or a type the generated code derives from it (response type, constructor
+  parameters, behavior constructor parameters), or a manifest entry that does not fit the types the host resolves (version skew)".
+  Alternative for the entry that does not fit: no diagnostic of its own, and its request no longer counts as handled, so KRX030 reports it
+  (whose severity is configurable, so it can be silenced, and which says nothing for a notification handler).
+
+### OQ-48: What the host reads from an assembly that has KRX032 or KRX033
+
+The ADR names the two diagnostics but not what the host composes from such an assembly.
+
+- **Interim:** nothing. An assembly whose manifest has a newer format version (KRX032, error) or that references Keryx without a manifest
+  (KRX033, warning) contributes no handlers, global behaviors, assembly behaviors, request types or notification types; so its request
+  types get no KRX030 and its notification types are unknown to the host.
+- **Proposal:** confirm. Alternative for KRX033: still read its request types, so KRX030 reports them as unhandled.
+
+### OQ-49: KRX005 across assemblies
+
+KRX005 in the host names "both handlers and assemblies"; the ADR does not give the message, the location, or what the host dispatches.
+
+- **Interim:** a request or stream request type with handlers in more than one assembly of the composed set (the host's own included) is
+  KRX005 with its own message ("Request type 'X' has more than one handler in this host: 'A' (assembly 'Lib'), 'B' (assembly 'Host')"),
+  through a second descriptor with the same ID that is not a compilation-end diagnostic. It is reported on the host's own handler when one
+  of them is the host's, otherwise on `[assembly: KeryxHost]`. The host dispatches none of the handlers, as for a duplicate in its own
+  source, so the error is not joined by errors in generated code. Duplicates inside one referenced assembly are not reported again (that
+  assembly's analyzer reported them).
+- **Proposal:** confirm and give the message in the KRX005 row.
+
+### OQ-50: KRX009 in the host
+
+The ADR has the host report "KRX008/KRX009 for pairs involving referenced behaviors", but not where, with what target name, or how a
+polymorphic referenced handler is checked. A behavior that a referenced handler's manifest attaches (`KeryxHandler.Behaviors`) can stop
+fitting when the host resolves the target or the behavior to another version than the library was built against.
+
+- **Interim:** for each referenced handler the host composes, each attached behavior from its manifest that does not fit the target as
+  the host resolves it is KRX009 (error, the analyzer's descriptor, which is not a compilation-end diagnostic), with the analyzer's reasons
+  ("it is not a Keryx behavior", the wrong kind, constraints that do not hold), on `[assembly: KeryxHost]`, naming the target
+  `HandlerClass.Handle` (the method is private, so its signature is not visible). As in the analyzer, a polymorphic notification handler is
+  checked for the behavior kind only and the host keeps skipping the behavior per concrete type (OQ-40). A behavior class the behavior
+  rules reject is the library's KRX019/KRX020 and is not reported again. The behavior is skipped and the handler kept, as for the host's own
+  handlers (the error fails the build either way). Assembly and global behaviors that do not fit are skipped silently, as the ADR says.
+- **Proposal:** confirm, and say in the Diagnostics section where the host reports KRX009 and how it names the target.
 
 ## Decided
 

@@ -1,9 +1,7 @@
 using System.Globalization;
 using Keryx.Analyzers;
-using Keryx.Tests.Abstractions;
 using Keryx.Tests.Hosts;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace Keryx.Tests.Behaviors;
 
@@ -187,7 +185,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     public async Task KRX008_For_Notification_Behavior_Pairs_With_A_Referenced_Behavior(CancellationToken cancellationToken)
     {
         // Per-publish and per-handler: a library behavior in Phase.Transaction; the host's own, in Phase.Observability, claims to run after
-        // it. Referenced global behaviors are Phase 7, so the library behaviors are attached with [Behavior].
+        // it. The library behaviors are attached with [Behavior] (a referenced global behavior would apply to both as well).
         var library = Library(
             """
             namespace Lib;
@@ -437,18 +435,5 @@ public class HostBehaviorDiagnosticsTests : HostTest
     public static IEnumerable<Func<OrderingForm>> Forms() => [() => OrderingForm.TypeOf, () => OrderingForm.Generic, () => OrderingForm.Mixed];
 
     /// <summary>Compiles a referenced library against Keryx.</summary>
-    private static MetadataReference Library(string source)
-    {
-        var compilation = CSharpCompilation.Create(
-            "Lib",
-            [CSharpSyntaxTree.ParseText(source, new(LanguageVersion.Latest))],
-            [.. ManifestContractTests.FrameworkReferences, MetadataReference.CreateFromFile(typeof(Unit).Assembly.Location)],
-            new(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable)
-        );
-        using var image = new MemoryStream();
-        var emit = compilation.Emit(image);
-        return emit.Success
-            ? MetadataReference.CreateFromImage(image.ToArray())
-            : throw new InvalidOperationException(string.Join(Environment.NewLine, emit.Diagnostics.Select(static d => d.ToString())));
-    }
+    private static MetadataReference Library(string source) => TestLibraries.Reference("Lib", source);
 }

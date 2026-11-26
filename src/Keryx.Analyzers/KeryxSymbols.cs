@@ -35,6 +35,8 @@ internal sealed class KeryxSymbols
         RunsBeforeAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttribute);
         RunsBeforeAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttributeOfT);
         ExcludeBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeBehaviorAttribute);
+        ExcludeHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeHandlerAttribute);
+        KeryxHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHandlerAttribute);
         RequestPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IRequestPipelineBehavior);
         StreamPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamPipelineBehavior);
         StreamHookBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamHookBehavior);
@@ -67,6 +69,8 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? RunsBeforeAttribute { get; }
     public INamedTypeSymbol? RunsBeforeAttributeOfT { get; }
     public INamedTypeSymbol? ExcludeBehaviorAttribute { get; }
+    public INamedTypeSymbol? ExcludeHandlerAttribute { get; }
+    public INamedTypeSymbol? KeryxHandlerAttribute { get; }
     public INamedTypeSymbol? RequestPipelineBehavior { get; }
     public INamedTypeSymbol? StreamPipelineBehavior { get; }
     public INamedTypeSymbol? StreamHookBehavior { get; }

@@ -54,8 +54,15 @@
     <File Path="samples/Directory.Build.props" />
     <File Path="samples/Directory.Build.targets" />
   </Folder>
-  <Folder Name="/samples/hosts/" />
-  <Folder Name="/samples/libraries/" />
+  <Folder Name="/samples/hosts/">
+    <File Path="samples/hosts/README.md" />
+    <Project Path="samples/hosts/Keryx.Samples.Host/Keryx.Samples.Host.csproj" />
+  </Folder>
+  <Folder Name="/samples/libraries/">
+    <File Path="samples/libraries/README.md" />
+    <Project Path="samples/libraries/Keryx.Samples.Contracts/Keryx.Samples.Contracts.csproj" />
+    <Project Path="samples/libraries/Keryx.Samples.Orders/Keryx.Samples.Orders.csproj" />
+  </Folder>
   <Folder Name="/test/">
     <File Path="test/.editorconfig" />
     <File Path="test/Directory.Build.props" />
