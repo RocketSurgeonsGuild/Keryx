@@ -124,6 +124,33 @@ internal static class HandlerAnalysis
     }
 
     /// <summary>
+    ///     The concrete request or stream request type a handler candidate takes, whether or not the candidate breaks other rules, or
+    ///     <see langword="null" /> when it takes a notification or has no single concrete request parameter. KRX001, KRX005 and KRX030 count
+    ///     a malformed handler as handling its request, so the request does not get a second error on top of the handler's.
+    /// </summary>
+    public static ITypeSymbol? HandledRequestType(IMethodSymbol handler, KeryxSymbols symbols)
+    {
+        MessageType? single = null;
+        foreach (var parameter in handler.Parameters)
+        {
+            var messageType = MessageType.Classify(parameter.Type, symbols);
+            if (!messageType.IsMessage)
+            {
+                continue;
+            }
+
+            if (single is not null)
+            {
+                return null;
+            }
+
+            single = messageType;
+        }
+
+        return single is { IsConcrete: true } request && ( request.IsRequest || request.IsStream ) ? request.Type : null;
+    }
+
+    /// <summary>
     ///     The handler candidates among a type's direct members, in declaration order.
     /// </summary>
     public static ImmutableArray<IMethodSymbol> GetCandidates(INamedTypeSymbol type, KeryxSymbols symbols)
@@ -261,6 +288,7 @@ internal static class HandlerAnalysis
                             true,
                             null,
                             behaviorType.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                            Descriptors.Public,
                             $"the handler '{methodName}' attaches it and this assembly is not a host"
                         )
                     );
@@ -268,7 +296,54 @@ internal static class HandlerAnalysis
             }
         }
 
+        AnalyzeHostReach(signature, methodName, issues);
         return signature;
+    }
+
+    /// <summary>
+    ///     OQ-24: in a host, the generated mediator and <c>AddKeryx()</c> live outside the handler class and name the request, its response
+    ///     and every injected type, so each must be at least <c>internal</c>. A type narrower than that is KRX016 in a host (the handler is
+    ///     skipped, and its request still counts as handled, so it does not also get KRX030). Outside a host the outside-host KRX016 rules
+    ///     already report these types as not public.
+    /// </summary>
+    private static void AnalyzeHostReach(HandlerSignature signature, string methodName, IssueCollector issues)
+    {
+        const string Reason = "the host's generated mediator and AddKeryx(), outside the handler class, use it";
+        if (signature.MessageParameter is { } message && TypeAccessibility.Of(message.Type) == AccessLevel.Restricted)
+        {
+            AddHostOnly(message.Locations.FirstOrDefault() ?? signature.Method.Locations.FirstOrDefault(), message.Type, $"the handler '{methodName}' takes it and {Reason}");
+        }
+
+        if (signature.ResponseType is { } response && TypeAccessibility.Of(response) == AccessLevel.Restricted)
+        {
+            AddHostOnly(ReturnTypeLocation(signature.Method) ?? signature.Method.Locations.FirstOrDefault(), response, $"the handler '{methodName}' responds with it and {Reason}");
+        }
+
+        foreach (var parameter in signature.InjectedParameters)
+        {
+            if (TypeAccessibility.Of(parameter.Type) == AccessLevel.Restricted)
+            {
+                AddHostOnly(
+                    parameter.Locations.FirstOrDefault() ?? signature.Method.Locations.FirstOrDefault(),
+                    parameter.Type,
+                    $"the handler injects it through parameter '{parameter.Name}' and {Reason}"
+                );
+            }
+        }
+
+        void AddHostOnly(Location? location, ITypeSymbol type, string reason) =>
+            issues.Add(
+                new(
+                    Descriptors.NotEffectivelyPublic,
+                    location,
+                    false,
+                    null,
+                    type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    Descriptors.AtLeastInternal,
+                    reason
+                )
+                { HostOnly = true }
+            );
     }
 
     /// <summary>
@@ -341,6 +416,30 @@ internal static class HandlerAnalysis
                 typeName,
                 $"has injected parameters, but its base type '{baseType.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat)}' has no accessible parameterless constructor for the generated constructor to call"
             );
+        }
+
+        if (!type.IsStatic && type.TypeKind == TypeKind.Class && injected.Length > 0)
+        {
+            // OQ-34: the host constructs a handler class with injected parameters with `new` in a generated factory.
+            if (type.IsAbstract)
+            {
+                issues.Add(
+                    Descriptors.InvalidHandlerConstructor,
+                    typeLocation,
+                    typeName,
+                    "has injected parameters, so a host constructs it, but it is abstract"
+                );
+            }
+
+            if (RequiredMembers(type) is { Count: > 0 } required)
+            {
+                issues.Add(
+                    Descriptors.InvalidHandlerConstructor,
+                    typeLocation,
+                    typeName,
+                    $"has injected parameters, so a host constructs it, but it has required members ({string.Join(", ", required.Select(static m => $"'{m}'"))}) that the generated constructor does not set"
+                );
+            }
         }
 
         foreach (var member in type.GetMembers())
@@ -442,6 +541,24 @@ internal static class HandlerAnalysis
         return signature;
     }
 
+    /// <summary>The required fields and properties of a type and its base types, by name, nearest first.</summary>
+    private static List<string> RequiredMembers(INamedTypeSymbol type)
+    {
+        var names = new List<string>();
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers())
+            {
+                if (member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true } && !names.Contains(member.Name))
+                {
+                    names.Add(member.Name);
+                }
+            }
+        }
+
+        return names;
+    }
+
     public static bool IsPartial(INamedTypeSymbol type)
     {
         foreach (var reference in type.DeclaringSyntaxReferences)
@@ -517,6 +634,7 @@ internal static class HandlerAnalysis
                         true,
                         null,
                         parameterTypeName,
+                        Descriptors.Public,
                         $"the notification handler '{methodName}' takes it and this assembly is not a host"
                     )
                 );
@@ -681,6 +799,7 @@ internal static class HandlerAnalysis
                     true,
                     null,
                     parameter.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    Descriptors.Public,
                     $"the handler injects it through parameter '{parameter.Name}', the generated public constructor takes it, and this assembly is not a host"
                 )
             );

@@ -1,0 +1,23 @@
+﻿{
+  FinalDiagnostics: [],
+  GeneratorDiagnostics: {
+    Keryx.Analyzers.HandlerGenerator: [],
+    Keryx.Analyzers.HostGenerator: []
+  },
+  GlobalOptions: {
+    build_property.RootNamespace: Sample
+  },
+  References: [
+    Keryx.dll,
+    Microsoft.Extensions.DependencyInjection.Abstractions.dll,
+    mscorlib.dll,
+    netstandard.dll,
+    System.Collections.Immutable.dll,
+    System.ComponentModel.dll,
+    System.Core.dll,
+    System.dll,
+    System.Private.CoreLib.dll,
+    System.Private.CoreLib.dll,
+    System.Runtime.dll
+  ]
+}

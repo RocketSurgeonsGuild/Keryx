@@ -96,8 +96,36 @@ target framework, which a `Compilation` does not carry. Both come from `build/Ke
 
 The ADR switches from a linear type-check chain to a `FrozenDictionary` lookup above 16 request types. The number is a guess.
 
-- **Interim:** 16.
-- **Proposal:** set it from the Phase 3 benchmark and record the measured crossover here.
+- **Interim:** 32 (`HostEmitter.DispatchThreshold`), set from the Phase 3 benchmark below.
+- **Proposal:** change the ADR's "more than 16 request types" to 32, and add the dispatch-shape rule below to its Generic entry points
+  section.
+
+Phase 3 measurements (2026-11-26; BenchmarkDotNet 0.15.8 `--job short`, .NET 10.0.15 Arm64 RyuJIT, Apple M4 Max, macOS 27.2, default
+runtime settings with Dynamic PGO on; `test/Keryx.Benchmarks/Host`). All rows allocate 0 B.
+
+| Request types | Linear, last type | Linear, middle type | FrozenDictionary + switch, last | middle  |
+| ------------- | ----------------- | ------------------- | ------------------------------- | ------- |
+| 8             | 1.86 ns           | 2.25 ns             | 4.50 ns                         | 4.48 ns |
+| 16            | 2.94 ns           | 2.12 ns             | 4.59 ns                         | 4.58 ns |
+| 24            | 3.91 ns           | 2.51 ns             | 4.52 ns                         | 4.80 ns |
+| 32            | 5.10 ns           | 3.04 ns             | 4.54 ns                         | 4.56 ns |
+| 48            | 7.03 ns           | 3.97 ns             | 4.74 ns                         | 4.80 ns |
+| 64            | 8.92 ns           | 5.02 ns             | 4.49 ns                         | 4.49 ns |
+
+The lookup is flat at about 4.5 ns; the chain costs about 0.13 ns per compare. The worst case crosses over between 24 and 32 types, the
+average near 56. At 32 the chain's worst case is 0.6 ns slower than the lookup and its average 1.5 ns faster, hence 32.
+
+Lazy pipeline context against resolving per call (`PipelineContextBenchmarks`, same machine and job): `Volatile.Read` of the scope's context
+measured below BenchmarkDotNet's resolution (reported as 0 ns, like the direct handler call), against 10.76 ns for
+`GetRequiredService<THandler>()` on a scoped registration per call; both 0 B.
+
+Dispatch shape found while measuring: a first version wrote every arm inline in the generic `Send` (`var response = ...;
+return Unsafe.As<ValueTask<X>, ValueTask<TResponse>>(ref response);`) and kept the `FrozenDictionary` lookup's `out` local in the same
+method. Under Dynamic PGO that measured about 45 ns per call for every count, both shapes, whichever arm was taken (about 1.5 to 8 ns with
+`DOTNET_TieredPGO=0`): the Tier1 code zeroed a 1 KB frame (one `ValueTask` per arm) in the prolog of every call and could not tail-call the
+arms. The generator therefore emits each arm as its own non-inlined `__Dispatch{n}<TResponse>` method holding the `Unsafe.As`, and the
+lookup as a non-inlined `__RequestIndex(Type)` returning -1 for an unknown type, so generic `Send` holds no address-taken locals; the
+table above is for that shape.
 
 ### OQ-16: A host that references another host
 
@@ -194,10 +222,13 @@ Inside a host a public handler class may use internal request or service types, 
   parameter) and the behavior types attached with `[Behavior]` on the handler method (reported on the attribute); the handler generator
   skips such a handler. In a host, a public handler class whose request, response or injected types are internal gets `internal`
   generated members and no `[KeryxHandler]` attribute, like the host's internal handlers; a handler whose signature uses a type narrower
-  than `internal` is skipped. Generated member accessibility follows the signature alone (`public` only when every type it mentions is
+  than `internal` (its request, response or an injected type) is skipped, and KRX016 reports that type in the host ("must be at least
+  internal", on the parameter or the return type), so the skipped handler is never silent. Its request still counts as handled, so it does
+  not also get KRX030. Generated member accessibility follows the signature alone (`public` only when every type it mentions is
   effectively public), so a `protected internal` handler class with internal signature types also gets `internal` members rather than
   public ones that fail with CS0051.
-- **Proposal:** confirm and extend the KRX016 row of the ADR ("... and every type the generated constructor and invoker mention").
+- **Proposal:** confirm and extend the KRX016 row of the ADR ("... and every type the generated constructor and invoker mention; in a
+  host, every type a handler's signature mentions is at least `internal`").
 
 ### OQ-25: Where KRX021 is reported
 
@@ -271,6 +302,68 @@ pointer cannot be. Without a rule the generated half fails to compile (CS8345, C
   also get KRX014 (whose "remove static" fix would not help) and the base-constructor part of KRX007 does not apply.
 - **Proposal:** extend the KRX013 row: "Handler parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a
   pointer, or there is more than one `CancellationToken`."
+
+### OQ-31: A typed overload called with a derived request
+
+Typed overloads "skip type dispatch" (ADR, Mediator), and "a handler for a base request never receives a derived request" (ADR,
+Requests and notifications). The two conflict for a request class that is not sealed: `Animal` and `Dog : Animal` are both requests, and
+`mediator.Send(animal)` with an `Animal`-typed variable that holds a `Dog` binds to the `Send(Animal)` overload at compile time, which would
+hand the `Dog` to `Animal`'s handler.
+
+- **Interim:** the typed overload of a request class that is not sealed compares `request.GetType()` with its own type (a method-table
+  compare, no allocation) and, when they differ, sends through the generic entry point, which dispatches on the exact runtime type (or
+  throws `KeryxHandlerNotFoundException`). Sealed classes and structs skip the check.
+- **Proposal:** confirm and add one sentence to the ADR's Mediator section ("A typed overload for a request class that is not sealed checks
+  the runtime type first").
+
+### OQ-32: What the host generator emits when KRX031 is reported
+
+KRX031 reports a host that targets a framework older than `net10.0`. The ADR does not say whether the host generator still emits the
+mediator and `AddKeryx()`, which use `Unsafe.As`, `FrozenDictionary` and `ArgumentNullException.ThrowIfNull` and so fail to compile there.
+
+- **Interim:** like KRX022, the host generator emits nothing in such a host and reports KRX031 on `[assembly: KeryxHost]` (KRX030 is still
+  reported), so the user sees KRX031 instead of compiler errors in generated files. The handler generator is unaffected.
+- **Proposal:** confirm and add "the host generator emits nothing there" to the KRX031 row.
+
+### OQ-33: Host namespace sanitisation for keywords and empty segments
+
+The ADR's fallback rule (characters not valid in an identifier become `_`, a segment that starts with a digit gets a `_` prefix) leaves
+two cases that still give an invalid namespace: a segment that is a C# keyword (`Contoso.namespace`, from an assembly named that way) and
+an empty segment (`My..App`). It also does not say whether `RootNamespace` itself is sanitised.
+
+- **Interim:** the same sanitisation runs on `RootNamespace` and on the assembly-name fallback (a valid namespace is unchanged); an empty
+  segment becomes `_` and a keyword segment is escaped with `@` (`Contoso.@namespace`).
+- **Proposal:** confirm and add both cases to the rule in the ADR's Opting in section.
+
+### OQ-34: Handler classes a host cannot construct with `new`
+
+A handler class with injected parameters is constructed by the host's generated factory (`new Handler(...)` in `AddKeryx()`). Two shapes
+pass every rule and still break that factory with a compiler error in generated code: an `abstract` handler class (CS0144) and a handler
+class that has, or inherits, a `required` field or property (CS9035, because the generated constructor does not set it). The handler
+partial alone compiles, so outside a host nothing shows until a host composes the handler.
+
+- **Interim:** KRX007 also reports a handler class with injected parameters that is abstract, or that it or a base type declares
+  `required` members ("has injected parameters, so a host constructs it, but it is abstract" / "... but it has required members ..."), and
+  the handler generator skips it. The host then counts its request as handled by a malformed handler, so no KRX030 is added.
+  `[SetsRequiredMembers]` is not put on the generated constructor, which does not set them. A static invoker (no injected parameters) is
+  never constructed, so neither case applies to it.
+- **Proposal:** extend the KRX007 row: "..., or has injected parameters and is abstract, declares or inherits `required` members, or has a
+  base type without an accessible parameterless instance constructor."
+
+### OQ-35: Where host diagnostics are reported, and KRX030 severity in `.editorconfig`
+
+The ADR has host diagnostics turned back into a `Location` with `Location.Create` from the equatable `LocationInfo`, and says KRX030's
+severity "can be changed in `.editorconfig`". `Location.Create(path, span, lineSpan)` gives a location without a syntax tree, so the
+compiler applies only global options to it: `dotnet_diagnostic.KRX030.severity` under `[*.cs]` in an `.editorconfig` had no effect (only an
+`is_global` config did).
+
+- **Interim:** the host generator computes its diagnostics from its cached models (still carrying `LocationInfo`) in a step of their own,
+  and only the output that reports them is combined with the compilation, to find the syntax tree by file path and report with
+  `Location.Create(tree, span)`. Per-tree `.editorconfig` severity then applies to KRX030 (and KRX031). The source output does not read the
+  compilation and stays cached on unrelated edits; the diagnostics output reruns on every compilation, which costs one dictionary of the
+  compilation's trees, built only when there is something to report.
+- **Proposal:** amend the Diagnostics section: "turned back into a `Location` on the compilation's syntax tree when reporting (in an output
+  that combines the cached diagnostics with the compilation)".
 
 ## Decided
 

@@ -22,5 +22,7 @@ KRX017  | Keryx    | Warning  | HandlerAnalyzer, response type differs only in n
 KRX018  | Keryx    | Error    | HandlerAnalyzer, keyed service key is not a constant
 KRX021  | Keryx    | Info     | StructRequestAnalyzer, struct request boxed through ISender
 KRX022  | Keryx    | Error    | LanguageVersionAnalyzer, C# language version below 11
+KRX030  | Keryx    | Error    | HostGenerator, request without a handler in the host
+KRX031  | Keryx    | Error    | HostGenerator, host targets a framework older than net10.0
 KRX040  | Keryx    | Warning  | HandlerAnalyzer, [HandlerOrder] on a method that is not a notification handler
 KRX041  | Keryx    | Warning  | MessageTypeAnalyzer, [PublishStrategy] on a type that is not a notification

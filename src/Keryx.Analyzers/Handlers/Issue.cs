@@ -21,6 +21,12 @@ internal sealed class Issue(
     /// <summary>Whether the rule applies only outside a host (the <c>public</c> part of KRX004, and KRX016).</summary>
     public bool OutsideHostOnly { get; } = outsideHostOnly;
 
+    /// <summary>
+    ///     Whether the rule applies only in a host (KRX016 for a signature type narrower than <c>internal</c>, OQ-24; outside a host the
+    ///     outside-host KRX016 already covers it).
+    /// </summary>
+    public bool HostOnly { get; init; }
+
     public ImmutableDictionary<string, string?> Properties { get; } = properties ?? ImmutableDictionary<string, string?>.Empty;
     public object?[] Arguments { get; } = arguments;
 
@@ -58,8 +64,10 @@ internal sealed class IssueCollector
         {
             HasOutsideHostErrors = true;
         }
-        else
+        else if (!issue.HostOnly)
         {
+            // A host-only error needs no flag: it is reported exactly when the handler's signature access is restricted, which the
+            // generators check directly (HandlerEmitter.Emit, HostModelFactory.CreateHandler).
             HasErrors = true;
         }
     }
@@ -74,7 +82,7 @@ internal sealed class IssueCollector
     {
         foreach (var issue in Issues)
         {
-            if (isHost && issue.OutsideHostOnly)
+            if (isHost ? issue.OutsideHostOnly : issue.HostOnly)
             {
                 continue;
             }

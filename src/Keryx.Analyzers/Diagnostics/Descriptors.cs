@@ -100,7 +100,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one), and with injected parameters its base type has an accessible parameterless constructor.",
+        description: "Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one). With injected parameters a host constructs the class, so it is not abstract, it and its base types declare no required members, and its base type has an accessible parameterless constructor.",
         helpLinkUri: HelpLinkBase + "krx007"
     );
 
@@ -159,14 +159,20 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx015"
     );
 
+    /// <summary>The KRX016 <c>{1}</c> argument outside a host.</summary>
+    public const string Public = "public";
+
+    /// <summary>The KRX016 <c>{1}</c> argument in a host (OQ-24).</summary>
+    public const string AtLeastInternal = "at least internal";
+
     public static readonly DiagnosticDescriptor NotEffectivelyPublic = new(
         "KRX016",
         "Type a pipeline needs is not public",
-        "'{0}' must be public, because {1}",
+        "'{0}' must be {1}, because {2}",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them.",
+        description: "Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions must be at least internal, because the generated mediator and AddKeryx() use it from outside the handler class.",
         helpLinkUri: HelpLinkBase + "krx016"
     );
 
@@ -213,6 +219,28 @@ internal static class Descriptors
         description: "Generated code sets init-only attribute properties, and [RunsAfter<T>]/[RunsBefore<T>] are generic attributes, so every project that references Keryx compiles with C# 11 or later. The Keryx generators emit nothing in a project below that.",
         helpLinkUri: HelpLinkBase + "krx022",
         customTags: WellKnownDiagnosticTags.CompilationEnd
+    );
+
+    public static readonly DiagnosticDescriptor UnhandledRequestInHost = new(
+        "KRX030",
+        "Request has no handler in the host",
+        "Request type '{0}' has no handler in this host",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Every request and stream request type a host can see needs exactly one handler in the host's composed set: the host's own handlers and the handlers of the assemblies it references. Its severity can be changed in .editorconfig, for example in a client that sends requests handled out of process.",
+        helpLinkUri: HelpLinkBase + "krx030"
+    );
+
+    public static readonly DiagnosticDescriptor HostTargetFrameworkTooOld = new(
+        "KRX031",
+        "Host targets a framework older than net10.0",
+        "'{0}' is a Keryx host ([assembly: KeryxHost]), so it must target net10.0 or newer, but it targets {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework.",
+        helpLinkUri: HelpLinkBase + "krx031"
     );
 
     public static readonly DiagnosticDescriptor MisplacedHandlerOrder = new(

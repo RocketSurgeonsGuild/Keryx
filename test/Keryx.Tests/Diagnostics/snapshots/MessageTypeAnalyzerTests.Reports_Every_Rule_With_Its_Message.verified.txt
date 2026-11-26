@@ -41,9 +41,9 @@
     Severity: Error,
     WarningLevel: 0,
     Location: Input0.cs: (12,22)-(12,28),
-    Description: Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them.,
+    Description: Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions must be at least internal, because the generated mediator and AddKeryx() use it from outside the handler class.,
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx016,
-    MessageFormat: '{0}' must be public, because {1},
+    MessageFormat: '{0}' must be {1}, because {2},
     Message: 'Hidden' must be public, because it is a request and this assembly is not a host,
     Category: Keryx
   },
@@ -53,9 +53,9 @@
     Severity: Error,
     WarningLevel: 0,
     Location: Input0.cs: (12,22)-(12,28),
-    Description: Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them.,
+    Description: Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions must be at least internal, because the generated mediator and AddKeryx() use it from outside the handler class.,
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx016,
-    MessageFormat: '{0}' must be public, because {1},
+    MessageFormat: '{0}' must be {1}, because {2},
     Message: 'Result' must be public, because the request 'Hidden' responds with it and this assembly is not a host,
     Category: Keryx
   },

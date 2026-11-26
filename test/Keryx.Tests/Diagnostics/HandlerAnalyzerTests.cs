@@ -301,6 +301,38 @@ public class HandlerAnalyzerTests : AnalyzerTest
     }
 
     [Test]
+    [Arguments(
+        "public abstract partial class H { private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it is abstract"
+    )]
+    [Arguments(
+        "public partial class H { public required string Name { get; init; } private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it has required members ('Name') that the generated constructor does not set"
+    )]
+    [Arguments(
+        "public abstract class Base { public required int Count; } public partial class H : Base { private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it has required members ('Count') that the generated constructor does not set"
+    )]
+    public async Task KRX007_A_Constructed_Handler_Class_Is_Abstract_Or_Has_Required_Members(string source, string message, CancellationToken cancellationToken)
+    {
+        // OQ-34: the host's generated factory constructs the class with `new`, which CS0144/CS9035 would reject in generated code.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX007"]);
+        await Assert.That(Messages(diagnostics, "KRX007")).IsEquivalentTo([message]);
+    }
+
+    [Test]
+    [Arguments("public abstract partial class H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial class H { public required string Name { get; init; } private static string Handle(Ping request) => \"\"; }")]
+    public async Task KRX007_A_Static_Invoker_Is_Never_Constructed(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
     [Arguments("public partial class H<T> { private static string Handle(Ping request) => \"\"; }")]
     [Arguments("public partial class Outer<T> { public partial class H { private static string Handle(Ping request) => \"\"; } }")]
     public async Task KRX012_Generic_Handler_Class(string source, CancellationToken cancellationToken)
@@ -452,6 +484,24 @@ public class HandlerAnalyzerTests : AnalyzerTest
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(
+        "internal static partial class H { private sealed record Secret : IRequest<int>; private static int Handle(Secret request) => 1; }",
+        "'H.Secret' must be at least internal, because the handler 'H.Handle(H.Secret)' takes it and the host's generated mediator and AddKeryx(), outside the handler class, use it"
+    )]
+    [Arguments(
+        "public sealed record Q : IRequest<int>; internal partial class H { private interface IHidden { } private static int Handle(Q request, IHidden hidden) => 1; }",
+        "'H.IHidden' must be at least internal, because the handler injects it through parameter 'hidden' and the host's generated mediator and AddKeryx(), outside the handler class, use it"
+    )]
+    public async Task KRX016_Signature_Type_Narrower_Than_Internal_In_A_Host(string source, string message, CancellationToken cancellationToken)
+    {
+        // OQ-24: the host skips such a handler, so the analyzer must say why.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>("[assembly: KeryxHost]\n" + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
+        await Assert.That(Messages(diagnostics, "KRX016")).IsEquivalentTo([message]);
     }
 
     [Test]

@@ -29,4 +29,55 @@ internal static class TrackingNames
 
     /// <summary>The handler models combined with the settings, one per generated handler source.</summary>
     public const string HandlerSources = "Keryx.HandlerSources";
+
+    /// <summary>The host generator: whether the parse options are C# 11 or later (KRX022).</summary>
+    public const string HostLanguageVersion = "Keryx.Host.LanguageVersion";
+
+    /// <summary>What the host generator reads from the compilation itself. Fed directly by the compilation, so it always runs.</summary>
+    public const string HostCompilation = "Keryx.Host.Compilation";
+
+    /// <summary>The MSBuild properties the host generator reads (RootNamespace, TargetFrameworkIdentifier, TargetFrameworkVersion).</summary>
+    public const string HostBuildProperties = "Keryx.Host.BuildProperties";
+
+    /// <summary><see cref="HostCompilation" />, <see cref="HostBuildProperties" /> and <see cref="HostLanguageVersion" />, before they are merged.</summary>
+    public const string HostSettingsInputs = "Keryx.Host.SettingsInputs";
+
+    /// <summary>The host generator's settings.</summary>
+    public const string HostSettings = "Keryx.Host.Settings";
+
+    /// <summary>Every <c>Handle</c>/<c>HandleAsync</c> method projected to what the host needs from it, or nothing.</summary>
+    public const string HostHandlerCandidates = "Keryx.Host.HandlerCandidates";
+
+    /// <summary>The <see cref="HostHandlerCandidates" /> that are handler candidates (still typed as nullable).</summary>
+    public const string HostHandlerEntries = "Keryx.Host.HandlerEntries";
+
+    /// <summary>What the host needs from each handler candidate.</summary>
+    public const string HostHandlers = "Keryx.Host.Handlers";
+
+    /// <summary><see cref="HostHandlers" />, collected.</summary>
+    public const string HostHandlerList = "Keryx.Host.HandlerList";
+
+    /// <summary>Every type declaration with a base list projected to a request or stream request model, or nothing.</summary>
+    public const string HostRequestCandidates = "Keryx.Host.RequestCandidates";
+
+    /// <summary>The <see cref="HostRequestCandidates" /> that are requests or stream requests (still typed as nullable).</summary>
+    public const string HostRequestModels = "Keryx.Host.RequestModels";
+
+    /// <summary>The request and stream request types declared in the host.</summary>
+    public const string HostRequests = "Keryx.Host.Requests";
+
+    /// <summary><see cref="HostRequests" />, collected.</summary>
+    public const string HostRequestList = "Keryx.Host.RequestList";
+
+    /// <summary>The settings combined with <see cref="HostHandlerList" />.</summary>
+    public const string HostSettingsAndHandlers = "Keryx.Host.SettingsAndHandlers";
+
+    /// <summary>The settings, handlers and request types combined: the input of the host's source output.</summary>
+    public const string HostSources = "Keryx.Host.Sources";
+
+    /// <summary>The host diagnostics (KRX030, KRX031), computed from <see cref="HostSources" />.</summary>
+    public const string HostDiagnostics = "Keryx.Host.Diagnostics";
+
+    /// <summary><see cref="HostDiagnostics" /> combined with the compilation, to report them on their syntax trees (fed by the compilation).</summary>
+    public const string HostDiagnosticsAndCompilation = "Keryx.Host.DiagnosticsAndCompilation";
 }

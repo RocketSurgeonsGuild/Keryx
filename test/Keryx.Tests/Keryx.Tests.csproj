@@ -38,6 +38,8 @@
         <PackageReference Include="PublicApiGenerator" />
         <!-- FromKeyedServicesAttribute for the keyed-parameter generator and analyzer tests. -->
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+        <!-- The service provider the host runtime tests resolve the generated mediator from. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     </ItemGroup>
     <ItemGroup>
         <Compile Remove="**\snapshots\**" />

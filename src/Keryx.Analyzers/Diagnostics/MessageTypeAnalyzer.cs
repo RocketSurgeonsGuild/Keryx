@@ -61,7 +61,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                                 if (location!.SourceTree == treeContext.Tree)
                                 {
                                     treeContext.ReportDiagnostic(
-                                        Diagnostic.Create(Descriptors.NotEffectivelyPublic, location, behaviorName, "this assembly attaches it to its handlers and is not a host")
+                                        Diagnostic.Create(Descriptors.NotEffectivelyPublic, location, behaviorName, Descriptors.Public, "this assembly attaches it to its handlers and is not a host")
                                     );
                                 }
                             }
@@ -103,6 +103,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                 Descriptors.NotEffectivelyPublic,
                 HandlerAnalysis.AttributeLocation(globalBehavior) ?? type.Locations.FirstOrDefault(),
                 type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                Descriptors.Public,
                 "it is a global behavior, every host that references this assembly applies it, and this assembly is not a host"
             )
         );
@@ -159,7 +160,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
         var kind = messageType.IsRequest ? "request" : messageType.IsStream ? "stream request" : "notification";
         if (TypeAccessibility.OfDeclaration(type) != AccessLevel.Public)
         {
-            context.ReportDiagnostic(Diagnostic.Create(Descriptors.NotEffectivelyPublic, location, typeName, $"it is a {kind} and this assembly is not a host"));
+            context.ReportDiagnostic(Diagnostic.Create(Descriptors.NotEffectivelyPublic, location, typeName, Descriptors.Public, $"it is a {kind} and this assembly is not a host"));
         }
 
         if (messageType.IsNotificationOnly)
@@ -172,6 +173,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                         Descriptors.NotEffectivelyPublic,
                         behaviorLocation ?? location,
                         behaviorName,
+                        Descriptors.Public,
                         $"the notification '{typeName}' attaches it and this assembly is not a host"
                     )
                 );
@@ -186,6 +188,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                     Descriptors.NotEffectivelyPublic,
                     location,
                     response.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    Descriptors.Public,
                     $"the {kind} '{typeName}' {( messageType.IsRequest ? "responds with" : "streams" )} it and this assembly is not a host"
                 )
             );

@@ -11,6 +11,8 @@
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="BenchmarkDotNet" />
+        <!-- The scoped container the pipeline context benchmark resolves handlers from. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />

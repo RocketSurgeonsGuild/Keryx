@@ -52,33 +52,11 @@ public sealed class MissingHandlerAnalyzer : DiagnosticAnalyzer
 
         foreach (var candidate in HandlerAnalysis.GetCandidates(type, symbols))
         {
-            if (SingleMessageType(candidate, symbols) is { IsConcrete: true } parameterType && ( parameterType.IsRequest || parameterType.IsStream ))
+            if (HandlerAnalysis.HandledRequestType(candidate, symbols) is { } requestType)
             {
-                handlers.Add((parameterType.Type, candidate));
+                handlers.Add((requestType, candidate));
             }
         }
-    }
-
-    private static MessageType? SingleMessageType(IMethodSymbol handler, KeryxSymbols symbols)
-    {
-        MessageType? single = null;
-        foreach (var parameter in handler.Parameters)
-        {
-            var messageType = MessageType.Classify(parameter.Type, symbols);
-            if (!messageType.IsMessage)
-            {
-                continue;
-            }
-
-            if (single is not null)
-            {
-                return null;
-            }
-
-            single = messageType;
-        }
-
-        return single;
     }
 
     private static void Report(
