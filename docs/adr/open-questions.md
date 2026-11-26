@@ -103,7 +103,7 @@ with no `LangVersion` that references the package evaluates `LangVersion` to `la
 `[BehaviorOrder(..., Order = n)]`; with `LangVersion` 10 in its `Directory.Build.props` it keeps 10 and fails with CS8936. Folded into
 the ADR (Package and assemblies, Diagnostics, Alternatives considered, Consequences).
 **Note 2026-11-26:** the generic ordering attributes were removed with "Static behaviors" below, so the C# 11 reason given here is
-gone; OQ-52 below keeps the floor at C# 11 for other reasons.
+gone; OQ-52 below raises the floor to C# 14.
 
 ### Generic `RunsAfter<T>`/`RunsBefore<T>` (2026-11-26)
 
@@ -1040,8 +1040,11 @@ through attribute named arguments (C# 9). The 2026-11-26 decisions did not say w
   it never sees KRX022.
 - **Proposal:** keep C# 11, which costs nothing for projects that take the default and leaves generated code free to use C# 10 and 11
   features. Alternative: lower the floor and KRX022 to C# 9, after checking that the generated code compiles there.
-- **Decision:** Keep the C# 11 floor and KRX022 unchanged: it costs nothing with the `LangVersion=latest` default and leaves generated
-  code free to use C# 10 and 11 features. Folded into the ADR (Package and assemblies, Alternatives considered).
+- **Decision:** first decided as "keep C# 11", then changed by the owner the same day: the floor rises to **C# 14**, the default
+  language of the .NET 10 SDK that Keryx already requires. KRX022 reports a language version below C# 14, and the generators emit
+  nothing there. `netstandard2.0` stays a supported target for contracts and handler libraries (dropping it was considered and
+  rejected); only the language version rises. Folded into the ADR (Status, Package and assemblies, Diagnostics, Alternatives
+  considered, Consequences). Implemented in Phase 9.
 
 ### OQ-53: A behavior class with both notification kinds (2026-11-26)
 

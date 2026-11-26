@@ -22,7 +22,7 @@ question, the interim behavior you are using and a proposal, continue with the s
 - One NuGet package `Keryx`: `Keryx.dll` (`netstandard2.0;net10.0;net11.0`) plus `Keryx.Analyzers.dll` (`netstandard2.0`; generators,
   analyzers and code fixes in one assembly) and `System.Text.Json.dll` under `analyzers/dotnet/cs`. `Keryx.dll` depends on
   `Microsoft.Extensions.DependencyInjection.Abstractions` (10.0.x for `net10.0`, 11.0.x for `net11.0`, 8.0.x for `netstandard2.0`).
-  `build/Keryx.props` defaults `LangVersion` to `latest`; Keryx needs C# 11 or later in every project that references it (KRX022).
+  `build/Keryx.props` defaults `LangVersion` to `latest`; Keryx needs C# 14 or later in every project that references it (KRX022, OQ-52); `netstandard2.0` targets stay supported.
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
   attribute.
@@ -316,6 +316,9 @@ Ordering, Streaming, Notifications, Host control and Performance contract sectio
   referenced behavior method instead of behavior constructor parameters (OQ-47). A `[Behavior]` on a referenced notification type that
   does not fit the type as the host resolves it follows OQ-55's interim (skipped silently) until OQ-55 is decided. Bump
   `ProjectionDataVersion` for the changed projection.
+- **Language floor.** Raise the minimum to C# 14 (OQ-52): `KeryxSymbols.MinimumLanguageVersion` becomes `LanguageVersion.CSharp14`,
+  the KRX022 descriptor and message say 14, the comment in `src/Keryx/build/Keryx.props` drops the generic-attribute reason, and the
+  README's Requirements bullet and KRX022 row say C# 14. `netstandard2.0` stays in `Keryx.csproj` and the samples' contracts library.
 - **Samples, benchmarks and README.** Rewrite the sample behaviors as static behaviors, and update `samples/hosts/README.md` and
   `samples/libraries/README.md`, which name the generic `LoggingBehavior<,>`, to the new behavior class names and descriptions. Rewrite
   the prototype in `test/Keryx.Benchmarks/Prototype` and the Keryx comparison subject with static behavior methods; drop the Keryx
@@ -355,6 +358,8 @@ Ordering, Streaming, Notifications, Host control and Performance contract sectio
 - KRX009 (analyzer), KRX035 (including a global behavior marked only on a method), KRX036 for `ExcludeBehavior` and KRX042 (the
   `[GlobalBehavior]` cases and `[Behavior]` on a notification handler method, exact-type and polymorphic) have positive and negative
   tests against static behaviors, and `[assembly: Behavior(typeof(X))]` naming a non-behavior reports nothing;
+- KRX022 is reported at C# 13 and not at C# 14 or `latest`, in a `netstandard2.0` project as well; both generators emit nothing at
+  C# 13; every test compilation that pinned C# 11 or 12 is moved to C# 14 or later;
 - KRX043 is reported for each of `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in
   a library and in a contracts assembly, and not in a host;
 - snapshot tests of request, stream and publish pipelines at depths 0, 1, 3 and 8 show static calls with explicit type arguments,

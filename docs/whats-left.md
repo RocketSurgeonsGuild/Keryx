@@ -41,7 +41,7 @@ The owner's second round of decisions the same day settled the rest:
 - only one notification behavior kind remains, `[NotificationBehavior]` (was `[PublishBehavior]`); per-handler notification
   behaviors are removed, which makes OQ-40, OQ-53 and the per-handler part of OQ-43 moot;
 - an open behavior method must constrain its message type parameter to the kind's message interface (KRX019);
-- **OQ-52:** the C# 11 floor and KRX022 stay;
+- **OQ-52:** the floor rises to C# 14 (KRX022 below it); `netstandard2.0` targets stay supported;
 - **OQ-54:** KRX043 warns about `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` in an assembly that is not a host.
 
 ## Gates and checks
