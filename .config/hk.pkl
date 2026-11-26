@@ -17,6 +17,7 @@ local excludeDiagnostics = new Listing<String> {
   "CS8602"
   "CS8604"
   "CS8632"
+  "IDE0051"
   "IDE0052"
   "IDE0060"
   "IDE0130"
