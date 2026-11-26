@@ -152,7 +152,7 @@ public sealed class PrototypeMediator
         public readonly PingHandler Handler = new();
         public readonly Behavior1<Ping, int> Behavior1 = new();
 
-        public readonly struct Link1(PrototypeMediator.Depth1Context context, Ping request) : INext<int>
+        public readonly struct Link1(Depth1Context context, Ping request) : INext<int>
         {
             private readonly Depth1Context _context = context;
             private readonly Ping _request = request;
@@ -169,7 +169,7 @@ public sealed class PrototypeMediator
         public readonly Behavior2<Ping, int> Behavior2 = new();
         public readonly Behavior3<Ping, int> Behavior3 = new();
 
-        public readonly struct Link1(PrototypeMediator.Depth3Context context, Ping request) : INext<int>
+        public readonly struct Link1(Depth3Context context, Ping request) : INext<int>
         {
             private readonly Depth3Context _context = context;
             private readonly Ping _request = request;
@@ -178,7 +178,7 @@ public sealed class PrototypeMediator
                 _context.Behavior2.Handle(_request, new Link2(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link2(PrototypeMediator.Depth3Context context, Ping request) : INext<int>
+        public readonly struct Link2(Depth3Context context, Ping request) : INext<int>
         {
             private readonly Depth3Context _context = context;
             private readonly Ping _request = request;
@@ -187,7 +187,7 @@ public sealed class PrototypeMediator
                 _context.Behavior3.Handle(_request, new Link3(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link3(PrototypeMediator.Depth3Context context, Ping request) : INext<int>
+        public readonly struct Link3(Depth3Context context, Ping request) : INext<int>
         {
             private readonly Depth3Context _context = context;
             private readonly Ping _request = request;
@@ -209,7 +209,7 @@ public sealed class PrototypeMediator
         public readonly Behavior7<Ping, int> Behavior7 = new();
         public readonly Behavior8<Ping, int> Behavior8 = new();
 
-        public readonly struct Link1(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link1(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -218,7 +218,7 @@ public sealed class PrototypeMediator
                 _context.Behavior2.Handle(_request, new Link2(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link2(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link2(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -227,7 +227,7 @@ public sealed class PrototypeMediator
                 _context.Behavior3.Handle(_request, new Link3(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link3(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link3(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -236,7 +236,7 @@ public sealed class PrototypeMediator
                 _context.Behavior4.Handle(_request, new Link4(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link4(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link4(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -245,7 +245,7 @@ public sealed class PrototypeMediator
                 _context.Behavior5.Handle(_request, new Link5(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link5(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link5(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -254,7 +254,7 @@ public sealed class PrototypeMediator
                 _context.Behavior6.Handle(_request, new Link6(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link6(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link6(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -263,7 +263,7 @@ public sealed class PrototypeMediator
                 _context.Behavior7.Handle(_request, new Link7(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link7(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link7(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
@@ -272,7 +272,7 @@ public sealed class PrototypeMediator
                 _context.Behavior8.Handle(_request, new Link8(_context, _request), cancellationToken);
         }
 
-        public readonly struct Link8(PrototypeMediator.Depth8Context context, Ping request) : INext<int>
+        public readonly struct Link8(Depth8Context context, Ping request) : INext<int>
         {
             private readonly Depth8Context _context = context;
             private readonly Ping _request = request;
