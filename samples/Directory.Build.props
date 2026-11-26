@@ -1,0 +1,14 @@
+<Project>
+    <!-- Inherit the repository-wide conventions (Company, LangVersion, analyzers, CPM, warnings as errors). -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+    <PropertyGroup>
+        <IsSampleProject>true</IsSampleProject>
+        <!-- Samples are demonstrations, never shipped or packed. -->
+        <IsPackable>false</IsPackable>
+        <IsPublishable>true</IsPublishable>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <!-- Samples are not consumed as libraries; no XML doc requirement. -->
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+</Project>

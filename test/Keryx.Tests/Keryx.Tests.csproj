@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+    </PropertyGroup>
+    <ItemGroup>
+        <!-- Referenced as an assembly so tests drive the generator in-process; Keryx itself for the types generated code uses. -->
+        <ProjectReference Include="..\..\src\Keryx.Analyzers\Keryx.Analyzers.csproj" />
+        <ProjectReference Include="..\..\src\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" />
+        <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- The source generator testing helpers need Roslyn 5.9 or later; the analyzers themselves build against 5.0. -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="5.12.0" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" VersionOverride="5.12.0" PrivateAssets="all" />
+        <PackageReference Include="Rocket.Surgery.Extensions.Testing.SourceGenerators" />
+    </ItemGroup>
+    <ItemGroup>
+        <Compile Remove="snapshots\**" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- InternalsVisibleTo exposes the analyzers' Polyfill copy of NotNullAttribute, making the repo-wide alias ambiguous. -->
+        <Using Remove="System.Diagnostics.CodeAnalysis.NotNullAttribute" />
+    </ItemGroup>
+</Project>

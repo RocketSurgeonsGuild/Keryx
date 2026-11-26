@@ -1,0 +1,8 @@
+<Project>
+    <!--
+        The generator keeps its Specular.Scanning scan cache in $(IntermediateOutputPath)ctp/Keryx.ctpjson. The shared wiring feeds it
+        back as an AdditionalFile just before CoreCompile and deletes it on Clean. The guard keeps it to one import when another
+        Specular.Scanning-based generator brings it too.
+    -->
+    <Import Project="$(MSBuildThisFileDirectory)Specular.Scanning.Cache.targets" Condition="'$(_SpecularScanningCacheImported)' != 'true' and Exists('$(MSBuildThisFileDirectory)Specular.Scanning.Cache.targets')" />
+</Project>

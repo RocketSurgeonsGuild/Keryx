@@ -1,0 +1,60 @@
+<Project>
+    <Sdk Name="Rocket.Surgery.Sdk" />
+    <PropertyGroup>
+        <!-- No PublicAPI.*.txt tracking in this repository. -->
+        <RocketSurgeryPublicApiAnalyzers>false</RocketSurgeryPublicApiAnalyzers>
+        <Company>Rocket Surgeons Guild</Company>
+        <Copyright>Copyright Rocket Surgeons Guild © $([System.DateTime]::Now.ToString('yyyy'))</Copyright>
+        <Authors>David Driscoll,Rocket Surgeons Guild contributors</Authors>
+        <PackageProjectUrl>https://github.com/RocketSurgeonsGuild/Keryx</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageReadmeFile>Readme.md</PackageReadmeFile>
+        <!-- Tags every Keryx package shares; each project appends its own with $(PackageTags);... -->
+        <PackageTags>keryx;mediator;source-generator;cqrs;pipeline;aot;native-aot;trimming</PackageTags>
+
+        <SolutionDir>$(MSBuildThisFileDirectory)</SolutionDir>
+        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+        <!--
+            Warnings are errors everywhere and always (ADR 0001 decision), not only on CI and Release as Rocket.Surgery.Sdk
+            defaults. Set after the SDK import, so it wins over the SDK's guarded default.
+        -->
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+    <PropertyGroup>
+        <RollForward>LatestMajor</RollForward>
+        <!--
+            Package validation without a baseline until the first release; set PackageValidationBaselineVersion then.
+        -->
+        <EnablePackageValidation>true</EnablePackageValidation>
+        <EnableStrictModeForCompatibleFrameworksInPackage>false</EnableStrictModeForCompatibleFrameworksInPackage>
+        <EnableStrictModeForCompatibleTfms>false</EnableStrictModeForCompatibleTfms>
+    </PropertyGroup>
+    <PropertyGroup>
+        <Verify_SponsorshipExemption>OpenSource</Verify_SponsorshipExemption>
+        <Verify_SponsorshipExemptionUntil>$([System.DateTime]::Today.AddDays(300).ToString("yyyy-MM"))</Verify_SponsorshipExemptionUntil>
+    </PropertyGroup>
+    <!-- The package icon is added once icons/keryx-icon-512.png exists; without the file, PackageIcon would fail pack (NU5046). -->
+    <PropertyGroup Condition="Exists('$(MSBuildThisFileDirectory)icons/keryx-icon-512.png')">
+        <PackageIcon>images/packageicon.png</PackageIcon>
+    </PropertyGroup>
+    <ItemGroup>
+        <None
+            Include="$(MSBuildThisFileDirectory)icons/keryx-icon-512.png"
+            Condition="Exists('$(MSBuildThisFileDirectory)icons/keryx-icon-512.png')"
+            Pack="true"
+            PackagePath="/images/packageicon.png"
+            Visible="false"
+        />
+        <None Include="$(MSBuildThisFileDirectory)/LICENSE" Pack="true" PackagePath="/" Visible="false" />
+        <None Include="$(MSBuildThisFileDirectory)/Readme.md" Pack="true" PackagePath="/" Visible="false" />
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectCapability Include="DynamicDependentFile" />
+        <ProjectCapability Include="DynamicFileNesting" />
+    </ItemGroup>
+    <ItemGroup>
+        <Using Include="System.Diagnostics.CodeAnalysis" />
+        <Using Include="System.Diagnostics.CodeAnalysis.NotNullAttribute" Alias="NotNullAttribute" />
+    </ItemGroup>
+</Project>

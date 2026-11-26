@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <!-- Ships inside the Keryx package (src/Keryx packs this assembly into analyzers/dotnet/cs), never on its own. -->
+        <IsPackable>false</IsPackable>
+        <!-- The Specular.Scanning pack helper would only act on this project's own package; src/Keryx packs the cache wiring. -->
+        <SpecularScanningPack>false</SpecularScanningPack>
+        <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+        <PackageReference Include="Specular.Scanning.Sources" PrivateAssets="all" GeneratePathProperty="true" />
+        <PackageReference Include="Polyfill" PrivateAssets="all" />
+        <PackageReference Include="System.Collections.Immutable" PrivateAssets="all" />
+        <PackageReference Include="System.Text.Json" PrivateAssets="all" GeneratePathProperty="true" />
+    </ItemGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="Keryx.Analyzers.CodeFixes" />
+        <InternalsVisibleTo Include="Keryx.Tests" />
+    </ItemGroup>
+
+    <!-- What src/Keryx packs from this project: the generator, the System.Text.Json it loads beside it, and the scan cache wiring. -->
+    <Target Name="GetKeryxPackageFiles" Returns="@(_KeryxPackageFile)">
+        <ItemGroup>
+            <_KeryxPackageFile Include="$(TargetPath)" PackagePath="analyzers/dotnet/cs" />
+            <_KeryxPackageFile Include="$(PkgSystem_Text_Json)/lib/netstandard2.0/System.Text.Json.dll" PackagePath="analyzers/dotnet/cs" />
+            <_KeryxPackageFile Include="$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets" PackagePath="build" />
+        </ItemGroup>
+    </Target>
+</Project>

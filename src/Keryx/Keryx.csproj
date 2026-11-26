@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net10.0;net11.0</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">true</IsAotCompatible>
+        <PackageTags>$(PackageTags);dependency-injection;microsoft-extensions</PackageTags>
+        <PackageDescription>A source-generated mediator: handlers are plain private static methods, and a Roslyn generator emits all dispatch and pipeline code at compile time. No reflection, Native AOT and trimming safe.</PackageDescription>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Polyfill" PrivateAssets="all" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="System.Threading.Tasks.Extensions" />
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+    </ItemGroup>
+    <!--
+        The generator, analyzers and code fixes ship inside this package (analyzers/dotnet/cs), so a project that references Keryx
+        runs them. Built before this project; never referenced as assemblies.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\Keryx.Analyzers\Keryx.Analyzers.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+        <ProjectReference Include="..\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="build/*.*" Pack="true" PackagePath="build" />
+        <None Include="buildMultiTargeting/*.*" Pack="true" PackagePath="buildMultiTargeting" />
+    </ItemGroup>
+
+    <!--
+        Adds the analyzer assemblies (and the System.Text.Json the generator loads on .NET Framework compiler hosts) to analyzers/dotnet/cs,
+        and the Specular.Scanning scan cache wiring that build/Keryx.targets imports to build/. The analyzer projects name their own
+        files (GetKeryxPackageFiles), so their output paths live in one place.
+    -->
+    <Target Name="_KeryxAddAnalyzerPackageFiles" BeforeTargets="_GetPackageFiles">
+        <MSBuild Projects="..\Keryx.Analyzers\Keryx.Analyzers.csproj" Targets="GetKeryxPackageFiles" Properties="Configuration=$(Configuration)">
+            <Output TaskParameter="TargetOutputs" ItemName="_KeryxAnalyzerPackageFile" />
+        </MSBuild>
+        <MSBuild Projects="..\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" Targets="GetKeryxPackageFiles" Properties="Configuration=$(Configuration)">
+            <Output TaskParameter="TargetOutputs" ItemName="_KeryxAnalyzerPackageFile" />
+        </MSBuild>
+        <ItemGroup>
+            <None Include="@(_KeryxAnalyzerPackageFile)" Pack="true" PackagePath="%(_KeryxAnalyzerPackageFile.PackagePath)" Visible="false" />
+        </ItemGroup>
+    </Target>
+</Project>

@@ -1,0 +1,20 @@
+<Project>
+    <!-- Inherit repository-wide targets. -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)../'))" />
+
+    <PropertyGroup>
+        <!-- Samples are never packed; the Web SDKs still ask `dotnet pack Keryx.slnx` to warn about them. -->
+        <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+    </PropertyGroup>
+
+    <!--
+        Samples consume Keryx through ProjectReferences, so the analyzers and the packed build files don't flow the way they do from the
+        NuGet package. Every sample gets the generator wired like a package consumer (ADR 0001, phase 7 adds the libraries and hosts).
+    -->
+    <ItemGroup>
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Keryx/Keryx.csproj" />
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Keryx.Analyzers/Keryx.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+    <Import Project="$(MSBuildThisFileDirectory)../src/Keryx/build/Keryx.props" />
+    <Import Project="$(MSBuildThisFileDirectory)../src/Keryx/build/Keryx.targets" />
+</Project>

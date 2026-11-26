@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        BenchmarkDotNet suite: Keryx against a hand-written baseline and the other mediators (ADR 0001, phases 4 and 8). Not a test project:
+        CI only builds it, or runs it with the Dry job; numbers from shared runners are never published.
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="BenchmarkDotNet" />
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
+    </ItemGroup>
+</Project>
