@@ -177,7 +177,7 @@ internal static partial class HostEmitter
         writer.Line(
             pipeline.Behaviors.IsEmpty
                 ? "return pipeline.RunHandlers(notification, cancellationToken);"
-                : $"return {BehaviorCall(pipeline.Behaviors[0], 0, NotificationContextName(index) + "." + LinkName(0), "pipeline", "notification")};"
+                : $"return {BehaviorCall(pipeline.Behaviors[0], notification.ContextServices, NotificationContextName(index) + "." + LinkName(0), "pipeline", "notification")};"
         );
         writer.Close();
 
@@ -258,7 +258,7 @@ internal static partial class HostEmitter
             }
         }
 
-        WriteServiceFields(writer, pipeline.Behaviors);
+        WriteServiceFields(writer, notification.ContextServices);
         writer.Line();
         writer.Line($"public {context}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -270,7 +270,7 @@ internal static partial class HostEmitter
             }
         }
 
-        WriteServiceResolution(writer, pipeline.Behaviors);
+        WriteServiceResolution(writer, notification.ContextServices);
         writer.Close();
 
         if (!pipeline.Handlers.IsEmpty)
@@ -507,7 +507,7 @@ internal static partial class HostEmitter
         writer.Line($"public {ValueTask} InvokeAsync({CancellationToken} cancellationToken) =>");
         writer.Line(
             !isLast
-                ? $"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_notification")};"
+                ? $"    {BehaviorCall(pipeline.Behaviors[position + 1], pipeline.Notification.ContextServices, LinkName(position + 1), "_pipeline", "_notification")};"
                 : pipeline.Handlers.IsEmpty
                 ? "    default;"
                 : "    _pipeline.RunHandlers(_notification, cancellationToken);"

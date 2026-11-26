@@ -204,7 +204,10 @@ not at all (short-circuit). A request with no response is `IRequest<Unit>`, so a
 **Behavior methods.** The message, `next` and an optional `CancellationToken` are found by type, in any order; every other parameter is
 **injected** like a handler's (keyed and default-valued forms included). The host resolves those services once per scope into the
 pipeline context, so no behavior instance is ever created (a `[StreamBehavior]` method's own iterator is still allocated per `Stream`
-call; see [Streaming](#streaming)). A method is either:
+call; see [Streaming](#streaming)). The context holds each service once, however many behavior methods of the pipeline inject it (same
+type and same key; a keyed and an unkeyed `IClock` are two services): it is resolved as required when any of them requires it, and
+otherwise once as optional, with each method's own default applied when it is missing. So **a transient service that several behaviors
+of one pipeline inject is one instance per scope and pipeline**, shared by those behaviors, not one per behavior. A method is either:
 
 - **open:** generic in the message, its response (or item) and `TNext`, with the message type parameter constrained to the kind's
   message interface (table above) or to an interface that derives from it: `where TRequest : ICommand<TResponse>` with
@@ -388,7 +391,7 @@ namespace:
 The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
 services its behavior methods inject; it never creates a behavior instance. From then on a `Send` allocates nothing. Singletons and hosted
 services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
-as long as the scope.
+as long as the scope, and the behaviors of one pipeline that inject the same transient share one instance.
 
 The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a `FrozenDictionary` lookup
 and a jump table above 32 request types) and never boxes the response. A struct request is boxed when sent through `ISender`; the typed

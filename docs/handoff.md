@@ -257,6 +257,12 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
 - **Generation.** Flat link structs for request/response pipelines. The pipeline context resolves each behavior method's injected services
   (keyed and optional forms included) in its constructor and holds them beside the handler; links call the static method with explicit type
   arguments and the arguments in declared order. `AddKeryx()` registers no behaviors.
+- **Shared services** (owner decision 9 of the second rework; ADR, Injected parameters). Every pipeline context (request, stream, publish)
+  resolves each distinct service (type and key) once, into one field (`Service0`, `Service1`, ... in order of first use), whatever the
+  number of behavior parameters that inject it. The model computes this (`PipelineBehaviors.ShareServices`: the pipeline model's
+  `ContextServices`, and each behavior's `ServiceSlots` indexing into it); the emitter only writes it. A required consumer makes the
+  service required for all; when every consumer is optional it is resolved once into a nullable field and each call site applies its own
+  default. A transient shared by several behavior methods is one instance per scope and pipeline.
 
 **Done when:**
 
@@ -282,6 +288,13 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   `ExcludeBehavior` removes a class from pipelines of every kind;
 - allocation tests show 0 B per `Send` at depths 1, 3 and 8 (typed and generic), with behaviors that take injected services and with
   `async` behaviors whose work completes synchronously, on an optimized (Release) test host;
+- `Behaviors/SharedServiceTests`: a snapshot of request, stream and publish pipelines whose four behaviors each inject `IClock` shows one
+  field per context; keyed and unkeyed services of one type stay separate; a required consumer makes a service required for optional
+  consumers too; consumers that are all optional keep their own defaults (generated code and at run time); every behavior of a pipeline
+  receives the same instance of a transient, and a required and an optional `IServiceProvider` both receive the scope's provider; and
+  adding a behavior that injects only a service the pipeline already shares, without changing the order of first uses, leaves the
+  pipeline's context services (model and fields) unchanged, while an edit that keeps the set but changes that order renumbers the fields
+  (`open-questions.md` OQ-64, open);
 - the gate's three criteria are recorded in the phase summary and in `open-questions.md`. A failed gate does not block this line: if
   criterion 1 (0 B at depths 1, 3 and 8) failed, follow `open-questions.md` OQ-22 for the 0 B allocation tests.
 
@@ -289,7 +302,7 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
 
 Stream dispatch (typed and generic), no-behavior pass-through (the handler's enumerable returned as is), `[StreamBehavior]` behavior
 methods that wrap the stream, called directly through flat `IStreamNext<TItem>` link structs (`StreamLink_k`) with their injected services
-read from the pipeline context, the token rules (two tokens linked once, at the outermost element), synchronous validation of null and
+read from the pipeline context (each distinct service once, shared as Phase 4's "Shared services" describes), the token rules (two tokens linked once, at the outermost element), synchronous validation of null and
 unknown requests. Stream behaviors use the same scopes, matching, ordering and diagnostics as request behaviors. There are no hook
 behaviors and no fused segments.
 
@@ -319,7 +332,8 @@ record the decisions this phase follows.
 
 `[NotificationBehavior]` wraps the whole publish once, also with zero handlers, uses `INext` and returns `ValueTask`; it is attached with
 `[Behavior]` on the notification type, `[assembly: Behavior]` in the notification type's assembly or `[GlobalBehavior]`, and its
-`TNotification` is the concrete published type. Handlers in a publish are called directly under both strategies: there are no per-handler
+`TNotification` is the concrete published type; the publish pipeline context shares its behaviors' injected services as Phase 4's "Shared
+services" describes. Handlers in a publish are called directly under both strategies: there are no per-handler
 pipelines or links. The handler generator writes no `Behaviors` for a notification handler, and the analyzer reports KRX042 for
 `[Behavior]` on a notification handler method.
 

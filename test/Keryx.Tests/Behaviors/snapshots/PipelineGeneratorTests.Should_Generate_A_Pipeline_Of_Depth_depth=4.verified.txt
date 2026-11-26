@@ -80,7 +80,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<string> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline0) ?? __CreatePipeline0();
-            return global::Sample.Step1.Handle<global::Sample.Ping, string, __Pipeline0.Link1>(request, new __Pipeline0.Link1(pipeline, request), pipeline.Behavior1Service0, cancellationToken);
+            return global::Sample.Step1.Handle<global::Sample.Ping, string, __Pipeline0.Link1>(request, new __Pipeline0.Link1(pipeline, request), pipeline.Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -94,14 +94,12 @@ namespace Sample
         private sealed class __Pipeline0
         {
             public readonly global::Sample.PingHandler Handler;
-            public readonly global::Sample.IClock Behavior1Service0;
-            public readonly global::Sample.IClock Behavior3Service0;
+            public readonly global::Sample.IClock Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
                 Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.PingHandler>(serviceProvider);
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
-                Behavior3Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Step1</c>: <c>Sample.Step2</c>.</summary>
@@ -133,7 +131,7 @@ namespace Sample
                 }
 
                 public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.Step3.Handle<global::Sample.Ping, string, Link3>(_request, new Link3(_pipeline, _request), _pipeline.Behavior3Service0, cancellationToken);
+                    global::Sample.Step3.Handle<global::Sample.Ping, string, Link3>(_request, new Link3(_pipeline, _request), _pipeline.Service0, cancellationToken);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Step3</c>: <c>Sample.Step4</c>.</summary>

@@ -205,9 +205,9 @@ internal static class HostModelFactory
 
         var classified = MessageType.Classify(messageType, symbols);
         var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
-        var (behaviors, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
+        var (behaviors, contextServices, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
             ? PipelineBehaviors.For(AttachedBehaviors(method, symbols), method.ContainingAssembly, target, catalog)
-            : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
+            : ComposedBehaviors.Empty;
         var deliveries = model.Kind == HandlerKind.Notification
             ? Deliveries(messageType, catalog)
             : ImmutableArray<HostNotificationModel>.Empty;
@@ -224,7 +224,8 @@ internal static class HostModelFactory
             behaviors,
             usedExclusions,
             model.Order,
-            deliveries
+            deliveries,
+            contextServices
         );
     }
 
@@ -273,9 +274,9 @@ internal static class HostModelFactory
         }
 
         var responseType = kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
-        var (behaviors, usedExclusions) = PipelineBehaviors.Target(kind, target, responseType) is { } pipelineTarget
+        var (behaviors, contextServices, usedExclusions) = PipelineBehaviors.Target(kind, target, responseType) is { } pipelineTarget
             ? PipelineBehaviors.For(attached, handlerClass.ContainingAssembly, pipelineTarget, catalog)
-            : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
+            : ComposedBehaviors.Empty;
         var deliveries = kind == HandlerKind.Notification
             ? Deliveries(target, catalog)
             : ImmutableArray<HostNotificationModel>.Empty;
@@ -293,7 +294,8 @@ internal static class HostModelFactory
             behaviors,
             usedExclusions,
             kind == HandlerKind.Notification ? order : 0,
-            deliveries
+            deliveries,
+            contextServices
         );
     }
 

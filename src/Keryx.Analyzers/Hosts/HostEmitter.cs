@@ -377,7 +377,7 @@ internal static partial class HostEmitter
             writer.Line(signature);
             writer.Open();
             writer.Line($"var pipeline = {context};");
-            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], 0, ContextName(index) + "." + LinkName(0), "pipeline", "request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], request.ContextServices, ContextName(index) + "." + LinkName(0), "pipeline", "request")};");
             writer.Close();
         }
 
@@ -405,7 +405,7 @@ internal static partial class HostEmitter
     {
         var request = pipeline.Handler;
         var behaviors = pipeline.Behaviors;
-        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request, behaviors)}, resolved once per scope.</summary>");
+        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
         writer.Line($"private sealed class {ContextName(index)}");
         writer.Open();
         if (!request.StaticInvoker)
@@ -413,7 +413,7 @@ internal static partial class HostEmitter
             writer.Line($"public readonly {request.HandlerClass} Handler;");
         }
 
-        WriteServiceFields(writer, behaviors);
+        WriteServiceFields(writer, request.ContextServices);
         writer.Line();
         writer.Line($"public {ContextName(index)}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -422,7 +422,7 @@ internal static partial class HostEmitter
             writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
         }
 
-        WriteServiceResolution(writer, behaviors);
+        WriteServiceResolution(writer, request.ContextServices);
         writer.Close();
 
         for (var k = 0; k < behaviors.Length; k++)
@@ -469,7 +469,7 @@ internal static partial class HostEmitter
         writer.Line($"public {ValueTask}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
         if (!isLast)
         {
-            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], request.ContextServices, LinkName(position + 1), "_pipeline", "_request")};");
         }
         else if (request.StaticInvoker)
         {
@@ -503,29 +503,42 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The direct call of the behavior method at <paramref name="position" /> (ADR 0001, Behavior methods): the class's static method with
-    ///     explicit type arguments (<paramref name="link" /> in place of <c>TNext</c>) and the arguments in declared order: the message, a new
-    ///     <paramref name="link" /> over the context and the message, the call's token, and its injected services read from the context.
+    ///     The direct call of a behavior method (ADR 0001, Behavior methods): the class's static method with explicit type arguments
+    ///     (<paramref name="link" /> in place of <c>TNext</c>) and the arguments in declared order: the message, a new <paramref name="link" />
+    ///     over the context and the message, the call's token, and its injected services read from the context's shared fields.
     /// </summary>
     /// <param name="behavior">The behavior.</param>
-    /// <param name="position">Its position in the pipeline, which names its service fields.</param>
+    /// <param name="services">The pipeline context's services, which the behavior's <see cref="PipelineBehaviorModel.ServiceSlots" /> index.</param>
     /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
     /// <param name="context">The pipeline context expression.</param>
     /// <param name="message">The request or notification expression.</param>
-    private static string BehaviorCall(PipelineBehaviorModel behavior, int position, string link, string context, string message)
+    private static string BehaviorCall(
+        PipelineBehaviorModel behavior,
+        Specular.Scanning.EquatableArray<ContextServiceModel> services,
+        string link,
+        string context,
+        string message
+    )
     {
         var typeArguments = string.Join(", ", behavior.TypeArguments.Select(t => t.Length == 0 ? link : t));
         var arguments = new List<string>(behavior.Parameters.Count);
         var service = 0;
         foreach (var role in behavior.Parameters)
         {
+            if (role == BehaviorParameterRole.Service)
+            {
+                var slot = behavior.ServiceSlots[service];
+                arguments.Add(ServiceArgument(context, services[slot], slot, behavior.Services[service]));
+                service++;
+                continue;
+            }
+
             arguments.Add(
                 role switch
                 {
                     BehaviorParameterRole.Message => message,
                     BehaviorParameterRole.Next => $"new {link}({context}, {message})",
                     BehaviorParameterRole.CancellationToken => "cancellationToken",
-                    BehaviorParameterRole.Service => $"{context}.{ServiceField(position, service++)}",
                     _ => "default",
                 }
             );
@@ -534,10 +547,30 @@ internal static partial class HostEmitter
         return $"{behavior.Class}.{behavior.Method}<{typeArguments}>({string.Join(", ", arguments)})";
     }
 
-    /// <summary>What a pipeline context holds, for its documentation.</summary>
-    private static string Holds(HostHandlerModel handler, ImmutableArray<PipelineBehaviorModel> behaviors)
+    /// <summary>
+    ///     What one injected parameter of a behavior method receives: the context's field for its service. A service resolved as required
+    ///     is passed as is to every consumer; a service whose consumers are all optional is held in a nullable field (<see langword="null" />
+    ///     when missing), and each call site applies its own parameter's default with <c>??</c> (<c>GetValueOrDefault()</c> for a
+    ///     <c>default</c> value type).
+    /// </summary>
+    /// <param name="context">The pipeline context expression.</param>
+    /// <param name="service">The parameter's service.</param>
+    /// <param name="slot">Its index in the context.</param>
+    /// <param name="parameter">The parameter.</param>
+    private static string ServiceArgument(string context, ContextServiceModel service, int slot, ServiceParameterModel parameter)
     {
-        var services = behaviors.Any(static b => b.Services.Count > 0);
+        var field = $"{context}.{ServiceField(slot)}";
+        return service.Required || parameter.DefaultValue is not { } defaultValue || defaultValue == "null"
+            ? field
+            : service.IsValueType && defaultValue == "default"
+            ? $"{field}.GetValueOrDefault()"
+            : $"{field} ?? {defaultValue}";
+    }
+
+    /// <summary>What a pipeline context holds, for its documentation.</summary>
+    private static string Holds(HostHandlerModel handler)
+    {
+        var services = handler.ContextServices.Count > 0;
         return (handler.StaticInvoker, services) switch
         {
             (false, true) => "its handler and the injected services of its behaviors",
@@ -547,29 +580,61 @@ internal static partial class HostEmitter
         };
     }
 
-    /// <summary>One field per injected service of each behavior method, in pipeline and declared order.</summary>
-    private static void WriteServiceFields(CodeWriter writer, ImmutableArray<PipelineBehaviorModel> behaviors)
+    /// <summary>
+    ///     One field per service the pipeline context shares (ADR 0001, Injected parameters), in order of first use: the service type for a
+    ///     service resolved as required, the nullable service type for one whose consumers are all optional (<see langword="null" /> when the
+    ///     service is missing; each call site applies its own default).
+    /// </summary>
+    private static void WriteServiceFields(CodeWriter writer, Specular.Scanning.EquatableArray<ContextServiceModel> services)
     {
-        for (var k = 0; k < behaviors.Length; k++)
+        for (var i = 0; i < services.Count; i++)
         {
-            for (var j = 0; j < behaviors[k].Services.Count; j++)
-            {
-                writer.Line($"public readonly {behaviors[k].Services[j].Type} {ServiceField(k, j)};");
-            }
+            var service = services[i];
+            var type = service.Required || service.NullableUnderlyingType is not null ? service.ServiceType : service.ServiceType + "?";
+            writer.Line($"public readonly {type} {ServiceField(i)};");
         }
     }
 
-    /// <summary>Resolves each injected service of each behavior method from the scope, in pipeline and declared order.</summary>
-    private static void WriteServiceResolution(CodeWriter writer, ImmutableArray<PipelineBehaviorModel> behaviors)
+    /// <summary>Resolves each service the pipeline context shares from the scope, once, in order of first use.</summary>
+    private static void WriteServiceResolution(CodeWriter writer, Specular.Scanning.EquatableArray<ContextServiceModel> services)
     {
-        var variable = 0;
-        for (var k = 0; k < behaviors.Length; k++)
+        for (var i = 0; i < services.Count; i++)
         {
-            for (var j = 0; j < behaviors[k].Services.Count; j++)
-            {
-                writer.Line($"{ServiceField(k, j)} = {Resolve(behaviors[k].Services[j], variable++)};");
-            }
+            writer.Line($"{ServiceField(i)} = {ResolveShared(services[i], i)};");
         }
+    }
+
+    /// <summary>
+    ///     The resolution of a shared service: as required (<see cref="Resolve" /> without a default) when any consumer is required;
+    ///     otherwise <c>GetService</c>/<c>GetKeyedService</c>, <see langword="null" /> for a missing service (a value type is matched with
+    ///     the type pattern of <see cref="Resolve" />, once, into a <c>Nullable&lt;T&gt;</c> field).
+    /// </summary>
+    private static string ResolveShared(ContextServiceModel service, int slot)
+    {
+        if (service.Required || !service.IsValueType)
+        {
+            return Resolve(
+                new(
+                    service.ServiceType,
+                    service.ServiceType,
+                    service.ServiceKey,
+                    service.Required ? null : "null",
+                    service.IsValueType,
+                    service.NullableUnderlyingType,
+                    service.IsServiceProvider
+                ),
+                slot
+            );
+        }
+
+        // GetKeyedService(Type, object) is an extension only from Microsoft.Extensions.DependencyInjection.Abstractions 9.0; the interface
+        // method exists from 8.0, the floor for keyed services (ADR 0001, Injected parameters).
+        var lookup = service.ServiceKey is not { } key
+            ? $"{ServiceProviderName}.GetService(typeof({service.ServiceType}))"
+            : $"({ServiceProviderName} as {KeyedServiceProvider})?.GetKeyedService(typeof({service.ServiceType}), {key})";
+        var variable = "__value" + Number(slot);
+        var nullable = service.NullableUnderlyingType is null ? service.ServiceType + "?" : service.ServiceType;
+        return $"{lookup} is {service.NullableUnderlyingType ?? service.ServiceType} {variable} ? ({nullable}){variable} : null";
     }
 
     private static void WriteFactory(CodeWriter writer, string type, Specular.Scanning.EquatableArray<ServiceParameterModel> services)
@@ -641,8 +706,8 @@ internal static partial class HostEmitter
 
     private static bool NeedsContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || !pipeline.Behaviors.IsEmpty;
 
-    /// <summary>The context field of injected service <paramref name="service" /> of the behavior at <paramref name="position" />.</summary>
-    private static string ServiceField(int position, int service) => "Behavior" + Number(position + 1) + "Service" + Number(service);
+    /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
+    private static string ServiceField(int slot) => "Service" + Number(slot);
 
     private static string LinkName(int position) => "Link" + Number(position + 1);
 

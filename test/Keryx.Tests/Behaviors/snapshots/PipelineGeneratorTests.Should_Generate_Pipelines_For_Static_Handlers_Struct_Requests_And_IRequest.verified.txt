@@ -129,7 +129,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<string?> __Send0(global::Sample.Find request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline0) ?? __CreatePipeline0();
-            return global::Sample.Audit.Handle<global::Sample.Find, string?, __Pipeline0.Link1>(request, pipeline.Behavior1Service0, new __Pipeline0.Link1(pipeline, request), cancellationToken, pipeline.Behavior1Service1);
+            return global::Sample.Audit.Handle<global::Sample.Find, string?, __Pipeline0.Link1>(request, pipeline.Service0, new __Pipeline0.Link1(pipeline, request), cancellationToken, pipeline.Service1 ?? 3);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -139,7 +139,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<int> __Send1(global::Sample.Tick request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline1) ?? __CreatePipeline1();
-            return global::Sample.Audit.Handle<global::Sample.Tick, int, __Pipeline1.Link1>(request, pipeline.Behavior1Service0, new __Pipeline1.Link1(pipeline, request), cancellationToken, pipeline.Behavior1Service1);
+            return global::Sample.Audit.Handle<global::Sample.Tick, int, __Pipeline1.Link1>(request, pipeline.Service0, new __Pipeline1.Link1(pipeline, request), cancellationToken, pipeline.Service1 ?? 3);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -149,7 +149,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<global::Keryx.Unit> __Send2(global::Sample.Touch request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline2) ?? __CreatePipeline2();
-            return global::Sample.Audit.Handle<global::Sample.Touch, global::Keryx.Unit, __Pipeline2.Link1>(request, pipeline.Behavior1Service0, new __Pipeline2.Link1(pipeline, request), cancellationToken, pipeline.Behavior1Service1);
+            return global::Sample.Audit.Handle<global::Sample.Touch, global::Keryx.Unit, __Pipeline2.Link1>(request, pipeline.Service0, new __Pipeline2.Link1(pipeline, request), cancellationToken, pipeline.Service1 ?? 3);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -162,13 +162,13 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Find</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.IAudit Behavior1Service0;
-            public readonly int Behavior1Service1;
+            public readonly global::Sample.IAudit Service0;
+            public readonly int? Service1;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
-                Behavior1Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? __value1 : 3;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
+                Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? (int?)__value1 : null;
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Audit</c>: the handler.</summary>
@@ -189,13 +189,13 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Tick</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline1
         {
-            public readonly global::Sample.IAudit Behavior1Service0;
-            public readonly int Behavior1Service1;
+            public readonly global::Sample.IAudit Service0;
+            public readonly int? Service1;
 
             public __Pipeline1(global::System.IServiceProvider serviceProvider)
             {
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
-                Behavior1Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? __value1 : 3;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
+                Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? (int?)__value1 : null;
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Audit</c>: <c>Sample.TickOnly</c>.</summary>
@@ -232,13 +232,13 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Touch</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline2
         {
-            public readonly global::Sample.IAudit Behavior1Service0;
-            public readonly int Behavior1Service1;
+            public readonly global::Sample.IAudit Service0;
+            public readonly int? Service1;
 
             public __Pipeline2(global::System.IServiceProvider serviceProvider)
             {
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
-                Behavior1Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? __value1 : 3;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
+                Service1 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), "retries") is int __value1 ? (int?)__value1 : null;
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Audit</c>: the handler.</summary>

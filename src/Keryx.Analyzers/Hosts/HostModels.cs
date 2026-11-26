@@ -33,6 +33,11 @@ namespace Keryx.Analyzers.Hosts;
 ///     For a notification handler, every concrete notification type the host knows that converts to the handler's parameter type (ADR 0001,
 ///     Polymorphic handlers), in no particular order (ordinal by type). Empty for request and stream request handlers.
 /// </param>
+/// <param name="ContextServices">
+///     The distinct services the behavior methods of a request or stream handler's pipeline inject, which its pipeline context resolves once
+///     each (<see cref="ContextServiceModel" />); the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. Empty for a
+///     notification handler.
+/// </param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
     HandlerKind Kind,
@@ -45,7 +50,8 @@ internal sealed record HostHandlerModel(
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
     int Order,
-    EquatableArray<HostNotificationModel> Deliveries = default
+    EquatableArray<HostNotificationModel> Deliveries = default,
+    EquatableArray<ContextServiceModel> ContextServices = default
 );
 
 /// <summary>
@@ -63,6 +69,10 @@ internal sealed record HostHandlerModel(
 /// </param>
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from the publish pipeline (for KRX036).</param>
 /// <param name="Location">Its first declaration when it is in source, for KRX037.</param>
+/// <param name="ContextServices">
+///     The distinct services its notification behaviors inject, which its publish pipeline context resolves once each
+///     (<see cref="ContextServiceModel" />); the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it.
+/// </param>
 internal sealed record HostNotificationModel(
     string Type,
     string DisplayName,
@@ -71,7 +81,8 @@ internal sealed record HostNotificationModel(
     bool Parallel,
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
-    LocationInfo? Location
+    LocationInfo? Location,
+    EquatableArray<ContextServiceModel> ContextServices = default
 );
 
 /// <summary>
@@ -91,12 +102,16 @@ internal sealed record HostNotificationModel(
 /// <param name="Order">Its <c>[BehaviorOrder]</c> order.</param>
 /// <param name="OrderOverridden">Whether the method declares ordering of its own, so KRX008 is checked for its kind on its own.</param>
 /// <param name="Edges">Its <c>RunsAfter</c>/<c>RunsBefore</c> edges, in declaration order.</param>
-/// <param name="Services">Its injected parameters, in declared order, resolved like a handler's injected parameters.</param>
+/// <param name="Services">Its injected parameters, in declared order.</param>
 /// <param name="Assembly">The assembly that declares it.</param>
 /// <param name="InSource">Whether it is declared in the host's own source (KRX008 for in-source pairs is the analyzer's).</param>
 /// <param name="ObliviousFit">
 ///     Whether the method fits only through a nullable-oblivious response (or item) type where it writes <c>TResponse?</c> (OQ-58), so its
 ///     call is emitted with nullable warnings disabled.
+/// </param>
+/// <param name="ServiceSlots">
+///     For each of <paramref name="Services" />, the index of the pipeline context service it receives (the pipeline's
+///     <c>ContextServices</c>); set by <see cref="PipelineBehaviors.ShareServices" />.
 /// </param>
 internal sealed record PipelineBehaviorModel(
     string Class,
@@ -112,7 +127,8 @@ internal sealed record PipelineBehaviorModel(
     EquatableArray<ServiceParameterModel> Services,
     string Assembly,
     bool InSource,
-    bool ObliviousFit
+    bool ObliviousFit,
+    EquatableArray<int> ServiceSlots = default
 )
 {
     /// <summary>What the sort compares.</summary>
@@ -165,6 +181,48 @@ internal sealed record ServiceParameterModel(
     string? NullableUnderlyingType,
     bool IsServiceProvider
 );
+
+/// <summary>
+///     One service a pipeline context resolves once and shares among the behavior methods that inject it (ADR 0001, Injected parameters):
+///     identified by (<paramref name="ServiceType" />, <paramref name="ServiceKey" />). When any of its consumers is required it is resolved
+///     as required (<c>GetRequiredService</c>/<c>GetRequiredKeyedService</c>) and every consumer receives that instance; when all of them
+///     are optional it is resolved once with <c>GetService</c>/<c>GetKeyedService</c> into a nullable field, and each call site applies its
+///     own parameter's default. The scope's <c>IServiceProvider</c> (unkeyed) is never resolved: it is the provider the context is built
+///     with, so it counts as required.
+/// </summary>
+/// <param name="ServiceType">The service type, fully qualified, without a top-level nullable reference annotation.</param>
+/// <param name="ServiceKey">The <c>[FromKeyedServices]</c> key as a C# expression, or <see langword="null" />.</param>
+/// <param name="IsValueType">Whether the service type is a value type, including <c>Nullable&lt;T&gt;</c>.</param>
+/// <param name="NullableUnderlyingType">For a <c>Nullable&lt;T&gt;</c> service type, <c>T</c>.</param>
+/// <param name="IsServiceProvider">Whether it is <c>IServiceProvider</c>.</param>
+/// <param name="Required">Whether at least one consumer is required (has no default value), so the service is resolved as required.</param>
+internal sealed record ContextServiceModel(
+    string ServiceType,
+    string? ServiceKey,
+    bool IsValueType,
+    string? NullableUnderlyingType,
+    bool IsServiceProvider,
+    bool Required
+)
+{
+    /// <summary>
+    ///     The service a parameter injects, as a pipeline context shares it: required unless the parameter has a default value (the scope's
+    ///     <c>IServiceProvider</c> is always available).
+    /// </summary>
+    public static ContextServiceModel For(ServiceParameterModel parameter) =>
+        new(
+            parameter.ServiceType,
+            parameter.ServiceKey,
+            parameter.IsValueType,
+            parameter.NullableUnderlyingType,
+            parameter.IsServiceProvider,
+            parameter.DefaultValue is null || parameter is { IsServiceProvider: true, ServiceKey: null }
+        );
+
+    /// <summary>Whether a parameter injects this service: the same service type and key.</summary>
+    public bool Matches(ServiceParameterModel parameter) =>
+        string.Equals(ServiceType, parameter.ServiceType, StringComparison.Ordinal) && string.Equals(ServiceKey, parameter.ServiceKey, StringComparison.Ordinal);
+}
 
 /// <summary>
 ///     What the host's syntax pipeline found for one handler candidate: enough to count its request as handled and to find the method again

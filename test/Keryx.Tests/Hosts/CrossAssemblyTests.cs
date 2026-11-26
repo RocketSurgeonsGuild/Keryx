@@ -187,7 +187,7 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).Contains("Send(global::Orders.CreateOrder request");
         await Assert.That(mediator).Contains("Stream(global::Orders.Countdown request");
         await Assert.That(mediator).Contains("global::Orders.Journaled.Handle<global::Orders.CreateOrder, int, ");
-        await Assert.That(mediator).Contains("global::Orders.IJournal Behavior1Service0;");
+        await Assert.That(mediator).Contains("global::Orders.IJournal Service0;");
         await Assert.That(mediator).Contains("global::Orders.Doubling.Handle<Link2>(");
         await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName))
                     .Contains("new global::Orders.CreateOrderHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Orders.IJournal>(serviceProvider))");

@@ -73,7 +73,7 @@ namespace Sample
         private global::System.Collections.Generic.IAsyncEnumerable<int> __Stream0(global::Sample.Numbers request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __streamPipeline0) ?? __CreateStreamPipeline0();
-            return global::Sample.Step1.Handle<global::Sample.Numbers, int, __StreamPipeline0.StreamLink1>(request, new __StreamPipeline0.StreamLink1(pipeline, request), pipeline.Behavior1Service0, cancellationToken);
+            return global::Sample.Step1.Handle<global::Sample.Numbers, int, __StreamPipeline0.StreamLink1>(request, new __StreamPipeline0.StreamLink1(pipeline, request), pipeline.Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -86,11 +86,11 @@ namespace Sample
         /// <summary>The stream pipeline context of <c>Sample.Numbers</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __StreamPipeline0
         {
-            public readonly global::Sample.IClock Behavior1Service0;
+            public readonly global::Sample.IClock Service0;
 
             public __StreamPipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Step1</c>: the handler.</summary>

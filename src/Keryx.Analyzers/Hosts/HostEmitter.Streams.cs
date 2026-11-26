@@ -122,7 +122,7 @@ internal static partial class HostEmitter
             writer.Line(signature);
             writer.Open();
             writer.Line($"var pipeline = {context};");
-            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], 0, StreamContextName(index) + "." + StreamLinkName(0), "pipeline", "request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], request.ContextServices, StreamContextName(index) + "." + StreamLinkName(0), "pipeline", "request")};");
             writer.Close();
         }
 
@@ -148,7 +148,7 @@ internal static partial class HostEmitter
     {
         var request = pipeline.Handler;
         var behaviors = pipeline.Behaviors;
-        writer.Line($"/// <summary>The stream pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request, behaviors)}, resolved once per scope.</summary>");
+        writer.Line($"/// <summary>The stream pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
         writer.Line($"private sealed class {StreamContextName(index)}");
         writer.Open();
         if (!request.StaticInvoker)
@@ -156,7 +156,7 @@ internal static partial class HostEmitter
             writer.Line($"public readonly {request.HandlerClass} Handler;");
         }
 
-        WriteServiceFields(writer, behaviors);
+        WriteServiceFields(writer, request.ContextServices);
         writer.Line();
         writer.Line($"public {StreamContextName(index)}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -165,7 +165,7 @@ internal static partial class HostEmitter
             writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
         }
 
-        WriteServiceResolution(writer, behaviors);
+        WriteServiceResolution(writer, request.ContextServices);
         writer.Close();
 
         for (var k = 0; k < behaviors.Length; k++)
@@ -216,7 +216,7 @@ internal static partial class HostEmitter
         writer.Line($"public {AsyncEnumerable}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
         if (!isLast)
         {
-            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, StreamLinkName(position + 1), "_pipeline", "_request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], request.ContextServices, StreamLinkName(position + 1), "_pipeline", "_request")};");
         }
         else if (request.StaticInvoker)
         {

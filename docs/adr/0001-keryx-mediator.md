@@ -352,6 +352,29 @@ parameter that is a `ref struct` (`Span<T>`, `TypedReference`, any `ref struct`)
 handler or behavior is skipped. A parameter that breaks KRX013 for any reason does not count as an injected service, so a static
 handler class does not also get KRX014 and the base-constructor part of KRX007 does not apply.
 
+**Shared services in a pipeline context.** A pipeline context (request, stream or publish; see Generated pipeline shape) resolves each
+service its behavior methods inject **once**: it has one field per distinct service, not one per behavior parameter. A service is
+identified by its type (without a top-level nullable annotation) and its `[FromKeyedServices]` key, so keyed and unkeyed services of one
+type, or two keys, stay separate. When the consumers of a service differ:
+
+- if **any** consumer is required (no default value), the context resolves it as required (`GetRequiredService`/`GetRequiredKeyedService`)
+  and every consumer, optional ones included, receives that instance;
+- if **all** consumers are optional, the context resolves it once with `GetService`/`GetKeyedService` into a nullable field (`T?`, a
+  `Nullable<T>` for a value type, matched with the type pattern above), and each call site applies its own parameter's default:
+  `ctx.Service0 ?? <default>`.
+
+The fields are named `Service0`, `Service1`, ... in order of first use (the pipeline's behaviors outermost first, each one's injected
+parameters in declared order). An edit that changes neither the set of services nor the order in which they are first used keeps the
+names (adding a behavior that injects only services the pipeline already has, in an order that does not move any first use, for
+example); an edit that keeps the set but changes that order renumbers them (open-questions OQ-64). The model computes
+the shared services (each behavior's parameters refer to a service by index); the emitter only writes them out. A behavior's unkeyed
+`IServiceProvider` is the scope's provider the context is built with, held in a field like any shared service and never resolved
+(open-questions OQ-63).
+
+**Consequence:** a transient service that several behavior methods of one pipeline inject is **one instance per pipeline context**, that
+is per scope and pipeline, not one per behavior method. Behaviors that need separate instances inject a factory (or
+`IServiceProvider`) and create them.
+
 Keyed services need `Microsoft.Extensions.DependencyInjection.Abstractions` 8.0 or newer, which the `Keryx` package brings on `net10.0`
 and `netstandard2.0` and the shared framework provides on `net11.0` (see Package and assemblies).
 
@@ -562,9 +585,10 @@ user writes it; the host's generated pipeline calls it directly. There is no gen
 
 No behavior instance ever exists, so nothing is allocated for a behavior itself, per scope or per call. A behavior method's injected
 parameters are resolved once per DI scope into the generated pipeline context (see Generated pipeline shape), which already holds the
-handler, and the link calls the method as `Audit.Handle<CreateOrder.Command, Guid, Link_2>(request, new Link_2(ctx, request), ctx.Audit_log, ct)`,
+handler, and the link calls the method as `Audit.Handle<CreateOrder.Command, Guid, Link_2>(request, new Link_2(ctx, request), ctx.Service0, ct)`,
 with the arguments in the method's declared order. The call is a direct static call: no interface, no virtual or generic virtual
-dispatch. A transient service injected into a behavior is created once per scope and pipeline. Nothing is registered in DI for a
+dispatch. A transient service injected into a behavior is created once per scope and pipeline, however many behavior methods of the
+pipeline inject it: they share the context's one instance (Injected parameters, Shared services in a pipeline context). Nothing is registered in DI for a
 behavior, so a behavior cannot be replaced through DI; exclude it with `ExcludeBehavior` and attach another.
 
 ### Three ways to attach a behavior
@@ -647,7 +671,8 @@ notification type that does not match is KRX009.
 For each pipeline the host emits:
 
 - a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
-  the notification type's handlers) and the injected services of every behavior method in the pipeline, resolved in its constructor;
+  the notification type's handlers) and each distinct service the pipeline's behavior methods inject, once (one `ServiceN` field per
+  service type and key, shared by every behavior method that injects it; see Injected parameters), resolved in its constructor;
 - one small **link** struct per position: `readonly struct Link_k : INext<TResponse> { Context ctx; TRequest request; }`. Its
   `InvokeAsync(ct)` calls the behavior method at position k+1 with `new Link_{k+1}(ctx, request)` as `next` and that method's injected
   services read from `ctx`; the last link calls the handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the
@@ -906,7 +931,8 @@ internal sealed partial class KeryxMediator : IMediator
 - **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline. After the first call in a scope, nothing is
   resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
   handler's transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because
-  its injected services are cached in the pipeline context (once per scope and pipeline).
+  its injected services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the
+  pipeline that injects the service).
 - **Concurrent first use.** One scope can use the mediator concurrently (parallel publish, handlers that send in parallel, user
   `Task.WhenAll` over `Send`). Contexts are created with
   `Volatile.Read(ref __p17) ?? Interlocked.CompareExchange(ref __p17, new P17(_sp), null) ?? __p17`, so every caller in the scope uses the

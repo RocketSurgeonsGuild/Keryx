@@ -112,7 +112,7 @@ namespace Sample
         private global::System.Collections.Generic.IAsyncEnumerable<string?> __Stream0(global::Sample.Orders request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __streamPipeline0) ?? __CreateStreamPipeline0();
-            return global::Sample.Trace.Handle<global::Sample.Orders, string?, __StreamPipeline0.StreamLink1>(request, pipeline.Behavior1Service0, new __StreamPipeline0.StreamLink1(pipeline, request), cancellationToken);
+            return global::Sample.Trace.Handle<global::Sample.Orders, string?, __StreamPipeline0.StreamLink1>(request, pipeline.Service0, new __StreamPipeline0.StreamLink1(pipeline, request), cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -122,7 +122,7 @@ namespace Sample
         private global::System.Collections.Generic.IAsyncEnumerable<int> __Stream1(global::Sample.Shapes request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __streamPipeline1) ?? __CreateStreamPipeline1();
-            return global::Sample.Trace.Handle<global::Sample.Shapes, int, __StreamPipeline1.StreamLink1>(request, pipeline.Behavior1Service0, new __StreamPipeline1.StreamLink1(pipeline, request), cancellationToken);
+            return global::Sample.Trace.Handle<global::Sample.Shapes, int, __StreamPipeline1.StreamLink1>(request, pipeline.Service0, new __StreamPipeline1.StreamLink1(pipeline, request), cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -139,12 +139,12 @@ namespace Sample
         private sealed class __StreamPipeline0
         {
             public readonly global::Sample.OrdersHandler Handler;
-            public readonly global::Sample.IAudit Behavior1Service0;
+            public readonly global::Sample.IAudit Service0;
 
             public __StreamPipeline0(global::System.IServiceProvider serviceProvider)
             {
                 Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.OrdersHandler>(serviceProvider);
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Trace</c>: <c>Sample.Cache</c>.</summary>
@@ -199,11 +199,11 @@ namespace Sample
         /// <summary>The stream pipeline context of <c>Sample.Shapes</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __StreamPipeline1
         {
-            public readonly global::Sample.IAudit Behavior1Service0;
+            public readonly global::Sample.IAudit Service0;
 
             public __StreamPipeline1(global::System.IServiceProvider serviceProvider)
             {
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IAudit>(serviceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Trace</c>: the handler.</summary>

@@ -258,7 +258,7 @@ internal sealed class BehaviorCatalog
             }
         }
 
-        var (behaviors, usedExclusions) = PipelineBehaviors.Compose(
+        var (behaviors, services, usedExclusions) = PipelineBehaviors.Compose(
             attached,
             AssemblyBehaviorsOf(type.ContainingAssembly),
             new(BehaviorKind.Notification, type, null),
@@ -274,7 +274,8 @@ internal sealed class BehaviorCatalog
             parallel,
             behaviors,
             usedExclusions,
-            LocationInfo.From(type.Locations.FirstOrDefault())
+            LocationInfo.From(type.Locations.FirstOrDefault()),
+            services
         );
     }
 
@@ -354,6 +355,20 @@ internal sealed class BehaviorCatalog
     }
 }
 
+/// <summary>The behaviors of one pipeline, the services its context shares among them, and the exclusions that removed behaviors from it.</summary>
+/// <param name="Behaviors">The behaviors, in no particular order (ordinal by class), each with its <see cref="PipelineBehaviorModel.ServiceSlots" />.</param>
+/// <param name="Services">The distinct services the behaviors inject, in order of first use in the sorted pipeline.</param>
+/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior.</param>
+internal sealed record ComposedBehaviors(
+    ImmutableArray<PipelineBehaviorModel> Behaviors,
+    ImmutableArray<ContextServiceModel> Services,
+    ImmutableArray<string> UsedExclusions
+)
+{
+    /// <summary>A pipeline without behaviors.</summary>
+    public static ComposedBehaviors Empty { get; } = new([], [], []);
+}
+
 /// <summary>
 ///     Composes the behaviors of one pipeline from the three scopes (ADR 0001, Three ways to attach a behavior) and projects them into
 ///     <see cref="PipelineBehaviorModel" />s.
@@ -369,7 +384,7 @@ internal static class PipelineBehaviors
     ///     (narrower than <c>internal</c>, or not accessible from the host) or one whose behavior method of the target's kind injects a type the
     ///     host cannot resolve (KRX034).
     /// </summary>
-    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<string> UsedExclusions) For(
+    public static ComposedBehaviors For(
         ImmutableArray<ITypeSymbol> attached,
         IAssemblySymbol? handlerAssembly,
         BehaviorTarget target,
@@ -381,9 +396,10 @@ internal static class PipelineBehaviors
     ///     The behaviors that apply to one target: <paramref name="attached" /> (per target), then <paramref name="assembly" /> (per
     ///     assembly), then the global ones whose <c>[GlobalBehavior]</c> covers the target's kind, each kept when it fits; de-duplicated by
     ///     behavior class; minus the host's exclusions. <paramref name="unfitAttached" /> receives each attached behavior that does not fit,
-    ///     with the reason (a class the behavior rules reject is its own KRX019 and is not passed).
+    ///     with the reason (a class the behavior rules reject is its own KRX019 and is not passed). The pipeline's injected services are
+    ///     shared (<see cref="ShareServices" />).
     /// </summary>
-    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<string> UsedExclusions) Compose(
+    public static ComposedBehaviors Compose(
         IEnumerable<ITypeSymbol> attached,
         IEnumerable<ITypeSymbol> assembly,
         BehaviorTarget target,
@@ -412,7 +428,8 @@ internal static class PipelineBehaviors
             }
         }
 
-        return ([.. behaviors.Values], [.. usedExclusions]);
+        var (shared, services) = ShareServices([.. behaviors.Values]);
+        return new(shared, services, [.. usedExclusions]);
 
         void Apply(ITypeSymbol type, Action<ITypeSymbol, string>? unfit)
         {
@@ -455,6 +472,46 @@ internal static class PipelineBehaviors
                 behaviors.Add(identity, Model(named, match, catalog));
             }
         }
+    }
+
+    /// <summary>
+    ///     Gives a pipeline's injected services one pipeline context field each (ADR 0001, Injected parameters): the distinct
+    ///     (service type, key) pairs the behavior methods inject, in order of first use in the sorted pipeline (outermost behavior first,
+    ///     then declared parameter order), and for each behavior the index of the service each of its injected parameters receives. A
+    ///     service with at least one required consumer is resolved as required for all of them; one whose consumers are all optional is
+    ///     resolved once as optional, and each call site applies its own default. The behaviors keep their order.
+    /// </summary>
+    /// <param name="behaviors">The pipeline's behaviors, in any order.</param>
+    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<ContextServiceModel> Services) ShareServices(
+        ImmutableArray<PipelineBehaviorModel> behaviors
+    )
+    {
+        var services = new List<ContextServiceModel>();
+        var slots = new Dictionary<string, ImmutableArray<int>>(StringComparer.Ordinal);
+        foreach (var behavior in BehaviorOrdering.Sort(behaviors, static b => b.Key))
+        {
+            var behaviorSlots = ImmutableArray.CreateBuilder<int>(behavior.Services.Count);
+            foreach (var parameter in behavior.Services)
+            {
+                var slot = services.FindIndex(s => s.Matches(parameter));
+                var service = ContextServiceModel.For(parameter);
+                if (slot < 0)
+                {
+                    slot = services.Count;
+                    services.Add(service);
+                }
+                else if (service.Required && !services[slot].Required)
+                {
+                    services[slot] = services[slot] with { Required = true };
+                }
+
+                behaviorSlots.Add(slot);
+            }
+
+            slots[behavior.Identity] = behaviorSlots.MoveToImmutable();
+        }
+
+        return ([.. behaviors.Select(b => b with { ServiceSlots = slots[b.Identity] })], [.. services]);
     }
 
     /// <summary>

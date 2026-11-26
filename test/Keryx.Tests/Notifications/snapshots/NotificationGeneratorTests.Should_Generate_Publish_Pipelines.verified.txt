@@ -154,7 +154,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __notification0) ?? __CreateNotification0();
-            return global::Sample.Timed.Handle<global::Sample.Broadcast, __Notification0.Link1>(notification, new __Notification0.Link1(pipeline, notification), pipeline.Behavior1Service0, cancellationToken);
+            return global::Sample.Timed.Handle<global::Sample.Broadcast, __Notification0.Link1>(notification, new __Notification0.Link1(pipeline, notification), pipeline.Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -237,12 +237,12 @@ namespace Sample
         private sealed class __Notification0
         {
             public readonly global::Sample.SecondListener Handler1;
-            public readonly global::Sample.IJournal Behavior1Service0;
+            public readonly global::Sample.IJournal Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
                 Handler1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.SecondListener>(serviceProvider);
-                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
             /// <summary>Starts every handler in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>
