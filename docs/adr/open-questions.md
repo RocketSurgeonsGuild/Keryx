@@ -644,6 +644,43 @@ fitting when the host resolves the target or the behavior to another version tha
   handlers (the error fails the build either way). Assembly and global behaviors that do not fit are skipped silently, as the ADR says.
 - **Proposal:** confirm, and say in the Diagnostics section where the host reports KRX009 and how it names the target.
 
+### OQ-51: How the comparison benchmarks set up each library
+
+The ADR's Benchmarks section names the libraries, versions and scenarios, but not how each library is configured, which request shape
+they share, what the baseline does at a behavior depth, or what a scenario a library cannot express shows. Each choice changes the
+numbers.
+
+- **Interim** (`test/Keryx.Benchmarks/Comparison`, one project per library in `test/benchmark-subjects`):
+    - Every library sends the same `sealed record` class requests and notifications, with the same handler bodies. ZeroAlloc.Mediator's
+      ZAM003 (use a `readonly record struct`) is suppressed in its project, so all libraries are compared on one request shape.
+    - Lifetimes are each library's defaults (MediatR, ZeroAlloc.Mediator: transient handlers; Immediate.Handlers: its generated
+      registrations), except Mediator, which runs twice as the ADR says (scoped and singleton). Scoped mediators and handlers are resolved
+      once, from one scope that lives for the whole benchmark, as in a request that sends many times; per-scope setup is not measured.
+    - Behaviors are pass-through and complete synchronously. Each library attaches them its own way: Keryx and Immediate.Handlers per
+      handler, Mediator and MediatR as constrained open behaviors selected by marker interfaces, ZeroAlloc.Mediator with one
+      `[PipelineBehavior(AppliesTo = ...)]` class per request and position.
+    - The baseline is the handler called directly at every depth (it never models behaviors), so the ratio column is the whole cost of
+      the mediator and its behaviors. The Publish baseline calls the handlers in turn from a non-async method and falls back to an
+      `async` continuation only when a handler does not complete synchronously, so it has no state machine of its own and stays the floor.
+    - `SendUnitYieldValueTask` and `SendUnitYieldTask` are Keryx only: an `IRequest` whose handler returns non-generic `ValueTask`/`Task`
+      and yields, against the same handler awaited directly. They are the benchmark the Performance contract names for
+      `UnitAdapter.ToUnit` ("must add 0 bytes in steady state"), not a comparison.
+    - "Typed" is each library's per-request entry point (Keryx and Mediator typed overloads, Immediate.Handlers' generated `Handler`,
+      ZeroAlloc.Mediator's static `Mediator` and its typed `IMediator`), "generic" the `IMediator`/`ISender` generic method. A scenario a
+      library has no API for is left out and shown as n/a: Immediate.Handlers has no generic entry point and no notifications,
+      MediatR no typed entry point, ZeroAlloc.Mediator no generic entry point and no stream behaviors.
+    - Keryx runs the 3-behavior stream twice: with `IStreamPipelineBehavior` wrap behaviors (the shape the other libraries use) and with
+      `IStreamHookBehavior` hook behaviors (fused into one iterator).
+    - ZeroAlloc.Mediator's generator is a separate package, `ZeroAlloc.Mediator.Generator`, pinned to the same 7.0.1.
+    - Besides building and the Dry job, CI runs `Keryx.Benchmarks --verify`, which calls every comparison benchmark with a call counter
+      on and fails when a library does not run the scenario's handlers and behaviors (the counter is a `static readonly` switch, a
+      constant in benchmark runs).
+    - The README's numbers come from local runs with `--launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200`
+      (BenchmarkDotNet's default job needed about two hours for the 130 benchmarks); the Publish and `IRequest` tables were re-run after
+      the Publish baseline change.
+- **Proposal:** confirm, and add the setup rules (shared request shape, default lifetimes, baseline without behaviors, n/a for
+  scenarios a library cannot express, `--verify` in CI) to the ADR's Benchmarks section.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

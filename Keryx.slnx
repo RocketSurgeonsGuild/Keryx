@@ -12,6 +12,7 @@
   </Folder>
   <Folder Name="/.github/workflows/">
     <File Path=".github/workflows/aot.yml" />
+    <File Path=".github/workflows/benchmarks.yml" />
     <File Path=".github/workflows/build.yml" />
     <File Path=".github/workflows/close-milestone.yml" />
     <File Path=".github/workflows/dependabot-merge.yml" />
@@ -69,5 +70,17 @@
     <File Path="test/Directory.Build.targets" />
     <Project Path="test/Keryx.Benchmarks/Keryx.Benchmarks.csproj" />
     <Project Path="test/Keryx.Tests/Keryx.Tests.csproj" />
+  </Folder>
+  <Folder Name="/test/benchmark-subjects/">
+    <File Path="test/benchmark-subjects/Directory.Build.props" />
+    <File Path="test/benchmark-subjects/Directory.Build.targets" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.Baseline/Keryx.Benchmarks.Baseline.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.Common/Keryx.Benchmarks.Common.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.ImmediateHandlers/Keryx.Benchmarks.ImmediateHandlers.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.KeryxHost/Keryx.Benchmarks.KeryxHost.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorScoped/Keryx.Benchmarks.MediatorScoped.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorSingleton/Keryx.Benchmarks.MediatorSingleton.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatRHandlers/Keryx.Benchmarks.MediatRHandlers.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.ZeroAllocMediator/Keryx.Benchmarks.ZeroAllocMediator.csproj" />
   </Folder>
 </Solution>

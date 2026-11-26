@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- The hand-written direct-call baseline: the subjects' handler bodies, called directly. -->
+</Project>

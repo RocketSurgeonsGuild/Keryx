@@ -1,0 +1,13 @@
+<Project>
+    <!--
+        The libraries the comparison benchmarks (test/Keryx.Benchmarks, Comparison/) measure: one small class library per mediator, each with
+        the same requests, handlers and pass-through behaviors written the way that library expects (ADR 0001, Benchmarks). Common holds what
+        they share: the verification probe and the stream source.
+    -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+</Project>

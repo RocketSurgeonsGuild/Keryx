@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- What every benchmark subject shares: the verification probe and the stream every stream handler returns. -->
+</Project>

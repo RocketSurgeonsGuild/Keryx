@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- Immediate.Handlers 4.4.0: a generated Handler class per handler, resolved from DI and called directly. -->
+    <ItemGroup>
+        <PackageReference Include="Immediate.Handlers" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

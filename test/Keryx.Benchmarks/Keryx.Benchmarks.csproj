@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <!--
-        BenchmarkDotNet suite: Keryx against a hand-written baseline and the other mediators (ADR 0001, phases 4 and 8). Not a test project:
-        CI only builds it, or runs it with the Dry job; numbers from shared runners are never published.
+        BenchmarkDotNet suite (ADR 0001, Benchmarks): Keryx against a hand-written baseline and the other mediators (Comparison/), each library
+        in its own small project under test/benchmark-subjects; the Phase 4 gate prototype (Prototype/); the Phase 3 dispatch measurements
+        (Host/). Not a test project: CI builds it, checks the comparison subjects with its verify mode and runs it with the Dry job; numbers from
+        shared runners are never published.
     -->
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -16,5 +18,13 @@
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.Common\Keryx.Benchmarks.Common.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.Baseline\Keryx.Benchmarks.Baseline.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.KeryxHost\Keryx.Benchmarks.KeryxHost.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorScoped\Keryx.Benchmarks.MediatorScoped.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorSingleton\Keryx.Benchmarks.MediatorSingleton.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatRHandlers\Keryx.Benchmarks.MediatRHandlers.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ImmediateHandlers\Keryx.Benchmarks.ImmediateHandlers.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ZeroAllocMediator\Keryx.Benchmarks.ZeroAllocMediator.csproj" />
     </ItemGroup>
 </Project>
