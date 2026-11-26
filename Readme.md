@@ -84,7 +84,8 @@ public partial class CreateOrder
 
 The generator writes the other half of `CreateOrder`: a constructor that takes `IOrderRepository`, a public `InvokeAsync` that runs the
 handler, and the metadata a host reads. In the host it writes `KeryxMediator` (with a typed `Send(CreateOrder.Command)` overload) and
-`AddKeryx()`, which registers the mediator, the handler class and every behavior with generated factories.
+`AddKeryx()`, which registers the mediator and the handler class with generated factories. Behaviors are static methods, so there is
+nothing to register for them.
 
 ## Requests and handlers
 
@@ -155,54 +156,85 @@ own.
 
 ## Behaviors
 
-A **behavior** wraps a handler call. There is one interface per pipeline:
+A **behavior** wraps a pipeline. It is a `static` class marked with one or more **kind attributes**, and for each kind it declares one
+`static` behavior method named `Handle` (or `HandleAsync`):
 
-| Interface                                         | Wraps                                                  |
-| ------------------------------------------------- | ------------------------------------------------------ |
-| `IRequestPipelineBehavior<TRequest, TResponse>`   | one `Send`                                             |
-| `IStreamPipelineBehavior<TRequest, TItem>`        | one `Stream` (wraps the stream; see [Streaming](#streaming)) |
-| `IStreamHookBehavior<TRequest, TItem>`            | one `Stream`, through start/item/complete/error hooks  |
-| `INotificationPipelineBehavior<TNotification>`    | one whole `Publish`                                    |
-| `INotificationHandlerPipelineBehavior<TNotification>` | each notification handler call                     |
+| Kind attribute           | Wraps                                                          | Open method's message type         | `next`                       | Returns                   |
+| ------------------------ | -------------------------------------------------------------- | ---------------------------------- | ---------------------------- | ------------------------- |
+| `[RequestBehavior]`      | one `Send`                                                     | `TRequest : IRequest<TResponse>`   | `struct, INext<TResponse>`   | `ValueTask<TResponse>`    |
+| `[StreamBehavior]`       | the inner stream of one `Stream` (see [Streaming](#streaming)) | `TRequest : IStreamRequest<TItem>` | `struct, IStreamNext<TItem>` | `IAsyncEnumerable<TItem>` |
+| `[NotificationBehavior]` | one whole `Publish` (see [Notifications](#notifications))      | `TNotification : INotification`    | `struct, INext`              | `ValueTask`               |
 
 ```csharp
+[RequestBehavior]
 [BehaviorOrder(Phase.Observability)]
-public sealed class LoggingBehavior<TRequest, TResponse>(ILogger<LoggingBehavior<TRequest, TResponse>> logger)
-    : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+public static class Audit
 {
-    public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(
+        TRequest request, TNext next, IAuditLog log, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
-        logger.LogInformation("Handling {Request}", typeof(TRequest).Name);
-        return await next.InvokeAsync(cancellationToken);
+        var response = await next.InvokeAsync(cancellationToken);
+        log.Record(request, response);
+        return response;
     }
+}
+
+[RequestBehavior]
+[BehaviorOrder(Phase.Validation)]
+public static class CheckQuantity
+{
+    public static ValueTask<Guid> Handle<TNext>(CreateOrder.Command request, TNext next, CancellationToken cancellationToken)
+        where TNext : struct, INext<Guid>
+        => request.Quantity > 0 ? next.InvokeAsync(cancellationToken) : throw new ArgumentOutOfRangeException(nameof(request));
 }
 ```
 
-`next` is a generated struct, and the generated pipeline calls `Handle` on the concrete behavior type, so there is no delegate, no
-closure and no generic virtual call per step. A behavior may call `next` more than once (retry) or not at all (short-circuit).
+`next` is a generated struct, and the generated pipeline calls each behavior method directly, with explicit type arguments: no behavior
+instance, no delegate, no closure and no virtual or generic virtual call per step. A behavior may call `next` more than once (retry) or
+not at all (short-circuit). A request with no response is `IRequest<Unit>`, so a request behavior sees `TResponse = Unit`.
 
-**Shapes.** A behavior implements exactly one behavior interface closing, and is either open with the interface's type parameters in
-order (`LoggingBehavior<TRequest, TResponse>`) or closed and non-generic (`AuditCreate : IRequestPipelineBehavior<CreateOrder.Command,
-Guid>`). It is not `abstract`, its `Handle` is not `virtual` ([KRX019](#krx019)), and it has exactly one public constructor, whose
-parameters are injected like a handler's ([KRX020](#krx020)).
+**Behavior methods.** The message, `next` and an optional `CancellationToken` are found by type, in any order; every other parameter is
+**injected** like a handler's (keyed and default-valued forms included). The host resolves those services once per scope into the
+pipeline context, so no behavior instance is ever created (a `[StreamBehavior]` method's own iterator is still allocated per `Stream`
+call; see [Streaming](#streaming)). A method is either:
 
-**Attaching.** A behavior applies through any of three scopes, and the union (without duplicates) runs:
+- **open:** generic in the message, its response (or item) and `TNext`, with the message type parameter constrained to the kind's
+  message interface (table above). Further constraints narrow where it applies (`where TRequest : ICommand<TResponse>` limits it to
+  commands); or
+- **closed:** generic only in `TNext`, over one concrete message type, with `next` carrying exactly that message's response or item
+  type (`INext<Unit>` for an `IRequest`).
 
-- per target: `[Behavior(typeof(LoggingBehavior<,>))]` on a handler method, or, for per-publish notification behaviors, on the
-  notification type;
-- per assembly: `[assembly: Behavior(typeof(TransactionBehavior<,>))]` applies to every matching target in that assembly;
-- global: `[GlobalBehavior]` on the behavior class applies to every matching target in every host that references it. A host removes
-  one with `[assembly: ExcludeBehavior(typeof(LoggingBehavior<,>))]`; Info [KRX035](#krx035) lists every global behavior a host applies.
+A class that is not `static` or is generic, a kind attribute without a matching method, two methods of one kind, a partially open
+method or one with other type parameters, an open method without the message constraint, a wrong `next` or return type, or a `static`
+`Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to
+different kinds is [KRX019](#krx019). One class may carry several kind attributes; when two of its methods would have the same parameter
+list, name one `Handle` and the other `HandleAsync`. Outside a host the class and method are `public`; in a host `internal` is enough
+([KRX016](#krx016)).
 
-An open behavior applies where its generic constraints hold for the target's types (`where TRequest : ICommand` limits it to commands).
-Assembly and global behaviors that do not fit are skipped; one attached explicitly that does not fit is [KRX009](#krx009).
+**Attaching.** A behavior applies through any of three scopes, and the union (without duplicates) runs. `typeof(X)` always names the
+behavior class; in a pipeline it means X's method of that pipeline's kind.
+
+- per target: `[Behavior(typeof(Audit))]` on a request or stream handler method, or, for a `[NotificationBehavior]`, on the
+  notification type. `[Behavior]` on a notification handler method has no effect ([KRX042](#krx042)): notification handlers have no
+  pipelines of their own;
+- per assembly: `[assembly: Behavior(typeof(Transaction))]` applies to every matching target in that assembly (for a notification
+  behavior, the notification types declared there);
+- global: `[GlobalBehavior]` on the behavior class applies each of its behaviors to every matching target in every host that references
+  it; on a behavior method, only that method's kind is global. A host removes one with
+  `[assembly: ExcludeBehavior(typeof(Audit))]`, which removes the class from pipelines of every kind; Info [KRX035](#krx035) lists every
+  global behavior a host applies.
+
+An open method applies where its constraints hold for the target's types; a closed one where its message and response (or item) types
+are identical to the target's. Assembly and global behaviors that do not fit are skipped; one attached explicitly that does not fit is
+[KRX009](#krx009).
 
 **Ordering.** Lower runs first (further out). Behaviors sort by `[BehaviorOrder(Phase)]` (`Outermost` 0, `Observability` 100, `Security`
 200, `Validation` 300, `Default` 400, `Caching` 450, `Transaction` 500, `Innermost` 600; any value in between works), then by its
-`Order`, then by `[RunsAfter]`/`[RunsBefore]` edges (`typeof` form or generic form, which mean the same), then by type name. A cycle,
-or an edge that contradicts phase or order, is [KRX008](#krx008).
+`Order`, then by `[RunsAfter(typeof(X))]`/`[RunsBefore(typeof(X))]` edges, then by class name. These attributes go on the behavior class;
+the same attribute on a behavior method overrides the class's for that method's kind. A cycle, or an edge that contradicts phase or
+order, is [KRX008](#krx008).
 
 ## Streaming
 
@@ -225,16 +257,33 @@ public partial class ListOrders
 await foreach (var order in mediator.Stream(new ListOrders.Query(), ct)) { /* ... */ }
 ```
 
-With no stream behaviors, `Stream` returns the handler's enumerable as is. Two kinds of stream behavior sort together in one list:
+With no stream behaviors, `Stream` returns the handler's enumerable as is. A `[StreamBehavior]` wraps the stream: its method gets the
+inner stream from `next.InvokeAsync(ct)` and returns the stream the caller (or the next behavior out) sees, typically by re-yielding it
+from its own `async` iterator. It can filter, map, buffer, catch, retry by calling `next` again, or serve items without calling `next`:
 
-- `IStreamPipelineBehavior` **wraps** the stream: `Handle` gets the inner stream from `next.InvokeAsync(ct)` and returns the stream the
-  caller sees, typically by re-yielding it from its own iterator. It can filter, map, buffer, retry or serve items without calling `next`.
-- `IStreamHookBehavior` **observes** the stream through `OnStartAsync`, `OnItem` (return `false` to drop an item), `OnCompleteAsync`
-  and `OnErrorAsync`. Hook behaviors next to each other in the pipeline are fused into one generated iterator, so three hooks cost one
-  iterator instead of three.
+```csharp
+[StreamBehavior]
+public static class SkipNulls
+{
+    public static async IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(
+        TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+        where TRequest : IStreamRequest<TItem>
+        where TNext : struct, IStreamNext<TItem>
+    {
+        await foreach (var item in next.InvokeAsync(cancellationToken))
+        {
+            if (item is not null)
+            {
+                yield return item;
+            }
+        }
+    }
+}
+```
 
-Per `Stream` call, Keryx allocates one iterator per wrap behavior and one per run of adjacent hook behaviors, nothing per item, and one
-linked `CancellationTokenSource` only when both the `Stream` token and the `WithCancellation` token can be cancelled and differ.
+Per `Stream` call, Keryx allocates one iterator per stream behavior (its own), nothing per item, and one linked
+`CancellationTokenSource` only when both the `Stream` token and the `WithCancellation` token can be cancelled and differ. A null or
+unknown stream request throws from the `Stream()` call itself, before any behavior runs.
 
 ## Notifications
 
@@ -264,9 +313,28 @@ await mediator.Publish(new OrderPlaced(id), ct);
   before awaiting any.
 - Every handler runs, whatever the others do. If any fail, `Publish` throws one `AggregateException` with every failure in handler
   order, even for a single failure. Cancelling the token does not skip handlers; each sees the cancelled token.
-- `INotificationPipelineBehavior` wraps the whole publish (and runs even when there are no handlers);
-  `INotificationHandlerPipelineBehavior` wraps each handler.
+- A `[NotificationBehavior]` wraps the whole publish, handlers and strategy included, once per `Publish`, also when there are no
+  handlers. Attach it with `[Behavior]` on the notification type, `[assembly: Behavior]` in the notification type's assembly, or
+  `[GlobalBehavior]`; its `TNotification` is the concrete published type. Handlers have no behaviors of their own: they are called
+  directly under either strategy.
 - A struct notification delivered to a handler typed as an interface is boxed once per `Publish` (Info [KRX037](#krx037)).
+
+```csharp
+[NotificationBehavior]
+public static class CountPublishes
+{
+    public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, IPublishCounter counter, CancellationToken ct)
+        where TNotification : INotification
+        where TNext : struct, INext
+    {
+        counter.Increment(typeof(TNotification).Name);
+        return next.InvokeAsync(ct);
+    }
+}
+
+[Behavior(typeof(CountPublishes))]
+public sealed record OrderShipped(Guid Id) : INotification;
+```
 
 ## Hosts
 
@@ -277,12 +345,13 @@ namespace:
 - `internal sealed partial class KeryxMediator : IMediator`, with `ISender.Send`, `ISender.Stream` and `IPublisher.Publish`, plus a typed
   overload for each request and notification (`ValueTask<Guid> Send(CreateOrder.Command)`), which skips type dispatch;
 - `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator` and `IMediator`,
-  `ISender` and `IPublisher` (one scoped instance), every handler class with injected parameters, and every closed behavior type used,
-  all with generated factories and `TryAdd`.
+  `ISender` and `IPublisher` (one scoped instance) and every handler class with injected parameters, all with generated factories and
+  `TryAdd`. It registers no behavior types: behaviors are static.
 
-The mediator is **scoped**. It creates each pipeline's handler and behavior instances once per scope, lazily, and from then on a `Send`
-allocates nothing. Singletons and hosted services that need it create a scope with `IServiceScopeFactory`. A handler's transient
-dependencies therefore live as long as the scope.
+The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
+services its behavior methods inject; it never creates a behavior instance. From then on a `Send` allocates nothing. Singletons and hosted
+services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
+as long as the scope.
 
 The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a `FrozenDictionary` lookup
 above 32 request types) and never boxes the response. A struct request is boxed when sent through `ISender`; the typed overload avoids
@@ -314,43 +383,42 @@ notification handlers) and [samples/hosts](samples/hosts).
 
 ## Diagnostics
 
-Every diagnostic links here. KRX001, KRX005 (within one assembly) and KRX008 (within one assembly) need the whole compilation: the IDE
-shows them with full-solution analysis on, and every build reports them.
+Every diagnostic links here. KRX001, KRX005 (within one assembly), KRX008 (within one assembly) and KRX022 need the whole compilation:
+the IDE shows them with full-solution analysis on, and every build reports them. KRX010 and KRX020 are retired.
 
 | ID                             | Severity | Meaning                                                                                                                                                        |
 | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a id="krx001"></a>KRX001      | Error    | A request or stream request has no handler in its assembly. Not reported in a contracts assembly or a host. Code fixes: add a handler stub; mark the assembly `[assembly: KeryxContracts]`. |
 | <a id="krx002"></a>KRX002      | Error    | A handler is not `private static`, or returns a type its request kind does not allow (including `async void`). Code fix: make it `private static`.           |
 | <a id="krx003"></a>KRX003      | Error    | A handler has no request or notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract request or an interface.        |
-| <a id="krx004"></a>KRX004      | Error    | A handler class or a containing type is not `partial`, is not `public` outside a host, or is a struct. Code fix: add `partial` (and `public`).                |
+| <a id="krx004"></a>KRX004      | Error    | A handler class or a containing type is not `partial`, is file-local, is not `public` outside a host (narrower than `internal` in a host), or is not a class. Code fix: add `partial` (and `public`). |
 | <a id="krx005"></a>KRX005      | Error    | A request has two handlers (in one assembly, or across the host's assemblies).                                                                                |
 | <a id="krx006"></a>KRX006      | Error    | A class directly contains more than one handler.                                                                                                              |
-| <a id="krx007"></a>KRX007      | Error    | A handler class declares an instance or primary constructor, or has injected parameters and a base type without an accessible parameterless constructor.      |
-| <a id="krx008"></a>KRX008      | Error    | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order.                                                                         |
-| <a id="krx009"></a>KRX009      | Error    | A behavior attached to a handler or notification type does not fit it: wrong behavior kind, or its constraints do not hold.                                    |
+| <a id="krx007"></a>KRX007      | Error    | A handler class declares an instance or primary constructor, or has injected parameters and is `abstract`, has `required` members, or has a base type without an accessible parameterless constructor. |
+| <a id="krx008"></a>KRX008      | Error    | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order. Reported once per pair of behavior classes (and per kind where a method overrides the class's ordering). |
+| <a id="krx009"></a>KRX009      | Error    | A behavior attached with `[Behavior]` to a request or stream handler method or a notification type does not fit it: not a behavior class, no behavior method of the target's kind, constraints that do not hold, or a closed method over other types. The host reports it for behaviors a referenced handler or notification type attaches. |
 | <a id="krx011"></a>KRX011      | Error    | A type implements more than one request closing, both request kinds, or a request interface and `INotification`.                                              |
 | <a id="krx012"></a>KRX012      | Error    | A request, stream request or notification is generic, nested in a generic type or a `ref struct`; or a handler class is generic.                             |
-| <a id="krx013"></a>KRX013      | Error    | A handler parameter is `ref`, `in`, `out` or `params`, or there is more than one `CancellationToken`.                                                          |
+| <a id="krx013"></a>KRX013      | Error    | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`. |
 | <a id="krx014"></a>KRX014      | Error    | A `static` handler class has injected parameters. Code fix: remove `static`.                                                                                  |
 | <a id="krx015"></a>KRX015      | Error    | A handler class declares a member named `InvokeAsync` or starting with `__keryx_`.                                                                            |
-| <a id="krx016"></a>KRX016      | Error    | Outside a host, a type a pipeline needs (request, response, notification, behavior) is not public.                                                            |
+| <a id="krx016"></a>KRX016      | Error    | Outside a host, a type a pipeline needs (request, response, notification, injected parameter type) or a behavior class or method is not public. In a host, one is narrower than `internal` or file-local. |
 | <a id="krx017"></a>KRX017      | Warning  | A handler's response type differs from the request's only in nullability.                                                                                     |
-| <a id="krx018"></a>KRX018      | Error    | A `[FromKeyedServices]` key is not a compile-time constant, or uses the parameterless form.                                                                   |
-| <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape, implements more than one behavior interface closing, is `abstract`, or implements `Handle` as `virtual`/`override`. |
-| <a id="krx020"></a>KRX020      | Error    | A behavior class does not have exactly one public constructor.                                                                                                |
+| <a id="krx018"></a>KRX018      | Error    | A `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form. |
+| <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape: not `static` or generic, a kind attribute without a matching behavior method, two methods of one kind, a partially open method or one with other type parameters, an open method whose message type parameter lacks the kind's message constraint, a `next` without the `struct` and interface constraint, a wrong return type, or a `static` `Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to different kinds. |
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
-| <a id="krx030"></a>KRX030      | Error    | A request the host can see has no handler anywhere in the host, unless `[assembly: ExternallyHandled(typeof(X))]` names it. Severity can be changed in `.editorconfig`. |
-| <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`.                                                                                              |
+| <a id="krx030"></a>KRX030      | Error    | A request the host can see (its own, or a referenced one, including one declared in another host) has no handler anywhere in the host, unless `[assembly: ExternallyHandled(typeof(X))]` names it. Severity can be changed in `.editorconfig`. |
+| <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`. The host generator emits nothing there.                                                    |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
-| <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names cannot be resolved from the host. Reference the assembly the message names.                                                |
+| <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. |
 | <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies and the assembly it comes from.                                                                                   |
 | <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline, or `ExternallyHandled` names a type the host handles or that is not a request or stream request. |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |
-| <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect, or `[GlobalBehavior]` on a type that is not a behavior.                                                                  |
+| <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect (including on a notification handler method), or `[GlobalBehavior]` on a class without a behavior kind attribute or on a method that is not a behavior method. |
 | <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`, where it has no effect. |
 
 ## Benchmarks
@@ -362,8 +430,8 @@ run); behaviors complete synchronously. "Typed" is a library's per-request entry
 scenario the library has no API for. How each library is set up is recorded in
 [open-questions.md](docs/adr/open-questions.md) (OQ-51).
 
-Each cell is the mean time per call and the bytes allocated per call. Local runs, 2026-11-26, all with the settings below (the `IRequest`
-and Publish tables come from a second run, after the Publish direct call was made non-async):
+Each cell is the mean time per call and the bytes allocated per call. One local run, 2026-11-26, after the move to static behaviors,
+with the settings below:
 
 ```
 BenchmarkDotNet v0.15.8, macOS 27.2.1 (26B131) [Darwin 27.2.0]
@@ -375,63 +443,59 @@ IterationCount=15  IterationTime=200ms  LaunchCount=1  WarmupCount=5
 How to read them:
 
 - Times under about 0.5 ns are below what BenchmarkDotNet resolves: the JIT inlined the whole call, pipeline included, into the
-  benchmark (the direct call, Keryx's typed overloads and Mediator's singleton `Mediator` class at low depths). Compare those rows by
-  order of magnitude.
+  benchmark (the direct call, and Keryx's typed overloads up to 3 behaviors). Compare those rows by order of magnitude.
 - With a yielding handler, the time is the thread-pool hop of `Task.Yield()` and varies by a few hundred nanoseconds from run to run;
   the allocation column is the meaningful one. The direct call's 112 to 113 B (averaged over thread-pool work) is the handler's own
   async state machine, so a library that shows the same adds nothing.
-- In the stream scenarios the direct call's 120 B is the handler's iterator. Each wrap behavior adds its own iterator; Keryx's three
-  hook behaviors are fused into one generated iterator.
+- In the stream scenarios the direct call's 120 B is the handler's iterator. Each stream behavior adds its own iterator.
 
 ### Send, synchronous handler
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 0.31 ns · 0 B | 0.02 ns · 0 B | 0.02 ns · 0 B | 0.00 ns · 0 B |
-| **Keryx**, typed overload | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.18 ns · 0 B | 2.16 ns · 0 B |
-| **Keryx**, `IMediator` | 2.95 ns · 0 B | 3.28 ns · 0 B | 3.44 ns · 0 B | 4.75 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 25.1 ns · 64 B | 45.5 ns · 160 B | 67.4 ns · 352 B | 122 ns · 832 B |
-| Mediator 3.0.2 scoped, `IMediator` | 27.4 ns · 64 B | 45.9 ns · 160 B | 62.9 ns · 352 B | 118 ns · 832 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 0.38 ns · 0 B | 1.22 ns · 0 B | 5.90 ns · 0 B | 14.0 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 4.09 ns · 0 B | 4.61 ns · 0 B | 9.24 ns · 0 B | 20.3 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 31.1 ns · 200 B | 67.4 ns · 440 B | 102 ns · 728 B | 187 ns · 1,448 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 8.06 ns · 0 B | 7.76 ns · 0 B | 10.2 ns · 0 B | 13.7 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 11.6 ns · 0 B | 9.00 ns · 0 B | 10.9 ns · 0 B | 14.1 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 19.8 ns · 24 B | 22.6 ns · 24 B | 24.5 ns · 24 B | 22.0 ns · 24 B |
+| Hand-written direct call | 0.01 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.02 ns · 0 B |
+| **Keryx**, typed overload | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.58 ns · 0 B |
+| **Keryx**, `IMediator` | 3.22 ns · 0 B | 3.31 ns · 0 B | 3.31 ns · 0 B | 3.51 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 27.3 ns · 64 B | 47.6 ns · 160 B | 64.9 ns · 352 B | 124 ns · 832 B |
+| Mediator 3.0.2 scoped, `IMediator` | 29.7 ns · 64 B | 47.2 ns · 160 B | 65.3 ns · 352 B | 125 ns · 832 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 0.64 ns · 0 B | 1.28 ns · 0 B | 5.06 ns · 0 B | 15.8 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 4.96 ns · 0 B | 4.69 ns · 0 B | 9.29 ns · 0 B | 18.0 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 32.5 ns · 200 B | 71.3 ns · 440 B | 105 ns · 728 B | 193 ns · 1,448 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 9.50 ns · 0 B | 8.43 ns · 0 B | 13.9 ns · 0 B | 14.2 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 15.2 ns · 0 B | 10.9 ns · 0 B | 15.0 ns · 0 B | 19.6 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 25.5 ns · 24 B | 24.5 ns · 24 B | 25.4 ns · 24 B | 26.5 ns · 24 B |
 
 ### Send, handler awaits `Task.Yield()`
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 1,177 ns · 113 B | 1,112 ns · 113 B | 1,137 ns · 113 B | 899 ns · 113 B |
-| **Keryx**, typed overload | 863 ns · 113 B | 877 ns · 113 B | 890 ns · 113 B | 981 ns · 112 B |
-| **Keryx**, `IMediator` | 1,005 ns · 112 B | 1,188 ns · 113 B | 878 ns · 113 B | 1,051 ns · 113 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 1,163 ns · 176 B | 945 ns · 272 B | 1,238 ns · 465 B | 938 ns · 944 B |
-| Mediator 3.0.2 scoped, `IMediator` | 856 ns · 176 B | 1,277 ns · 272 B | 920 ns · 464 B | 1,222 ns · 944 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 1,149 ns · 112 B | 925 ns · 113 B | 1,166 ns · 113 B | 874 ns · 113 B |
-| Mediator 3.0.2 singleton, `IMediator` | 810 ns · 113 B | 1,067 ns · 112 B | 923 ns · 113 B | 1,026 ns · 113 B |
-| MediatR 15.0.0, `IMediator` | 842 ns · 232 B | 878 ns · 472 B | 1,093 ns · 760 B | 978 ns · 1,480 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 1,356 ns · 373 B | 881 ns · 372 B | 890 ns · 373 B | 831 ns · 374 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 841 ns · 245 B | 1,324 ns · 246 B | 956 ns · 245 B | 1,192 ns · 246 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 880 ns · 279 B | 929 ns · 278 B | 1,237 ns · 279 B | 1,006 ns · 278 B |
+| Hand-written direct call | 1,277 ns · 113 B | 1,216 ns · 112 B | 1,186 ns · 113 B | 1,227 ns · 113 B |
+| **Keryx**, typed overload | 1,253 ns · 113 B | 1,251 ns · 112 B | 1,305 ns · 112 B | 1,275 ns · 112 B |
+| **Keryx**, `IMediator` | 1,323 ns · 112 B | 1,290 ns · 112 B | 1,243 ns · 112 B | 1,255 ns · 112 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 1,269 ns · 176 B | 1,336 ns · 272 B | 1,357 ns · 464 B | 1,479 ns · 944 B |
+| Mediator 3.0.2 scoped, `IMediator` | 1,375 ns · 176 B | 1,400 ns · 272 B | 1,475 ns · 464 B | 1,421 ns · 944 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 1,260 ns · 112 B | 1,199 ns · 113 B | 1,210 ns · 113 B | 1,286 ns · 112 B |
+| Mediator 3.0.2 singleton, `IMediator` | 1,280 ns · 112 B | 1,269 ns · 112 B | 1,327 ns · 112 B | 1,301 ns · 112 B |
+| MediatR 15.0.0, `IMediator` | 1,360 ns · 232 B | 1,352 ns · 472 B | 1,260 ns · 760 B | 1,400 ns · 1,480 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 1,331 ns · 372 B | 1,366 ns · 373 B | 1,382 ns · 373 B | 1,423 ns · 373 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,258 ns · 246 B | 1,361 ns · 246 B | 1,365 ns · 246 B | 1,304 ns · 246 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,401 ns · 277 B | 1,336 ns · 279 B | 1,327 ns · 278 B | 1,423 ns · 279 B |
 
 ### Stream of 100 items
 
 | Subject | 0 stream behaviors | 3 stream behaviors |
 | --- | ---: | ---: |
-| Hand-written direct call | 633 ns · 120 B | 650 ns · 120 B |
-| **Keryx**, typed overload | 641 ns · 120 B | 2,708 ns · 680 B |
-| **Keryx**, `IMediator` | 631 ns · 120 B | 2,725 ns · 680 B |
-| **Keryx** (hook behaviors), typed overload | n/a | 1,407 ns · 352 B |
-| **Keryx** (hook behaviors), `IMediator` | n/a | 1,386 ns · 352 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 669 ns · 184 B | 2,793 ns · 1,048 B |
-| Mediator 3.0.2 scoped, `IMediator` | 655 ns · 184 B | 2,803 ns · 1,048 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 633 ns · 120 B | 2,719 ns · 696 B |
-| Mediator 3.0.2 singleton, `IMediator` | 637 ns · 120 B | 2,771 ns · 696 B |
-| MediatR 15.0.0, `IMediator` | 1,309 ns · 512 B | 7,617 ns · 2,336 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 623 ns · 120 B | 2,711 ns · 672 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 637 ns · 120 B | n/a |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 641 ns · 144 B | n/a |
+| Hand-written direct call | 652 ns · 120 B | 651 ns · 120 B |
+| **Keryx**, typed overload | 643 ns · 120 B | 2,831 ns · 680 B |
+| **Keryx**, `IMediator` | 652 ns · 120 B | 2,810 ns · 680 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 683 ns · 184 B | 2,888 ns · 1,048 B |
+| Mediator 3.0.2 scoped, `IMediator` | 686 ns · 184 B | 2,864 ns · 1,048 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 648 ns · 120 B | 2,787 ns · 696 B |
+| Mediator 3.0.2 singleton, `IMediator` | 658 ns · 120 B | 2,804 ns · 696 B |
+| MediatR 15.0.0, `IMediator` | 1,354 ns · 512 B | 7,369 ns · 2,336 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 638 ns · 120 B | 2,850 ns · 672 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 660 ns · 120 B | n/a |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 674 ns · 144 B | n/a |
 
 ### Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only)
 
@@ -442,9 +506,9 @@ libraries are left out: this checks Keryx's contract, not a comparison.
 
 | Subject | `async ValueTask` handler | `async Task` handler |
 | --- | ---: | ---: |
-| Hand-written direct call | 1,257 ns · 96 B | 1,146 ns · 96 B |
-| **Keryx**, typed overload | 1,394 ns · 96 B | 1,303 ns · 96 B |
-| **Keryx**, `IMediator` | 1,402 ns · 96 B | 1,319 ns · 96 B |
+| Hand-written direct call | 1,364 ns · 96 B | 1,106 ns · 96 B |
+| **Keryx**, typed overload | 1,288 ns · 96 B | 1,228 ns · 96 B |
+| **Keryx**, `IMediator` | 1,449 ns · 96 B | 1,309 ns · 96 B |
 
 ### Publish, sequential, synchronous handlers
 
@@ -454,16 +518,16 @@ resolves.
 
 | Subject | 1 handler | 5 handlers |
 | --- | ---: | ---: |
-| Hand-written direct call | 0.00 ns · 0 B | 0.64 ns · 0 B |
-| **Keryx**, typed overload | 0.68 ns · 0 B | 0.74 ns · 0 B |
-| **Keryx**, `IMediator` | 2.86 ns · 0 B | 3.05 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 17.8 ns · 0 B | 32.6 ns · 0 B |
-| Mediator 3.0.2 scoped, `IMediator` | 17.8 ns · 0 B | 27.4 ns · 0 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 3.21 ns · 0 B | 15.4 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 5.07 ns · 0 B | 17.3 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 121 ns · 768 B | 299 ns · 1,728 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 7.57 ns · 0 B | 15.9 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 28.2 ns · 24 B | 58.4 ns · 120 B |
+| Hand-written direct call | 0.04 ns · 0 B | 0.67 ns · 0 B |
+| **Keryx**, typed overload | 0.65 ns · 0 B | 0.84 ns · 0 B |
+| **Keryx**, `IMediator` | 3.11 ns · 0 B | 3.27 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 18.0 ns · 0 B | 34.9 ns · 0 B |
+| Mediator 3.0.2 scoped, `IMediator` | 19.0 ns · 0 B | 29.1 ns · 0 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 3.28 ns · 0 B | 15.6 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 4.97 ns · 0 B | 17.9 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 122 ns · 768 B | 316 ns · 1,728 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.98 ns · 0 B | 20.3 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 27.5 ns · 24 B | 58.8 ns · 120 B |
 
 Run them yourself (the full set takes about 15 minutes with these settings; `--verify` checks that every library really runs each
 scenario's handlers and behaviors):
@@ -474,7 +538,12 @@ dotnet run -c Release -f net10.0 -- --verify
 dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
 ```
 
-CI only builds the suite, runs `--verify` and runs every benchmark once with `--job Dry`; numbers from shared runners are never published.
+`--filter '*PipelinePrototype*'` runs the hand-written struct pipeline the generated code follows (static behavior methods, struct
+`next` links) against nested direct calls at depths 1, 3 and 8: 0 B at every depth, and 0.66x the nested calls' time at depth 3 on the
+machine above. On macOS, `--prototype-disasm` runs the same pipelines to Tier 1 for a `DOTNET_JitDisasm` listing (see `Program.cs`).
+
+CI builds the suite, runs `--verify`, runs every benchmark once with `--job Dry`, and runs the pipeline prototype on Linux with
+BenchmarkDotNet's `DisassemblyDiagnoser`, uploading the disassembly as a build artifact. Numbers from shared runners are never published.
 
 ## Building
 
