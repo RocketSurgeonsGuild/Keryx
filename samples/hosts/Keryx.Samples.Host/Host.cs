@@ -1,6 +1,5 @@
 using Keryx;
 using Keryx.Samples.Contracts;
-using Keryx.Samples.Orders;
 
 [assembly: KeryxHost]
 

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Keryx.Samples.Contracts;
 
 namespace Keryx.Samples.Orders;
