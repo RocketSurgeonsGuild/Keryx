@@ -82,7 +82,7 @@ internal static class HandlerModelFactory
             signature.NullabilityDiffers,
             method.Name,
             parameters.MoveToImmutable(),
-            Behaviors(method, symbols),
+            signature.Kind == HandlerKind.Notification ? ImmutableArray<string>.Empty : Behaviors(method, symbols),
             signature.Kind == HandlerKind.Notification ? Order(method, symbols) : 0,
             !issues.HasOutsideHostErrors && classAccess == AccessLevel.Public && signatureAccess == AccessLevel.Public,
             classAccess,
@@ -145,13 +145,29 @@ internal static class HandlerModelFactory
         var behaviors = ImmutableArray.CreateBuilder<string>();
         foreach (var attribute in method.GetAttributes())
         {
-            if (KeryxSymbols.IsAttribute(attribute, symbols.BehaviorAttribute) && attribute.ConstructorArguments is [{ Value: ITypeSymbol behavior }])
+            // A file-local behavior class is KRX016, and the manifest, generated into another file, cannot name it, so it is left out.
+            if (KeryxSymbols.IsAttribute(attribute, symbols.BehaviorAttribute)
+             && attribute.ConstructorArguments is [{ Value: ITypeSymbol behavior }]
+             && !IsFileLocal(behavior))
             {
                 behaviors.Add(CSharpText.TypeOf(behavior));
             }
         }
 
         return behaviors.ToImmutable();
+
+        static bool IsFileLocal(ITypeSymbol type)
+        {
+            for (var current = type as INamedTypeSymbol; current is not null; current = current.ContainingType)
+            {
+                if (current.IsFileLocal)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     private static int Order(IMethodSymbol method, KeryxSymbols symbols)

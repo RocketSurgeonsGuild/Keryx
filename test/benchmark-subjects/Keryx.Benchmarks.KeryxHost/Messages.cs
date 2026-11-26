@@ -16,7 +16,6 @@ public sealed record YieldUnitTask(int Value) : IRequest;
 
 public sealed record Count0(int Count) : IStreamRequest<int>;
 public sealed record Count3(int Count) : IStreamRequest<int>;
-public sealed record CountHooks3(int Count) : IStreamRequest<int>;
 
 public sealed record Pinged1(int Value) : INotification;
 public sealed record Pinged5(int Value) : INotification;

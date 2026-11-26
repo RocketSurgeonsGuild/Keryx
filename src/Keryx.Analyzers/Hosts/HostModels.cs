@@ -23,16 +23,15 @@ namespace Keryx.Analyzers.Hosts;
 /// <param name="StaticInvoker">Whether <c>InvokeAsync</c> is static: the handler has no injected parameters and is never constructed.</param>
 /// <param name="Services">The generated constructor's parameters (the handler's injected parameters), in order.</param>
 /// <param name="Behaviors">
-///     The closed behaviors that apply to the handler's pipeline: the union of the three scopes (per target, per assembly, global),
-///     de-duplicated by closed type, minus the host's <c>ExcludeBehavior</c> entries, in no particular order (ordinal by identity). The
-///     emitter sorts them (ADR 0001, Ordering).
+///     The behaviors that apply to a request or stream handler's pipeline: the union of the three scopes (per target, per assembly, global),
+///     de-duplicated by behavior class, minus the host's <c>ExcludeBehavior</c> entries, in no particular order (ordinal by class). The
+///     emitter sorts them (ADR 0001, Ordering). Empty for a notification handler, which has no behaviors of its own.
 /// </param>
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from this pipeline (for KRX036).</param>
 /// <param name="Order">The <c>[HandlerOrder]</c> of a notification handler.</param>
 /// <param name="Deliveries">
 ///     For a notification handler, every concrete notification type the host knows that converts to the handler's parameter type (ADR 0001,
-///     Polymorphic handlers), each with the per-handler behaviors closed over that concrete type, in no particular order (ordinal by type).
-///     Empty for request and stream request handlers, whose behaviors are <paramref name="Behaviors" />.
+///     Polymorphic handlers), in no particular order (ordinal by type). Empty for request and stream request handlers.
 /// </param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
@@ -46,12 +45,12 @@ internal sealed record HostHandlerModel(
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
     int Order,
-    EquatableArray<NotificationDeliveryModel> Deliveries = default
+    EquatableArray<HostNotificationModel> Deliveries = default
 );
 
 /// <summary>
-///     A concrete notification type the host knows (ADR 0001, Notifications): its publish strategy and its per-publish behaviors
-///     (<c>INotificationPipelineBehavior</c>), composed from the three scopes and closed over the type.
+///     A concrete notification type the host knows (ADR 0001, Notifications): its publish strategy and its notification behaviors, composed
+///     from the three scopes.
 /// </summary>
 /// <param name="Type">The notification type, fully qualified with <c>global::</c>.</param>
 /// <param name="DisplayName">The name diagnostics show.</param>
@@ -59,10 +58,10 @@ internal sealed record HostHandlerModel(
 /// <param name="IsSealed">Whether no other type can derive from it (a sealed class or a struct).</param>
 /// <param name="Parallel">Whether it carries <c>[PublishStrategy(PublishStrategy.Parallel)]</c>.</param>
 /// <param name="Behaviors">
-///     The closed per-publish behaviors: the type's <c>[Behavior]</c>s, its assembly's <c>[assembly: Behavior]</c>s (OQ-3) and the global
-///     ones, de-duplicated, minus the host's exclusions, in no particular order (ordinal by identity).
+///     The notification behaviors: the type's <c>[Behavior]</c>s, its assembly's <c>[assembly: Behavior]</c>s (OQ-3) and the global ones,
+///     de-duplicated, minus the host's exclusions, in no particular order (ordinal by class).
 /// </param>
-/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from the per-publish pipeline (for KRX036).</param>
+/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from the publish pipeline (for KRX036).</param>
 /// <param name="Location">Its first declaration when it is in source, for KRX037.</param>
 internal sealed record HostNotificationModel(
     string Type,
@@ -76,40 +75,35 @@ internal sealed record HostNotificationModel(
 );
 
 /// <summary>
-///     One concrete notification type a notification handler receives, with the per-handler behaviors
-///     (<c>INotificationHandlerPipelineBehavior</c>) closed over that concrete type (ADR 0001, Notifications, Behaviors: <c>TNotification</c>
-///     is always the concrete published type).
+///     One behavior in a pipeline: what the emitter needs to call its behavior method and resolve its injected services, and what the sort
+///     and KRX008 need to place it (ADR 0001, Behavior methods, Generated pipeline shape, Ordering).
 /// </summary>
-/// <param name="Notification">The concrete notification type.</param>
-/// <param name="Behaviors">The closed per-handler behaviors, in no particular order (ordinal by identity).</param>
-/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from this handler's pipeline (for KRX036).</param>
-internal sealed record NotificationDeliveryModel(
-    HostNotificationModel Notification,
-    EquatableArray<PipelineBehaviorModel> Behaviors,
-    EquatableArray<string> UsedExclusions
-);
-
-/// <summary>
-///     One closed behavior in a pipeline: what the emitter needs to hold, call and register it, and what the sort and KRX008 need to place
-///     it (ADR 0001, Registration and invocation, Ordering).
-/// </summary>
-/// <param name="Type">The closed behavior type for generated code, fully qualified, with nullable annotations.</param>
-/// <param name="Identity">The closed type's <c>typeof</c> operand: de-duplication, registration and the ordinal sort name.</param>
-/// <param name="Definition">The <c>typeof</c> operand of its definition (<c>X&lt;,&gt;</c> when generic), which open edges match.</param>
-/// <param name="Kind">Its behavior interface.</param>
-/// <param name="Phase">Its <c>[BehaviorOrder]</c> phase.</param>
+/// <param name="Class">The behavior class, fully qualified.</param>
+/// <param name="Identity">The class's <c>typeof</c> operand: de-duplication, exclusions, edges and the ordinal sort name.</param>
+/// <param name="Kind">The kind of its behavior method in this pipeline.</param>
+/// <param name="Method">The behavior method's name (<c>Handle</c> or <c>HandleAsync</c>).</param>
+/// <param name="TypeArguments">
+///     The method's explicit type arguments, in declared order, fully qualified with nullable annotations; empty in the position of
+///     <c>TNext</c>, which is the generated link.
+/// </param>
+/// <param name="Parameters">What each parameter receives, in declared order.</param>
+/// <param name="Phase">Its <c>[BehaviorOrder]</c> phase (the method's, else the class's).</param>
 /// <param name="Order">Its <c>[BehaviorOrder]</c> order.</param>
-/// <param name="Edges">Its <c>RunsAfter</c>/<c>RunsBefore</c> edges, in declaration order, whichever form declared them.</param>
-/// <param name="Services">Its public constructor's parameters, resolved like a handler's injected parameters.</param>
+/// <param name="OrderOverridden">Whether the method declares ordering of its own, so KRX008 is checked for its kind on its own.</param>
+/// <param name="Edges">Its <c>RunsAfter</c>/<c>RunsBefore</c> edges, in declaration order.</param>
+/// <param name="Services">Its injected parameters, in declared order, resolved like a handler's injected parameters.</param>
 /// <param name="Assembly">The assembly that declares it.</param>
 /// <param name="InSource">Whether it is declared in the host's own source (KRX008 for in-source pairs is the analyzer's).</param>
 internal sealed record PipelineBehaviorModel(
-    string Type,
+    string Class,
     string Identity,
-    string Definition,
     BehaviorKind Kind,
+    string Method,
+    EquatableArray<string> TypeArguments,
+    EquatableArray<BehaviorParameterRole> Parameters,
     int Phase,
     int Order,
+    bool OrderOverridden,
     EquatableArray<BehaviorEdgeModel> Edges,
     EquatableArray<ServiceParameterModel> Services,
     string Assembly,
@@ -117,7 +111,7 @@ internal sealed record PipelineBehaviorModel(
 )
 {
     /// <summary>What the sort compares.</summary>
-    public OrderingKey Key => new(Identity, Definition, Phase, Order, [.. Edges.Select(static e => e.Edge)]);
+    public OrderingKey Key => new(Identity, Phase, Order, [.. Edges.Select(static e => e.Edge)]);
 }
 
 /// <summary>
@@ -147,8 +141,8 @@ internal sealed record ExclusionModel(string Operand, string Display, LocationIn
 internal sealed record ExternallyHandledModel(string Type, string Display, bool IsRequest, LocationInfo? Location);
 
 /// <summary>
-///     One parameter of a generated constructor (a handler's, later a behavior's), resolved by a generated factory (ADR 0001, Injected
-///     parameters).
+///     One injected parameter of a handler's generated constructor or of a behavior method, resolved by a generated factory or a pipeline
+///     context (ADR 0001, Injected parameters).
 /// </summary>
 /// <param name="Type">The parameter type, fully qualified, with nullable annotations.</param>
 /// <param name="ServiceType">
@@ -248,7 +242,7 @@ internal sealed record HostBuildProperties(string? RootNamespace, string? Target
 ///     handled in more than one assembly is KRX005 (in <paramref name="Diagnostics" />) and is dispatched by neither.
 /// </param>
 /// <param name="Notifications">
-///     The concrete notification types declared in the host's source and in its references, with their per-publish behaviors, ordered by
+///     The concrete notification types declared in the host's source and in its references, with their notification behaviors, ordered by
 ///     type.
 /// </param>
 /// <param name="HandledRequests">

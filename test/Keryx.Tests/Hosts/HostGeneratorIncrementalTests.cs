@@ -177,10 +177,12 @@ public class HostGeneratorIncrementalTests
                     """
                     namespace Sample;
 
+                    [Keryx.RequestBehavior]
                     [Keryx.GlobalBehavior]
-                    public sealed class Audit<TRequest, TResponse> : Keryx.IRequestPipelineBehavior<TRequest, TResponse> where TRequest : Keryx.IRequest<TResponse>
+                    public static class Audit
                     {
-                        public System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+                        public static System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+                            where TRequest : Keryx.IRequest<TResponse>
                             where TNext : struct, Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
                     }
                     """,
@@ -196,7 +198,7 @@ public class HostGeneratorIncrementalTests
         var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
         await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
         await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("global::Sample.Audit<global::Sample.CreateOrder.Command, global::System.Guid> Behavior1;");
+                    .Contains("global::Sample.Audit.Handle<global::Sample.CreateOrder.Command, global::System.Guid, ");
     }
 
     [Test]

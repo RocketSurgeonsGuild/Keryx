@@ -5,9 +5,9 @@ namespace Keryx.Tests.Notifications;
 
 /// <summary>
 ///     The Performance contract for <c>Publish</c> (ADR 0001, Performance contract; the Phase 6 brief): after one warm-up publish in the same
-///     scope, a sequential publish and a parallel publish whose handler pipelines complete synchronously allocate 0 bytes, on the typed
-///     overload and the generic entry point, for class and struct notifications, with and without per-publish and per-handler behaviors
-///     (compiled with optimizations, as a Release build ships the behaviors' own <c>async</c> methods). The one documented exception, a
+///     scope, a sequential publish and a parallel publish whose handlers complete synchronously allocate 0 bytes, on the typed
+///     overload and the generic entry point, for class and struct notifications, with and without static notification behaviors (one that
+///     takes an injected service, and an <c>async</c> one, compiled with optimizations as a Release build ships it). The one documented exception, a
 ///     struct delivered to an interface-typed handler, allocates exactly one box per publish (OQ-17, KRX037).
 /// </summary>
 /// <remarks>Measured like <see cref="HostAllocationTests" />: inside the compiled host, smallest of several regions, not in parallel.</remarks>
@@ -22,45 +22,41 @@ public class NotificationAllocationTests : HostTest
 
         public interface IMarker : INotification { }
 
+        [NotificationBehavior]
         [BehaviorOrder(Phase.Outermost)]
-        public sealed class Around<T> : INotificationPipelineBehavior<T> where T : INotification
+        public static class Around
         {
-            public async ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+            public static async ValueTask Handle<T, TNext>(T notification, TNext next, CancellationToken cancellationToken)
+                where T : INotification
+                where TNext : struct, INext =>
                 await next.InvokeAsync(cancellationToken);
         }
 
-        public sealed class Pass<T> : INotificationPipelineBehavior<T> where T : INotification
+        [NotificationBehavior]
+        public static class Pass
         {
-            public ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
-                next.InvokeAsync(cancellationToken);
-        }
-
-        [BehaviorOrder(Phase.Outermost)]
-        public sealed class AroundHandler<T> : INotificationHandlerPipelineBehavior<T> where T : INotification
-        {
-            public async ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
-                await next.InvokeAsync(cancellationToken);
-        }
-
-        public sealed class PassHandler<T> : INotificationHandlerPipelineBehavior<T> where T : INotification
-        {
-            public ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
-                next.InvokeAsync(cancellationToken);
+            public static ValueTask Handle<T, TNext>(T notification, TNext next, object service, CancellationToken cancellationToken)
+                where T : INotification
+                where TNext : struct, INext
+            {
+                GC.KeepAlive(service);
+                return next.InvokeAsync(cancellationToken);
+            }
         }
 
         public sealed record Placed : INotification;
         public readonly record struct Tick(int Value) : INotification;
         public readonly record struct Tock(int Value) : IMarker;
 
-        [Behavior(typeof(Around<>))]
-        [Behavior(typeof(Pass<>))]
+        [Behavior(typeof(Around))]
+        [Behavior(typeof(Pass))]
         public sealed record Wrapped : INotification;
 
         [PublishStrategy(PublishStrategy.Parallel)]
         public sealed record Fanout : INotification;
 
         [PublishStrategy(PublishStrategy.Parallel)]
-        [Behavior(typeof(Pass<>))]
+        [Behavior(typeof(Pass))]
         public readonly record struct FanoutTick(int Value) : INotification;
 
         public static partial class OnPlaced1 { private static ValueTask Handle(Placed notification) => default; }
@@ -74,25 +70,11 @@ public class NotificationAllocationTests : HostTest
         public static partial class OnAnyMarker { private static ValueTask Handle(IMarker notification) => default; }
         public static partial class OnAnyMarker2 { private static ValueTask Handle(IMarker notification) => default; }
 
-        public static partial class OnWrapped1
-        {
-            [Behavior(typeof(AroundHandler<>))]
-            [Behavior(typeof(PassHandler<>))]
-            private static ValueTask Handle(Wrapped notification) => default;
-        }
-
-        public partial class OnWrapped2
-        {
-            [Behavior(typeof(PassHandler<>))]
-            private static ValueTask Handle(Wrapped notification, object service) => default;
-        }
+        public static partial class OnWrapped1 { private static ValueTask Handle(Wrapped notification) => default; }
+        public partial class OnWrapped2 { private static ValueTask Handle(Wrapped notification, object service) => default; }
 
         public static partial class OnFanout1 { private static ValueTask Handle(Fanout notification) => default; }
-        public partial class OnFanout2
-        {
-            [Behavior(typeof(AroundHandler<>))]
-            private static ValueTask Handle(Fanout notification, object service) => default;
-        }
+        public partial class OnFanout2 { private static ValueTask Handle(Fanout notification, object service) => default; }
 
         public static partial class OnFanoutTick1 { private static ValueTask Handle(FanoutTick notification) => default; }
         public static partial class OnFanoutTick2 { private static ValueTask Handle(FanoutTick notification) => default; }

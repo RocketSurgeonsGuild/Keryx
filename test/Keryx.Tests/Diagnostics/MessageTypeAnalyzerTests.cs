@@ -78,12 +78,25 @@ public class MessageTypeAnalyzerTests : AnalyzerTest
         await Assert.That(Ids(diagnostics)).IsEmpty();
     }
 
+    /// <summary>A request behavior method, public.</summary>
+    private const string RequestMethod =
+        "{ public static ValueTask<TR> Handle<TQ, TR, TN>(TQ q, TN n) where TQ : IRequest<TR> where TN : struct, INext<TR> => n.InvokeAsync(default); }";
+
+    /// <summary>A notification behavior method, public.</summary>
+    private const string NotificationMethod =
+        "{ public static ValueTask Handle<T, TN>(T m, TN n) where T : INotification where TN : struct, INext => n.InvokeAsync(default); }";
+
+    /// <summary>A notification behavior method, internal.</summary>
+    private const string InternalNotificationMethod =
+        "{ internal static ValueTask Handle<T, TN>(T m, TN n) where T : INotification where TN : struct, INext => n.InvokeAsync(default); }";
+
     [Test]
-    [Arguments("internal sealed class Hidden { } [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
-    [Arguments("internal sealed class Hidden<T> { } [Behavior(typeof(Hidden<>))] public readonly struct Tick : INotification { }")]
-    [Arguments("[assembly: Behavior(typeof(Hidden))] internal sealed class Hidden { }")]
-    [Arguments("[GlobalBehavior] internal sealed class Hidden { }")]
-    [Arguments("public static class Outer { [GlobalBehavior] internal sealed class Hidden { } }")]
+    [Arguments("[NotificationBehavior] internal static class Hidden " + NotificationMethod + " [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
+    [Arguments("[NotificationBehavior] public static class Hidden " + InternalNotificationMethod + " [Behavior(typeof(Hidden))] public readonly struct Tick : INotification { }")]
+    [Arguments("[assembly: Behavior(typeof(Hidden))] [RequestBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments("[RequestBehavior] [GlobalBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments("public static class Outer { [RequestBehavior] [GlobalBehavior] internal static class Hidden " + RequestMethod + " }")]
+    [Arguments("[NotificationBehavior] public static class Hidden { [GlobalBehavior] internal static ValueTask Handle<T, TN>(T m, TN n) where T : INotification where TN : struct, INext => n.InvokeAsync(default); }")]
     public async Task KRX016_Behavior_Not_Public_Outside_A_Host(string source, CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken);
@@ -92,12 +105,13 @@ public class MessageTypeAnalyzerTests : AnalyzerTest
     }
 
     [Test]
-    [Arguments("[assembly: KeryxHost] internal sealed class Hidden { } [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
-    [Arguments("[assembly: KeryxHost] [assembly: Behavior(typeof(Hidden))] internal sealed class Hidden { }")]
-    [Arguments("[assembly: KeryxHost] [GlobalBehavior] internal sealed class Hidden { }")]
-    [Arguments("public sealed class Visible { } [Behavior(typeof(Visible))] public sealed class Placed : INotification { }")]
-    [Arguments("[assembly: Behavior(typeof(Visible))] public sealed class Visible { }")]
-    [Arguments("[GlobalBehavior] public sealed class Visible { }")]
+    [Arguments("[assembly: KeryxHost] [NotificationBehavior] internal static class Hidden " + NotificationMethod + " [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }")]
+    [Arguments("[assembly: KeryxHost] [assembly: Behavior(typeof(Hidden))] [RequestBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments("[assembly: KeryxHost] [RequestBehavior] [GlobalBehavior] internal static class Hidden " + RequestMethod)]
+    [Arguments("[NotificationBehavior] public static class Visible " + NotificationMethod + " [Behavior(typeof(Visible))] public sealed class Placed : INotification { }")]
+    [Arguments("[assembly: Behavior(typeof(Visible))] [RequestBehavior] public static class Visible " + RequestMethod)]
+    [Arguments("[RequestBehavior] [GlobalBehavior] public static class Visible " + RequestMethod)]
+    [Arguments("internal sealed class NotABehavior { } [Behavior(typeof(NotABehavior))] public sealed class Placed : INotification { }")]
     public async Task KRX016_Behavior_Public_Or_In_A_Host(string source, CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<MessageTypeAnalyzer>(source, cancellationToken);
@@ -114,11 +128,22 @@ public class MessageTypeAnalyzerTests : AnalyzerTest
 
             namespace Sample;
 
-            internal sealed class Hidden { }
+            [RequestBehavior]
+            [NotificationBehavior]
+            internal static class Hidden
+            {
+                public static ValueTask<TR> Handle<TQ, TR, TN>(TQ q, TN n) where TQ : IRequest<TR> where TN : struct, INext<TR> => n.InvokeAsync(default);
+                public static ValueTask Handle<T, TN>(T m, TN n) where T : INotification where TN : struct, INext => n.InvokeAsync(default);
+            }
 
             [Behavior(typeof(Hidden))] public sealed class Placed : INotification { }
 
-            [GlobalBehavior] internal sealed class Everywhere { }
+            [RequestBehavior]
+            [GlobalBehavior]
+            internal static class Everywhere
+            {
+                public static ValueTask<TR> Handle<TQ, TR, TN>(TQ q, TN n) where TQ : IRequest<TR> where TN : struct, INext<TR> => n.InvokeAsync(default);
+            }
             """,
             cancellationToken
         );

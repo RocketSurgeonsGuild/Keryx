@@ -18,23 +18,19 @@ internal static class KnownTypeNames
 
     public const string INextOfT = "Keryx.INext`1";
     public const string INext = "Keryx.INext";
-    public const string IRequestPipelineBehavior = "Keryx.IRequestPipelineBehavior`2";
     public const string IStreamNext = "Keryx.IStreamNext`1";
-    public const string IStreamPipelineBehavior = "Keryx.IStreamPipelineBehavior`2";
-    public const string IStreamHookBehavior = "Keryx.IStreamHookBehavior`2";
-    public const string INotificationPipelineBehavior = "Keryx.INotificationPipelineBehavior`1";
-    public const string INotificationHandlerPipelineBehavior = "Keryx.INotificationHandlerPipelineBehavior`1";
 
     public const string Phase = "Keryx.Phase";
     public const string PublishStrategy = "Keryx.PublishStrategy";
 
+    public const string RequestBehaviorAttribute = "Keryx.RequestBehaviorAttribute";
+    public const string StreamBehaviorAttribute = "Keryx.StreamBehaviorAttribute";
+    public const string NotificationBehaviorAttribute = "Keryx.NotificationBehaviorAttribute";
     public const string BehaviorAttribute = "Keryx.BehaviorAttribute";
     public const string GlobalBehaviorAttribute = "Keryx.GlobalBehaviorAttribute";
     public const string BehaviorOrderAttribute = "Keryx.BehaviorOrderAttribute";
     public const string RunsAfterAttribute = "Keryx.RunsAfterAttribute";
-    public const string RunsAfterAttributeOfT = "Keryx.RunsAfterAttribute`1";
     public const string RunsBeforeAttribute = "Keryx.RunsBeforeAttribute";
-    public const string RunsBeforeAttributeOfT = "Keryx.RunsBeforeAttribute`1";
     public const string ExcludeBehaviorAttribute = "Keryx.ExcludeBehaviorAttribute";
     public const string ExcludeHandlerAttribute = "Keryx.ExcludeHandlerAttribute";
     public const string ExternallyHandledAttribute = "Keryx.ExternallyHandledAttribute";

@@ -28,6 +28,45 @@ when" list expect the package in every TFM's group.
 - **Proposal:** keep the interim (the package lists the dependency for every TFM, as decided), or let pruning drop it for `net11.0` and
   say in the ADR (Package and assemblies) that `net11.0` gets the assembly from the shared framework. Needs a decision.
 
+### OQ-57: Which behavior methods KRX034 checks, and message constraints implied through another interface (2026-11-26)
+
+Two details of the static-behavior rework that the ADR does not settle:
+
+1. **KRX034 for a referenced behavior class with several kinds.** The ADR (How the host reads it; KRX034) says the host checks "the
+   injected parameter types of a referenced behavior method the host calls". A global or `[assembly: Behavior]` class is resolved before
+   the host knows which of its kinds any pipeline uses, and KRX035 lists a global behavior per class, so checking only the methods a
+   pipeline calls would make KRX035 and KRX034 depend on which targets exist.
+2. **Message constraint through a derived interface.** An open behavior method's message type parameter "must be constrained to the
+   kind's message interface" (Behavior methods; KRX019). The ADR does not say whether a constraint to an interface that itself implements
+   it (`where TRequest : ICommand<TResponse>` with `ICommand<T> : IRequest<T>`, `where TNotification : IDomainEvent` with
+   `IDomainEvent : INotification`) counts.
+
+- **Interim:** (1) a referenced behavior class is left out of every pipeline, with KRX034, when an injected parameter type of any of its
+  behavior methods (any kind it carries) cannot be resolved; a global one is then not listed by KRX035. (2) The constraint counts when
+  the constraint type is the kind's message interface or implements it (with the response or item type parameter for requests and
+  streams); the compiler guarantees the same conversion either way.
+- **Proposal:** keep both. Alternative for (1): check per kind, leaving the class in the pipelines of the kinds whose methods resolve.
+  Alternative for (2): require the kind's message interface itself in the constraint list.
+
+### OQ-58: An open behavior method that annotates its response type parameter (2026-11-26)
+
+A fully open behavior method has its message and response (or item) positions as method type parameters (Behavior methods, Generic
+shape). The ADR does not say whether `TResponse?` counts as that type parameter: `where TRequest : IRequest<TResponse?>`,
+`where TNext : struct, INext<TResponse?>` (`IStreamNext<TItem?>`) or a return type of `ValueTask<TResponse?>`
+(`IAsyncEnumerable<TItem?>`). Matching substitutes the bare type parameter and ignores the annotation, but `IRequest<>` and `INext<>` are
+invariant, so for a request that responds with `string` the generated code fails with CS8631 (`Ping` does not satisfy
+`IRequest<string?>`; the link is `INext<string>`, not `INext<string?>`) or CS8619, and nothing reports it. As a global or assembly
+behavior, it breaks every host it reaches.
+
+- **Interim:** KRX019. An open request or stream behavior method whose `next` constraint, return type or message constraint carries
+  `TResponse?` (`TItem?`) is rejected: "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return
+  type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'". The host skips the class, so generated code
+  never names it.
+- **Proposal:** keep the interim and say in the ADR (Behavior methods, Generic shape; KRX019) that the open positions are the bare type
+  parameters. Alternative: accept the annotation and make matching substitute `string?` where the method writes `TResponse?`, then
+  check each substituted constraint with its nullability against the target (a `TResponse?` method would then fit only requests that
+  respond with an annotated or oblivious type).
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

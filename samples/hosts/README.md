@@ -3,7 +3,7 @@
 Applications marked `[assembly: KeryxHost]` that compose the sample libraries (ADR 0001, Cross-assembly discovery).
 
 - `Keryx.Samples.Host`: a console host over `Keryx.Samples.Orders` and `Keryx.Samples.Contracts`. Its generated `KeryxMediator` and
-  `AddKeryx()` compose the library's handlers, its global `LoggingBehavior<,>` and its notification handlers with the host's own `Ping`
+  `AddKeryx()` compose the library's handlers, its global `Logging` behavior and its notification handlers with the host's own `Ping`
   handler and `OrderShipped` notification. It runs a short scenario (send through the generic and the typed entry points, stream, publish,
   a validation failure) and exits with a non-zero code when anything is off.
 

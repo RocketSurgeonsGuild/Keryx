@@ -5,124 +5,98 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace Keryx.Analyzers.Behaviors;
 
-/// <summary>What a behavior is matched against (ADR 0001, Three ways to attach a behavior, Matching).</summary>
-internal enum BehaviorTargetKind
-{
-    /// <summary>A request handler: type arguments <c>TRequest</c>, <c>TResponse</c>.</summary>
-    Request,
-
-    /// <summary>A stream request handler: type arguments <c>TRequest</c>, <c>TItem</c>.</summary>
-    Stream,
-
-    /// <summary>One notification handler (per-handler behaviors): type argument <c>TNotification</c>, the concrete published type.</summary>
-    NotificationHandler,
-
-    /// <summary>A notification type (per-publish behaviors): type argument <c>TNotification</c>.</summary>
-    Notification,
-}
-
 /// <summary>
-///     A pipeline target: its kind and the type arguments a behavior interface closing must have to fit it.
+///     A pipeline target (ADR 0001, Matching): the kind of behavior method it takes, its message type and its response (request) or item
+///     (stream) type. For a publish pipeline, the concrete published notification type and no response.
 /// </summary>
-/// <param name="Kind">What the target is.</param>
-/// <param name="TypeArguments">The type arguments in the behavior interface's order.</param>
-internal readonly record struct BehaviorTarget(BehaviorTargetKind Kind, ImmutableArray<ITypeSymbol> TypeArguments)
-{
-    /// <summary>Whether a behavior of this kind can apply to the target at all.</summary>
-    public bool Accepts(BehaviorKind kind) =>
-        (Kind, kind) switch
-        {
-            (BehaviorTargetKind.Request, BehaviorKind.Request) => true,
-            (BehaviorTargetKind.Stream, BehaviorKind.Stream or BehaviorKind.StreamHook) => true,
-            (BehaviorTargetKind.NotificationHandler, BehaviorKind.NotificationHandler) => true,
-            (BehaviorTargetKind.Notification, BehaviorKind.Notification) => true,
-            _ => false,
-        };
-
-    /// <summary>The behavior interfaces that fit the target, for messages.</summary>
-    public string ExpectedInterfaces =>
-        Kind switch
-        {
-            BehaviorTargetKind.Request => "IRequestPipelineBehavior<TRequest, TResponse>",
-            BehaviorTargetKind.Stream => "IStreamPipelineBehavior<TRequest, TItem> or IStreamHookBehavior<TRequest, TItem>",
-            BehaviorTargetKind.NotificationHandler => "INotificationHandlerPipelineBehavior<TNotification>",
-            BehaviorTargetKind.Notification => "INotificationPipelineBehavior<TNotification>",
-            _ => "a Keryx behavior interface",
-        };
-}
+/// <param name="Kind">The kind of behavior method that fits it.</param>
+/// <param name="Message">The request, stream request or concrete notification type.</param>
+/// <param name="Response">The response or item type; <see langword="null" /> for a notification.</param>
+internal readonly record struct BehaviorTarget(BehaviorKind Kind, ITypeSymbol Message, ITypeSymbol? Response);
 
 /// <summary>
-///     Decides whether a behavior fits a target and closes it over the target's types (ADR 0001, Matching). Keryx checks the constraints
-///     itself, because <c>INamedTypeSymbol.Construct</c> does not validate them.
+///     A behavior method matched to a target: what a generated call needs.
+/// </summary>
+/// <param name="Method">The behavior method.</param>
+/// <param name="TypeArguments">
+///     The method's type arguments, in declared order, with <see langword="null" /> in place of <c>TNext</c> (the generated link).
+/// </param>
+/// <param name="Services">The injected parameter types, in declared order, with the target's types substituted.</param>
+internal sealed record BehaviorMatch(BehaviorMethod Method, ImmutableArray<ITypeSymbol?> TypeArguments, ImmutableArray<ITypeSymbol> Services);
+
+/// <summary>
+///     Decides whether a behavior class fits a target and matches its behavior method of the target's kind (ADR 0001, Matching). Keryx checks
+///     the constraints on the method's type parameters itself, because <c>IMethodSymbol.Construct</c> does not validate them.
 /// </summary>
 internal static class BehaviorMatching
 {
     /// <summary>
-    ///     Closes the behavior named by <paramref name="behaviorType" /> (an unbound generic for an open behavior, a constructed or non-generic
-    ///     type for a closed one) over <paramref name="target" />.
+    ///     Matches the behavior method of <paramref name="shape" /> whose kind fits <paramref name="target" />: an open method has its message
+    ///     and response (or item) type parameters substituted with the target's types and every constraint checked; a closed method's message
+    ///     and response (or item) types must be identical to the target's.
     /// </summary>
-    /// <param name="behaviorType">The behavior as an attribute or scope names it.</param>
     /// <param name="shape">The behavior class's shape (<see cref="BehaviorShapes.Analyze" />).</param>
     /// <param name="target">The target.</param>
     /// <param name="compilation">The compilation, for conversions.</param>
-    /// <param name="closed">The closed behavior type when it fits.</param>
+    /// <param name="match">The matched method when it fits.</param>
     /// <param name="reason">Why it does not fit, for KRX009.</param>
-    public static bool TryClose(
-        INamedTypeSymbol behaviorType,
-        BehaviorShape shape,
-        BehaviorTarget target,
-        Compilation compilation,
-        out INamedTypeSymbol closed,
-        out string reason
-    )
+    public static bool TryMatch(BehaviorShape shape, BehaviorTarget target, Compilation compilation, out BehaviorMatch match, out string reason)
     {
-        closed = behaviorType;
-        if (!target.Accepts(shape.Kind))
+        match = null!;
+        if (shape.Method(target.Kind) is not { } method)
         {
-            reason = $"it is {Article(shape.Kind)}, but the target needs {target.ExpectedInterfaces}";
+            reason = $"it has no {BehaviorShapes.KindName(target.Kind)} behavior method (the class does not carry {BehaviorShapes.AttributeName(target.Kind)})";
             return false;
         }
 
-        if (behaviorType.IsUnboundGenericType)
+        var map = new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
+        if (method.IsOpen)
         {
-            // Open: every type parameter is substituted with the target's types, positionally, then every constraint must hold.
-            var definition = shape.Type;
-            if (definition.TypeParameters.Length != target.TypeArguments.Length)
+            var parameters = ImmutableArray.CreateBuilder<ITypeParameterSymbol>();
+            var arguments = ImmutableArray.CreateBuilder<ITypeSymbol>();
+            parameters.Add((ITypeParameterSymbol)method.Message);
+            arguments.Add(target.Message);
+            if (method.Response is ITypeParameterSymbol response && target.Response is { } targetResponse)
             {
-                reason = "its type parameters do not match the target's";
+                parameters.Add(response);
+                arguments.Add(targetResponse);
+            }
+
+            if (!ConstraintsHold(parameters.ToImmutable(), arguments.ToImmutable(), compilation, out reason))
+            {
                 return false;
             }
 
-            if (!ConstraintsHold(definition.TypeParameters, target.TypeArguments, compilation, out reason))
+            for (var i = 0; i < parameters.Count; i++)
             {
-                return false;
+                map[parameters[i]] = arguments[i];
             }
-
-            closed = definition.Construct(target.TypeArguments, target.TypeArguments.Select(static t => t.NullableAnnotation).ToImmutableArray());
-            return true;
         }
-
-        // Closed (non-generic, or a constructed generic named with all its type arguments): the interface's type arguments are the
-        // target's, identically. Assignable is not enough.
-        var closing = behaviorType.AllInterfaces.FirstOrDefault(i => SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, shape.Interface.OriginalDefinition));
-        if (closing is null || closing.TypeArguments.Length != target.TypeArguments.Length)
+        else if (!SymbolEqualityComparer.Default.Equals(method.Message, target.Message)
+              || ( method.Response is { } closedResponse
+                && target.Response is { } expectedResponse
+                && ( !SymbolEqualityComparer.Default.Equals(closedResponse, expectedResponse) || HandlerAnalysis.DiffersInNullabilityOnly(closedResponse, expectedResponse) ) ))
         {
-            reason = "it does not implement the target's behavior interface";
+            // Closed: identical types; assignable is not enough, and nullable annotations count when both sides are annotated.
+            reason = target.Response is null
+                ? $"its {BehaviorShapes.KindName(target.Kind)} behavior method is closed over '{Display(method.Message)}', but the target needs exactly '{Display(target.Message)}'"
+                : $"its {BehaviorShapes.KindName(target.Kind)} behavior method is closed over '{Display(method.Message)}' and '{Display(method.Response)}', but the target needs exactly '{Display(target.Message)}' and '{Display(target.Response)}'";
             return false;
         }
 
-        for (var i = 0; i < closing.TypeArguments.Length; i++)
+        var typeArguments = method.Method.TypeParameters
+                                  .Select(p => SymbolEqualityComparer.Default.Equals(p, method.Next) ? null : map.TryGetValue(p, out var argument) ? argument : p)
+                                  .ToImmutableArray();
+        var services = ImmutableArray.CreateBuilder<ITypeSymbol>();
+        for (var i = 0; i < method.Roles.Length; i++)
         {
-            var actual = closing.TypeArguments[i];
-            var expected = target.TypeArguments[i];
-            if (!SymbolEqualityComparer.Default.Equals(actual, expected) || HandlerAnalysis.DiffersInNullabilityOnly(actual, expected))
+            if (method.Roles[i] == BehaviorParameterRole.Service)
             {
-                reason =
-                    $"it is closed over '{Display(closing)}', but the target needs exactly '{Display(shape.Interface.OriginalDefinition.Construct([.. target.TypeArguments]))}'";
-                return false;
+                services.Add(Substitute(method.Method.Parameters[i].Type, map, compilation));
             }
         }
 
+        match = new(method, typeArguments, services.ToImmutable());
         reason = "";
         return true;
     }
@@ -296,16 +270,6 @@ internal static class BehaviorMatching
         return rebuilt.Construct(arguments, arguments.Select(static argument => argument.NullableAnnotation).ToImmutableArray());
     }
 
-    private static string Display(ITypeSymbol type) => type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
-
-    private static string Article(BehaviorKind kind) =>
-        kind switch
-        {
-            BehaviorKind.Request => "a request behavior (IRequestPipelineBehavior)",
-            BehaviorKind.Stream => "a stream wrap behavior (IStreamPipelineBehavior)",
-            BehaviorKind.StreamHook => "a stream hook behavior (IStreamHookBehavior)",
-            BehaviorKind.Notification => "a per-publish notification behavior (INotificationPipelineBehavior)",
-            BehaviorKind.NotificationHandler => "a per-handler notification behavior (INotificationHandlerPipelineBehavior)",
-            _ => "a behavior",
-        };
+    private static string Display(ITypeSymbol? type) =>
+        type?.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat.AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier)) ?? "";
 }

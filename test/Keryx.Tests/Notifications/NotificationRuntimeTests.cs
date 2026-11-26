@@ -225,25 +225,34 @@ public class NotificationRuntimeTests : HostTest
             }
         }
 
-        // OQ-43: a per-publish behavior's exception propagates as it is; a per-handler behavior's is part of its handler's failure.
-        public sealed class ThrowsBeforeNext<T> : INotificationPipelineBehavior<T> where T : INotification
+        // OQ-43: a notification behavior's exception propagates as it is.
+        [NotificationBehavior]
+        public static class ThrowsBeforeNext
         {
-            public ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+            public static ValueTask Handle<T, TNext>(T notification, TNext next, CancellationToken cancellationToken)
+                where T : INotification
+                where TNext : struct, INext =>
                 throw new InvalidOperationException("publish sync");
         }
 
-        public sealed class ThrowsAfterNext<T> : INotificationPipelineBehavior<T> where T : INotification
+        [NotificationBehavior]
+        public static class ThrowsAfterNext
         {
-            public async ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext
+            public static async ValueTask Handle<T, TNext>(T notification, TNext next, CancellationToken cancellationToken)
+                where T : INotification
+                where TNext : struct, INext
             {
                 await next.InvokeAsync(cancellationToken);
                 throw new InvalidOperationException("publish async");
             }
         }
 
-        public sealed class PassesThrough<T> : INotificationPipelineBehavior<T> where T : INotification
+        [NotificationBehavior]
+        public static class PassesThrough
         {
-            public async ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext
+            public static async ValueTask Handle<T, TNext>(T notification, TNext next, CancellationToken cancellationToken)
+                where T : INotification
+                where TNext : struct, INext
             {
                 Log.Write("pass>");
                 await next.InvokeAsync(cancellationToken);
@@ -251,22 +260,15 @@ public class NotificationRuntimeTests : HostTest
             }
         }
 
-        public sealed class HandlerThrows<T> : INotificationHandlerPipelineBehavior<T> where T : INotification
-        {
-            public ValueTask Handle<TNext>(T notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
-                throw new InvalidOperationException("behavior 2");
-        }
-
-        [Behavior(typeof(ThrowsBeforeNext<>))]
+        [Behavior(typeof(ThrowsBeforeNext))]
         public sealed record PublishThrows : INotification;
 
-        [Behavior(typeof(ThrowsAfterNext<>))]
+        [Behavior(typeof(ThrowsAfterNext))]
         public sealed record PublishThrowsLater : INotification;
 
-        [Behavior(typeof(PassesThrough<>))]
+        [Behavior(typeof(PassesThrough))]
         public sealed record PublishPassesFailure : INotification;
 
-        public sealed record Guarded : INotification;
 
         public static partial class OnPublishThrows
         {
@@ -289,33 +291,6 @@ public class NotificationRuntimeTests : HostTest
         public static partial class OnPublishPassesFailure
         {
             private static ValueTask Handle(PublishPassesFailure notification) => throw new InvalidOperationException("handler failed");
-        }
-
-        public static partial class Guarded1
-        {
-            [HandlerOrder(1)]
-            private static ValueTask Handle(Guarded notification)
-            {
-                Log.Write("1 ran");
-                return default;
-            }
-        }
-
-        public static partial class Guarded2
-        {
-            [HandlerOrder(2)]
-            [Behavior(typeof(HandlerThrows<>))]
-            private static ValueTask Handle(Guarded notification)
-            {
-                Log.Write("2 ran");
-                return default;
-            }
-        }
-
-        public static partial class Guarded3
-        {
-            [HandlerOrder(3)]
-            private static ValueTask Handle(Guarded notification) => throw new InvalidOperationException("handler 3");
         }
 
         // Fanout: the first handler waits for the second, which only a parallel publish can satisfy.
@@ -441,9 +416,6 @@ public class NotificationRuntimeTests : HostTest
                             break;
                         case "publish passes failure":
                             await publisher.Publish(new PublishPassesFailure(), cancellationToken);
-                            break;
-                        case "handler behavior throws":
-                            await mediator.Publish(new Guarded(), cancellationToken);
                             break;
                         case "derived unknown":
                             await mediator.Publish((Shipped)new Hidden("h"), cancellationToken);
@@ -599,9 +571,9 @@ public class NotificationRuntimeTests : HostTest
                      );
 
     [Test]
-    public async Task A_Per_Publish_Behavior_Exception_Propagates_Unwrapped(CancellationToken cancellationToken)
+    public async Task A_Notification_Behavior_Exception_Propagates_Unwrapped(CancellationToken cancellationToken)
     {
-        // OQ-43: a synchronous throw from the outermost per-publish behavior throws from Publish itself, on the typed and generic paths.
+        // OQ-43: a synchronous throw from the outermost notification behavior throws from Publish itself, on the typed and generic paths.
         var host = await CompileHostAsync(Source, cancellationToken);
         await Assert.That(await RunAsync(host, "publish throws", cancellationToken))
                     .IsEquivalentTo(["threw synchronously publish sync", "completed"], CollectionOrdering.Matching);
@@ -616,15 +588,6 @@ public class NotificationRuntimeTests : HostTest
         await Assert.That(await RunAsync(host, "publish passes failure", cancellationToken))
                     .IsEquivalentTo(["pass>", "all PublishPassesFailure", "aggregate: InvalidOperationException handler failed"], CollectionOrdering.Matching);
     }
-
-    [Test]
-    public async Task A_Per_Handler_Behavior_Exception_Is_Its_Handlers_Failure(CancellationToken cancellationToken) =>
-        // OQ-43: the behavior is part of handler 2's pipeline, so its exception is aggregated in handler order and the others still run.
-        await Assert.That(await RunAsync("handler behavior throws", cancellationToken))
-                    .IsEquivalentTo(
-                         ["1 ran", "all Guarded", "aggregate: InvalidOperationException behavior 2 | InvalidOperationException handler 3"],
-                         CollectionOrdering.Matching
-                     );
 
     [Test]
     public async Task A_Derived_Type_The_Host_Does_Not_Know_Runs_Nothing_Through_The_Base_Overload(CancellationToken cancellationToken) =>

@@ -13,12 +13,13 @@ public class AttributeTests
     [Arguments(typeof(KeryxHostAttribute), AttributeTargets.Assembly, false)]
     [Arguments(typeof(KeryxContractsAttribute), AttributeTargets.Assembly, false)]
     [Arguments(typeof(BehaviorAttribute), BehaviorTargets, true)]
-    [Arguments(typeof(GlobalBehaviorAttribute), AttributeTargets.Class, false)]
-    [Arguments(typeof(BehaviorOrderAttribute), AttributeTargets.Class, false)]
-    [Arguments(typeof(RunsAfterAttribute), AttributeTargets.Class, true)]
-    [Arguments(typeof(RunsBeforeAttribute), AttributeTargets.Class, true)]
-    [Arguments(typeof(RunsAfterAttribute<>), AttributeTargets.Class, true)]
-    [Arguments(typeof(RunsBeforeAttribute<>), AttributeTargets.Class, true)]
+    [Arguments(typeof(RequestBehaviorAttribute), AttributeTargets.Class, false)]
+    [Arguments(typeof(StreamBehaviorAttribute), AttributeTargets.Class, false)]
+    [Arguments(typeof(NotificationBehaviorAttribute), AttributeTargets.Class, false)]
+    [Arguments(typeof(GlobalBehaviorAttribute), AttributeTargets.Class | AttributeTargets.Method, false)]
+    [Arguments(typeof(BehaviorOrderAttribute), AttributeTargets.Class | AttributeTargets.Method, false)]
+    [Arguments(typeof(RunsAfterAttribute), AttributeTargets.Class | AttributeTargets.Method, true)]
+    [Arguments(typeof(RunsBeforeAttribute), AttributeTargets.Class | AttributeTargets.Method, true)]
     [Arguments(typeof(ExcludeBehaviorAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(ExcludeHandlerAttribute), AttributeTargets.Assembly, true)]
     [Arguments(typeof(ExternallyHandledAttribute), AttributeTargets.Assembly, true)]
@@ -61,11 +62,12 @@ public class AttributeTests
                              "KeryxHandlerAttribute",
                              "KeryxHostAttribute",
                              "KeryxManifestAttribute",
+                             "NotificationBehaviorAttribute",
                              "PublishStrategyAttribute",
+                             "RequestBehaviorAttribute",
                              "RunsAfterAttribute",
-                             "RunsAfterAttribute`1",
                              "RunsBeforeAttribute",
-                             "RunsBeforeAttribute`1",
+                             "StreamBehaviorAttribute",
                          ]
                      );
     }
@@ -87,8 +89,6 @@ public class AttributeTests
     {
         await Assert.That(new RunsAfterAttribute(typeof(List<>)).BehaviorType).IsEqualTo(typeof(List<>));
         await Assert.That(new RunsBeforeAttribute(typeof(string)).BehaviorType).IsEqualTo(typeof(string));
-        await Assert.That(new RunsAfterAttribute<List<int>>().BehaviorType).IsEqualTo(typeof(List<int>));
-        await Assert.That(new RunsBeforeAttribute<string>().BehaviorType).IsEqualTo(typeof(string));
         await Assert.That(new BehaviorAttribute(typeof(Dictionary<,>)).BehaviorType).IsEqualTo(typeof(Dictionary<,>));
         await Assert.That(new ExcludeBehaviorAttribute(typeof(int)).BehaviorType).IsEqualTo(typeof(int));
         await Assert.That(new ExcludeHandlerAttribute(typeof(object)).HandlerType).IsEqualTo(typeof(object));

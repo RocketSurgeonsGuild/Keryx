@@ -302,7 +302,7 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
             public readonly global::Sample.OnPlaced Handler0;
@@ -312,14 +312,14 @@ namespace Sample
                 Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.OnPlaced>(serviceProvider);
             }
 
-            /// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>
+            /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
             public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = RunHandler0(notification, cancellationToken);
+                    task = Handler0.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -337,7 +337,7 @@ namespace Sample
                 return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
             }
 
-            /// <summary>Awaits the handler pipeline at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
+            /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
             private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.Placed notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
@@ -355,10 +355,6 @@ namespace Sample
                     throw new global::System.AggregateException(exceptions);
                 }
             }
-
-            /// <summary>Runs the pipeline of <c>Sample.OnPlaced</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken) =>
-                Handler0.InvokeAsync(notification, cancellationToken);
         }
     }
 }

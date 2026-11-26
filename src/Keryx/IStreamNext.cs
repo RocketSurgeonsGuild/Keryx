@@ -1,8 +1,8 @@
 namespace Keryx;
 
 /// <summary>
-///     The rest of a stream pipeline, as seen by an <see cref="IStreamPipelineBehavior{TRequest,TItem}" />: the next behavior, a fused hook
-///     segment, or the handler.
+///     The rest of a stream pipeline, as seen by a stream behavior method (<see cref="StreamBehaviorAttribute" />): the next behavior, or
+///     the handler.
 /// </summary>
 /// <remarks>
 ///     Implemented by generated link structs. A behavior may call <see cref="InvokeAsync" /> more than once (for example to restart the

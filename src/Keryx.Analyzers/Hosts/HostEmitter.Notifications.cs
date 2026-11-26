@@ -6,8 +6,8 @@ namespace Keryx.Analyzers.Hosts;
 /// <summary>
 ///     Notification dispatch and publish pipelines (ADR 0001, Notifications): typed <c>Publish</c> overloads, generic
 ///     <c>Publish&lt;TNotification&gt;</c> that never boxes a struct notification, and per notification type a pipeline context holding its
-///     handlers and behaviors, one flat <c>INext</c> link struct per per-publish behavior, the publish strategy (sequential or parallel, run
-///     all, then one <c>AggregateException</c>), and per handler one flat link struct per per-handler behavior.
+///     handlers and the injected services of its notification behaviors, one flat <c>INext</c> link struct per notification behavior, and the
+///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly.
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -41,7 +41,7 @@ internal static partial class HostEmitter
         writer.Line("/// <summary>");
         writer.Line(
             index < 0
-                ? $"///     Publishes a <c>{Display(notification.Type)}</c>. Nothing runs for it in this host: it has neither handlers nor per-publish behaviors."
+                ? $"///     Publishes a <c>{Display(notification.Type)}</c>. Nothing runs for it in this host: it has neither handlers nor notification behaviors."
                 : $"///     Publishes a <c>{Display(notification.Type)}</c> to its handlers, without type dispatch{( notification.IsValueType ? " and without boxing it" : "" )}."
         );
         writer.Line("/// </summary>");
@@ -165,8 +165,8 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     The publish pipeline of one notification type, without checks: the typed overload and generic dispatch both call it. It calls the
-    ///     outermost per-publish behavior's <c>Handle</c> on its concrete type with the first link, or, without per-publish behaviors, runs the
-    ///     handlers with the publish strategy.
+    ///     outermost notification behavior method directly with the first link, or, without notification behaviors, runs the handlers with the
+    ///     publish strategy.
     /// </summary>
     private static void WritePublishCore(CodeWriter writer, NotificationPipeline pipeline, int index)
     {
@@ -177,7 +177,7 @@ internal static partial class HostEmitter
         writer.Line(
             pipeline.Behaviors.IsEmpty
                 ? "return pipeline.RunHandlers(notification, cancellationToken);"
-                : $"return pipeline.{BehaviorField(0)}.Handle<{NotificationContextName(index)}.{LinkName(0)}>(notification, new(pipeline, notification), cancellationToken);"
+                : $"return {BehaviorCall(pipeline.Behaviors[0], 0, NotificationContextName(index) + "." + LinkName(0), "pipeline", "notification")};"
         );
         writer.Close();
 
@@ -191,12 +191,12 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The parallel strategy's slow path (ADR 0001, Publish strategy): awaits the handler pipelines that had not completed successfully
-    ///     when they were started, then throws one <c>AggregateException</c> with every failure, in handler order.
+    ///     The parallel strategy's slow path (ADR 0001, Publish strategy): awaits the handlers that had not completed successfully when they
+    ///     were started, then throws one <c>AggregateException</c> with every failure, in handler order.
     /// </summary>
     private static void WriteWhenAllHandlers(CodeWriter writer)
     {
-        writer.Line("/// <summary>Awaits the pending handler pipelines of a parallel publish and throws every failure, in handler order.</summary>");
+        writer.Line("/// <summary>Awaits the pending handlers of a parallel publish and throws every failure, in handler order.</summary>");
         writer.Line("[global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]");
         writer.Line($"private static async {ValueTask} __WhenAllHandlers({TaskType}[] tasks)");
         writer.Open();
@@ -237,17 +237,16 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The pipeline context of one notification type: its handlers that have injected parameters, its per-publish behaviors and every
-    ///     handler's per-handler behaviors, resolved once per scope; the publish strategy over the handler pipelines; one flat link struct per
-    ///     per-publish behavior (<c>Link{k}</c>, whose last one runs the strategy); and per handler one flat link struct per per-handler
-    ///     behavior (<c>Handler{i}Link{k}</c>, whose last one calls the handler's invoker).
+    ///     The pipeline context of one notification type: its handlers that have injected parameters and the injected services of its
+    ///     notification behaviors, resolved once per scope; the publish strategy, which calls the handlers directly; and one flat link struct
+    ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy).
     /// </summary>
     private static void WriteNotificationContext(CodeWriter writer, NotificationPipeline pipeline, int index)
     {
         var notification = pipeline.Notification;
         var context = NotificationContextName(index);
         writer.Line(
-            $"/// <summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>"
+            $"/// <summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>"
         );
         writer.Line($"private sealed class {context}");
         writer.Open();
@@ -259,19 +258,7 @@ internal static partial class HostEmitter
             }
         }
 
-        for (var k = 0; k < pipeline.Behaviors.Length; k++)
-        {
-            writer.Line($"public readonly {pipeline.Behaviors[k].Type} {BehaviorField(k)};");
-        }
-
-        for (var i = 0; i < pipeline.Handlers.Length; i++)
-        {
-            for (var k = 0; k < pipeline.Handlers[i].Behaviors.Length; k++)
-            {
-                writer.Line($"public readonly {pipeline.Handlers[i].Behaviors[k].Type} {HandlerBehaviorField(i, k)};");
-            }
-        }
-
+        WriteServiceFields(writer, pipeline.Behaviors);
         writer.Line();
         writer.Line($"public {context}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -283,21 +270,7 @@ internal static partial class HostEmitter
             }
         }
 
-        for (var k = 0; k < pipeline.Behaviors.Length; k++)
-        {
-            writer.Line($"{BehaviorField(k)} = {ServiceProviderExtensions}.GetRequiredService<{pipeline.Behaviors[k].Type}>({ServiceProviderName});");
-        }
-
-        for (var i = 0; i < pipeline.Handlers.Length; i++)
-        {
-            for (var k = 0; k < pipeline.Handlers[i].Behaviors.Length; k++)
-            {
-                writer.Line(
-                    $"{HandlerBehaviorField(i, k)} = {ServiceProviderExtensions}.GetRequiredService<{pipeline.Handlers[i].Behaviors[k].Type}>({ServiceProviderName});"
-                );
-            }
-        }
-
+        WriteServiceResolution(writer, pipeline.Behaviors);
         writer.Close();
 
         if (!pipeline.Handlers.IsEmpty)
@@ -311,12 +284,6 @@ internal static partial class HostEmitter
             {
                 WriteSequentialStrategy(writer, pipeline);
             }
-
-            for (var i = 0; i < pipeline.Handlers.Length; i++)
-            {
-                writer.Line();
-                WriteRunHandler(writer, pipeline, i);
-            }
         }
 
         for (var k = 0; k < pipeline.Behaviors.Length; k++)
@@ -325,21 +292,12 @@ internal static partial class HostEmitter
             WritePublishLink(writer, pipeline, index, k);
         }
 
-        for (var i = 0; i < pipeline.Handlers.Length; i++)
-        {
-            for (var k = 0; k < pipeline.Handlers[i].Behaviors.Length; k++)
-            {
-                writer.Line();
-                WriteHandlerLink(writer, pipeline, index, i, k);
-            }
-        }
-
         writer.Close();
     }
 
     /// <summary>
-    ///     The sequential strategy (ADR 0001, Publish strategy, Failures): each handler pipeline is awaited in handler order, every one runs
-    ///     whatever the others do, and the failures are combined into one <c>AggregateException</c>. Handlers that complete synchronously and
+    ///     The sequential strategy (ADR 0001, Publish strategy, Failures): each handler is called directly and awaited in handler order, every
+    ///     one runs whatever the others do, and the failures are combined into one <c>AggregateException</c>. Handlers that complete synchronously and
     ///     successfully take a path that allocates nothing; the first one that does not hands over to <c>RunHandlersAsync</c>, which awaits it
     ///     and runs the rest.
     /// </summary>
@@ -348,7 +306,7 @@ internal static partial class HostEmitter
         var notification = pipeline.Notification;
         var boxParameter = pipeline.Boxes ? $"{NotificationInterface} boxed, " : "";
         var boxArgument = pipeline.Boxes ? "boxed, " : "";
-        writer.Line("/// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>");
+        writer.Line("/// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>");
         writer.Line($"public {ValueTask} RunHandlers({notification.Type} notification, {CancellationToken} cancellationToken)");
         writer.Open();
         WriteBox(writer, pipeline);
@@ -358,7 +316,7 @@ internal static partial class HostEmitter
         {
             writer.Line("try");
             writer.Open();
-            writer.Line($"task = {RunHandlerName(i)}({RunHandlerArguments(pipeline, i)});");
+            writer.Line($"task = {HandlerCall(pipeline, i)};");
             writer.Close();
             writer.Line($"catch ({ExceptionType} exception)");
             writer.Open();
@@ -379,7 +337,7 @@ internal static partial class HostEmitter
         writer.Close();
 
         writer.Line();
-        writer.Line("/// <summary>Awaits the handler pipeline at <paramref name=\"position\" />, runs the ones after it in order, then reports every failure.</summary>");
+        writer.Line("/// <summary>Awaits the handler at <paramref name=\"position\" />, runs the ones after it in order, then reports every failure.</summary>");
         writer.Line("[global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]");
         writer.Line(
             $"private async {ValueTask} RunHandlersAsync({notification.Type} notification, {boxParameter}{ValueTask} pending, int position, {ExceptionList}? exceptions, {CancellationToken} cancellationToken)"
@@ -400,7 +358,7 @@ internal static partial class HostEmitter
             writer.Open();
             writer.Line("try");
             writer.Open();
-            writer.Line($"await {RunHandlerName(i)}({RunHandlerArguments(pipeline, i)}).ConfigureAwait(false);");
+            writer.Line($"await {HandlerCall(pipeline, i)}.ConfigureAwait(false);");
             writer.Close();
             writer.Line($"catch ({ExceptionType} exception)");
             writer.Open();
@@ -418,8 +376,8 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The parallel strategy (ADR 0001, Publish strategy): every handler pipeline is started in handler order on the calling thread without
-    ///     awaiting it (no <c>Task.Run</c>), a synchronous throw is recorded as a faulted task and the rest still start. When every pipeline
+    ///     The parallel strategy (ADR 0001, Publish strategy): every handler is started in handler order on the calling thread without
+    ///     awaiting it (no <c>Task.Run</c>), a synchronous throw is recorded as a faulted task and the rest still start. When every handler
     ///     completed successfully, nothing is allocated; otherwise one array plus one <c>AsTask()</c> per pipeline that did not, awaited
     ///     together, with every failure in handler order.
     /// </summary>
@@ -427,7 +385,7 @@ internal static partial class HostEmitter
     {
         var notification = pipeline.Notification;
         var count = pipeline.Handlers.Length;
-        writer.Line("/// <summary>Starts every handler pipeline in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>");
+        writer.Line("/// <summary>Starts every handler in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>");
         writer.Line($"public {ValueTask} RunHandlers({notification.Type} notification, {CancellationToken} cancellationToken)");
         writer.Open();
         WriteBox(writer, pipeline);
@@ -437,7 +395,7 @@ internal static partial class HostEmitter
             writer.Line($"{ValueTask} {task};");
             writer.Line("try");
             writer.Open();
-            writer.Line($"{task} = {RunHandlerName(i)}({RunHandlerArguments(pipeline, i)});");
+            writer.Line($"{task} = {HandlerCall(pipeline, i)};");
             writer.Close();
             writer.Line($"catch ({ExceptionType} exception)");
             writer.Open();
@@ -446,7 +404,7 @@ internal static partial class HostEmitter
             writer.Line();
         }
 
-        // Each status is read once: a pending pipeline may complete between two reads.
+        // Each status is read once: a pending handler may complete between two reads.
         for (var i = 0; i < count; i++)
         {
             writer.Line($"var done{Number(i)} = task{Number(i)}.IsCompletedSuccessfully;");
@@ -488,26 +446,14 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The start of one handler pipeline: the outermost per-handler behavior's <c>Handle</c> on its concrete type with the first link, or
-    ///     the handler's invoker.
+    ///     The direct call of one handler's invoker, from inside the context: handlers have no behaviors of their own (ADR 0001,
+    ///     Notifications).
     /// </summary>
-    private static void WriteRunHandler(CodeWriter writer, NotificationPipeline pipeline, int handler)
+    private static string HandlerCall(NotificationPipeline pipeline, int handler)
     {
-        var notification = pipeline.Notification;
         var entry = pipeline.Handlers[handler];
-        var boxParameter = entry.Boxed ? $"{NotificationInterface} boxed, " : "";
-        writer.Line($"/// <summary>Runs the pipeline of <c>{Display(entry.Handler.HandlerClass)}</c>.</summary>");
-        writer.Line($"public {ValueTask} {RunHandlerName(handler)}({notification.Type} notification, {boxParameter}{CancellationToken} cancellationToken) =>");
-        writer.Line(
-            entry.Behaviors.IsEmpty
-                ? $"    {HandlerTarget(entry, handler, null)}.{HandlerAnalysis.InvokerName}({HandlerArgument(entry, "notification", "boxed")}, cancellationToken);"
-                : $"    {HandlerBehaviorField(handler, 0)}.Handle<{HandlerLinkName(handler, 0)}>(notification, new(this, notification{( entry.Boxed ? ", boxed" : "" )}), cancellationToken);"
-        );
+        return $"{HandlerTarget(entry, handler, null)}.{HandlerAnalysis.InvokerName}({HandlerArgument(entry, "notification", "boxed")}, cancellationToken)";
     }
-
-    /// <summary>The arguments the strategy passes to one handler pipeline.</summary>
-    private static string RunHandlerArguments(NotificationPipeline pipeline, int handler) =>
-        pipeline.Handlers[handler].Boxed ? "notification, boxed, cancellationToken" : "notification, cancellationToken";
 
     /// <summary>
     ///     What a handler's invoker is called on: the class for a static invoker, else the handler instance the context holds (a field of the
@@ -524,8 +470,8 @@ internal static partial class HostEmitter
         entry.Boxed ? $"{Unsafe}.As<{entry.Handler.MessageType}>({boxed})" : notification;
 
     /// <summary>
-    ///     One link of the per-publish pipeline: the <c>next</c> of per-publish behavior <c>k</c>. It calls behavior <c>k + 1</c> on its
-    ///     concrete type, and the last one runs the publish strategy (or completes, when the type has no handlers).
+    ///     One link of the publish pipeline: the <c>next</c> of notification behavior <c>k</c>. It calls behavior <c>k + 1</c>'s method
+    ///     directly, and the last one runs the publish strategy (or completes, when the type has no handlers).
     /// </summary>
     private static void WritePublishLink(CodeWriter writer, NotificationPipeline pipeline, int index, int position)
     {
@@ -561,7 +507,7 @@ internal static partial class HostEmitter
         writer.Line($"public {ValueTask} InvokeAsync({CancellationToken} cancellationToken) =>");
         writer.Line(
             !isLast
-                ? $"    _pipeline.{BehaviorField(position + 1)}.Handle<{LinkName(position + 1)}>(_notification, new(_pipeline, _notification), cancellationToken);"
+                ? $"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_notification")};"
                 : pipeline.Handlers.IsEmpty
                 ? "    default;"
                 : "    _pipeline.RunHandlers(_notification, cancellationToken);"
@@ -569,78 +515,7 @@ internal static partial class HostEmitter
         writer.Close();
     }
 
-    /// <summary>
-    ///     One link of a handler pipeline: the <c>next</c> of that handler's per-handler behavior <c>k</c>. It calls behavior <c>k + 1</c> on its
-    ///     concrete type, and the last one calls the handler's invoker. A link of an interface-typed handler of a struct notification also
-    ///     carries the publish's one box.
-    /// </summary>
-    private static void WriteHandlerLink(CodeWriter writer, NotificationPipeline pipeline, int index, int handler, int position)
-    {
-        var notification = pipeline.Notification;
-        var entry = pipeline.Handlers[handler];
-        var context = NotificationContextName(index);
-        var link = HandlerLinkName(handler, position);
-        var isLast = position == entry.Behaviors.Length - 1;
-        var holdsContext = !isLast || !entry.Handler.StaticInvoker;
-        var holdsNotification = !isLast || !entry.Boxed;
-        writer.Line(
-            isLast
-                ? $"/// <summary>The <c>next</c> of <c>{Display(entry.Behaviors[position].Identity)}</c>: <c>{Display(entry.Handler.HandlerClass)}</c>.</summary>"
-                : $"/// <summary>The <c>next</c> of <c>{Display(entry.Behaviors[position].Identity)}</c>: <c>{Display(entry.Behaviors[position + 1].Identity)}</c>.</summary>"
-        );
-        writer.Line($"public readonly struct {link} : global::Keryx.INext");
-        writer.Open();
-        if (holdsContext)
-        {
-            writer.Line($"private readonly {context} _pipeline;");
-        }
-
-        if (holdsNotification)
-        {
-            writer.Line($"private readonly {notification.Type} _notification;");
-        }
-
-        if (entry.Boxed)
-        {
-            writer.Line($"private readonly {NotificationInterface} _boxed;");
-        }
-
-        writer.Line();
-        writer.Line($"public {link}({context} pipeline, {notification.Type} notification{( entry.Boxed ? $", {NotificationInterface} boxed" : "" )})");
-        writer.Open();
-        if (holdsContext)
-        {
-            writer.Line("_pipeline = pipeline;");
-        }
-
-        if (holdsNotification)
-        {
-            writer.Line("_notification = notification;");
-        }
-
-        if (entry.Boxed)
-        {
-            writer.Line("_boxed = boxed;");
-        }
-
-        writer.Close();
-        writer.Line();
-        writer.Line($"public {ValueTask} InvokeAsync({CancellationToken} cancellationToken) =>");
-        writer.Line(
-            !isLast
-                ? $"    _pipeline.{HandlerBehaviorField(handler, position + 1)}.Handle<{HandlerLinkName(handler, position + 1)}>(_notification, new(_pipeline, _notification{( entry.Boxed ? ", _boxed" : "" )}), cancellationToken);"
-                : $"    {HandlerTarget(entry, handler, "_pipeline")}.{HandlerAnalysis.InvokerName}({HandlerArgument(entry, "_notification", "_boxed")}, cancellationToken);"
-        );
-        writer.Close();
-    }
-
     private static string HandlerField(int handler) => "Handler" + Number(handler);
-
-    private static string HandlerBehaviorField(int handler, int position) => HandlerField(handler) + "Behavior" + Number(position + 1);
-
-    private static string HandlerLinkName(int handler, int position) => HandlerField(handler) + "Link" + Number(position + 1);
-
-    private static string RunHandlerName(int handler) => "RunHandler" + Number(handler);
 
     private static string NotificationContextName(int index) => "__Notification" + Number(index);
 

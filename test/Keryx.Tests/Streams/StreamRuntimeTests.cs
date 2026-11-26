@@ -7,10 +7,10 @@ using static Keryx.Tests.Streams.StreamSources;
 namespace Keryx.Tests.Streams;
 
 /// <summary>
-///     Compiles a host with stream behaviors and streams through it (ADR 0001, Streaming; the Phase 5 brief): pass-through without behaviors,
-///     wrap behaviors (re-yield, filter, map, calling <c>next</c> twice, not calling it), hook order, dropped items, early dispose,
-///     exceptions from the handler, hooks and wrap behaviors (inside and outside a fused segment, OQ-21), cancellation through both tokens,
-///     segment splitting, and typed and generic dispatch.
+///     Compiles a host with static stream behaviors and streams through it (ADR 0001, Streaming): pass-through without behaviors, stream
+///     behaviors that re-yield (outer to inner), filter, map, call <c>next</c> twice or not at all, early dispose, exceptions from the handler
+///     and from stream behaviors, a synchronous throw from a non-iterator stream behavior (outermost: at the <c>Stream</c> call), cancellation
+///     through both tokens with a stream behavior outermost, and typed and generic dispatch.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class StreamRuntimeTests : HostTest
@@ -32,155 +32,54 @@ public class StreamRuntimeTests : HostTest
     [Test]
     [Arguments(true)]
     [Arguments(false)]
-    public async Task Hooks_Start_Outer_To_Inner_And_See_Items_And_Completion_Inner_To_Outer(bool typed, CancellationToken cancellationToken)
+    public async Task Stream_Behaviors_Run_Outer_To_Inner_And_Re_Yield_The_Items(bool typed, CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
         await using var scope = provider.CreateAsyncScope();
 
-        var (items, error) = await ConsumeAsync(Stream(host, scope, typed, Create(host, "Sample.Hooks", 2), cancellationToken), cancellationToken);
+        var (items, error) = await ConsumeAsync(Stream(host, scope, typed, Create(host, "Sample.Wraps", 2), cancellationToken), cancellationToken);
 
         await Assert.That(error).IsNull();
         await Assert.That(Text(items)).IsEqualTo("1,2");
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(
-                         [
-                             "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookA.item 2", "<handler",
-                             "HookB.complete", "HookA.complete",
-                         ],
-                         CollectionOrdering.Matching
-                     );
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "WrapB>", "handler>", "<handler", "<WrapB", "<WrapA"], CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task A_Hook_Drops_An_Item_Before_Outer_Hooks_And_The_Consumer_See_It(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, dropAt: "HookB:2");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Hooks", 3), cancellationToken), cancellationToken);
-
-        await Assert.That(error).IsNull();
-        await Assert.That(Text(items)).IsEqualTo("1,3");
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(
-                         [
-                             "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookB.item 3", "HookA.item 3",
-                             "<handler", "HookB.complete", "HookA.complete",
-                         ],
-                         CollectionOrdering.Matching
-                     );
-    }
-
-    [Test]
-    public async Task Early_Dispose_Completes_Every_Started_Hook(CancellationToken cancellationToken)
+    public async Task Early_Dispose_Ends_Every_Stream_Behavior_Inner_To_Outer(CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
         await using var scope = provider.CreateAsyncScope();
 
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Hooks", 3), cancellationToken), cancellationToken, take: 1);
+        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Wraps", 3), cancellationToken), cancellationToken, take: 1);
 
         await Assert.That(error).IsNull();
         await Assert.That(Text(items)).IsEqualTo("1");
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.complete", "HookA.complete"], CollectionOrdering.Matching);
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "WrapB>", "handler>", "WrapB.abort", "WrapA.abort"], CollectionOrdering.Matching);
     }
 
     [Test]
-    [Arguments("handler.2", "1", new[] { "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.error InvalidOperationException", "HookA.error InvalidOperationException" })]
-    [Arguments("HookB.start", "", new[] { "HookA.start", "HookB.start", "HookA.error InvalidOperationException" })]
-    [Arguments("HookA.start", "", new[] { "HookA.start" })]
-    [Arguments("HookA.item", "", new[] { "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.error InvalidOperationException", "HookA.error InvalidOperationException" })]
-    public async Task Exceptions_From_The_Handler_And_From_Hooks_Reach_OnErrorAsync_Of_Started_Hooks(
-        string throwAt,
-        string expectedItems,
-        string[] expectedLog,
-        CancellationToken cancellationToken
-    )
+    [Arguments("handler.2", "1")]
+    [Arguments("WrapB.item", "")]
+    [Arguments("WrapA.item", "")]
+    public async Task Exceptions_From_The_Handler_And_From_Stream_Behaviors_Reach_The_Consumer(string throwAt, string expectedItems, CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
         await using var scope = provider.CreateAsyncScope();
         SetControl(host, throwAt);
 
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Hooks", 3), cancellationToken), cancellationToken);
+        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Wraps", 3), cancellationToken), cancellationToken);
 
         await Assert.That(error).IsTypeOf<InvalidOperationException>();
         await Assert.That(error!.Message).IsEqualTo(throwAt);
         await Assert.That(Text(items)).IsEqualTo(expectedItems);
-        await Assert.That(TakeLog(host)).IsEquivalentTo(expectedLog, CollectionOrdering.Matching);
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "WrapB>", "handler>", "WrapB.abort", "WrapA.abort"], CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task A_Terminal_Hook_Call_That_Throws_Still_Lets_The_Outer_Hooks_Complete(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, "HookB.complete");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Hooks", 1), cancellationToken), cancellationToken);
-
-        // OQ-38: the terminal calls nest like using statements; the kind (complete) was decided before HookB threw.
-        await Assert.That(error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(error!.Message).IsEqualTo("HookB.complete");
-        await Assert.That(Text(items)).IsEqualTo("1");
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "<handler", "HookB.complete", "HookA.complete"], CollectionOrdering.Matching);
-    }
-
-    [Test]
-    public async Task An_OnErrorAsync_That_Throws_Still_Lets_The_Outer_Hooks_Observe_The_Error(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, "HookB.error");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.ThrowInside", 2), cancellationToken), cancellationToken);
-
-        // OQ-38: HookA still gets OnErrorAsync with the original error; the exception thrown last (HookB's) reaches the consumer.
-        await Assert.That(error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(error!.Message).IsEqualTo("HookB.error");
-        await Assert.That(items).IsEmpty();
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["HookA.start", "HookB.start", "HookB.error InvalidOperationException", "HookA.error InvalidOperationException"], CollectionOrdering.Matching);
-    }
-
-    /// <summary>
-    ///     OQ-38: the segment disposes the inner enumerator before any terminal hook call. After normal completion that dispose is inside the
-    ///     guarded region, so its exception reaches <c>OnErrorAsync</c>; on early dispose it runs first in the terminal pass, its exception
-    ///     propagates, and the hooks still complete. <c>Sample.Disposing</c>'s handler is hand-written, because a compiler-generated iterator
-    ///     runs its <c>finally</c> inside the last <c>MoveNextAsync</c>, not inside <c>DisposeAsync</c>.
-    /// </summary>
-    [Test]
-    [Arguments(int.MaxValue, "1,2", new[] { "HookA.start", "HookB.start", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookA.item 2", "handler.dispose", "HookB.error InvalidOperationException", "HookA.error InvalidOperationException" })]
-    [Arguments(1, "1", new[] { "HookA.start", "HookB.start", "HookB.item 1", "HookA.item 1", "handler.dispose", "HookB.complete", "HookA.complete" })]
-    public async Task An_Exception_From_Disposing_The_Inner_Enumerator_Reaches_The_Consumer_After_The_Hooks(
-        int take,
-        string expectedItems,
-        string[] expectedLog,
-        CancellationToken cancellationToken
-    )
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, "handler.dispose");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Disposing", 2), cancellationToken), cancellationToken, take);
-
-        await Assert.That(error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(error!.Message).IsEqualTo("handler.dispose");
-        await Assert.That(Text(items)).IsEqualTo(expectedItems);
-        await Assert.That(TakeLog(host)).IsEquivalentTo(expectedLog, CollectionOrdering.Matching);
-    }
-
-    [Test]
-    public async Task Wrap_Behaviors_Map_Filter_Call_Next_Twice_And_Answer_Without_Next(CancellationToken cancellationToken)
+    public async Task Stream_Behaviors_Map_Filter_Call_Next_Twice_And_Answer_Without_Next(CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
@@ -204,77 +103,24 @@ public class StreamRuntimeTests : HostTest
     }
 
     [Test]
-    [Arguments("Sample.WrapOuter", new[] { "WrapFirst>", "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookA.item 2", "<handler", "HookB.complete", "HookA.complete", "<WrapFirst" })]
-    [Arguments("Sample.WrapMiddle", new[] { "HookA.start", "WrapMid>", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookA.item 2", "<handler", "HookB.complete", "<WrapMid", "HookA.complete" })]
-    [Arguments("Sample.WrapEnd", new[] { "HookA.start", "HookB.start", "WrapLast>", "handler>", "HookB.item 1", "HookA.item 1", "HookB.item 2", "HookA.item 2", "<handler", "<WrapLast", "HookB.complete", "HookA.complete" })]
-    public async Task Wrap_Behaviors_Split_Hooks_Into_Segments(string request, string[] expectedLog, CancellationToken cancellationToken)
+    public async Task An_Inner_Non_Iterator_Stream_Behavior_That_Throws_Ends_The_Outer_Ones(CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
         await using var scope = provider.CreateAsyncScope();
 
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, request, 2), cancellationToken), cancellationToken);
-
-        await Assert.That(error).IsNull();
-        await Assert.That(Text(items)).IsEqualTo("1,2");
-        await Assert.That(TakeLog(host)).IsEquivalentTo(expectedLog, CollectionOrdering.Matching);
-    }
-
-    [Test]
-    public async Task Wrap_And_Hook_Behaviors_Interleave_By_Order(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-
-        var (items, error) = await ConsumeAsync(StreamTyped<int>(Mediator(host, scope), Create(host, "Sample.Mixed", 1), cancellationToken), cancellationToken);
-
-        await Assert.That(error).IsNull();
-        await Assert.That(Text(items)).IsEqualTo("1");
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(
-                         [
-                             "WrapFirst>", "HookA.start", "WrapMid>", "HookB.start", "HookC.start", "WrapLast>", "handler>", "HookC.item 1", "HookB.item 1",
-                             "HookA.item 1", "<handler", "<WrapLast", "HookC.complete", "HookB.complete", "<WrapMid", "HookA.complete", "<WrapFirst",
-                         ],
-                         CollectionOrdering.Matching
-                     );
-
-        // An exception from an inner wrap behavior travels out through every segment around it, each of which observes it.
-        SetControl(host, "WrapLast.item");
-        var (Items, Error) = await ConsumeAsync(StreamTyped<int>(Mediator(host, scope), Create(host, "Sample.Mixed", 1), cancellationToken), cancellationToken);
-        await Assert.That(Error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(
-                         [
-                             "WrapFirst>", "HookA.start", "WrapMid>", "HookB.start", "HookC.start", "WrapLast>", "handler>", "HookC.error InvalidOperationException",
-                             "HookB.error InvalidOperationException", "HookA.error InvalidOperationException",
-                         ],
-                         CollectionOrdering.Matching
-                     );
-    }
-
-    [Test]
-    public async Task A_Non_Iterator_Wrap_Behavior_Inside_A_Segment_That_Throws_Is_Observed_By_The_Segments_Hooks(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-
-        // Nothing runs at the Stream call: the outermost element is a fused segment, which is lazy.
+        // ThrowNow runs when WrapA gets its inner stream, on the first MoveNextAsync, not at the Stream call.
         var stream = Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.ThrowInside", 2), cancellationToken);
-        await Assert.That(TakeLog(host)).IsEmpty();
-
         var (items, error) = await ConsumeAsync(stream, cancellationToken);
+
         await Assert.That(error).IsTypeOf<InvalidOperationException>();
         await Assert.That(error!.Message).IsEqualTo("ThrowNow");
         await Assert.That(items).IsEmpty();
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["HookA.start", "HookB.start", "HookB.error InvalidOperationException", "HookA.error InvalidOperationException"], CollectionOrdering.Matching);
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "WrapA.abort"], CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task An_Outermost_Non_Iterator_Wrap_Behavior_That_Throws_Throws_From_The_Stream_Call(CancellationToken cancellationToken)
+    public async Task An_Outermost_Non_Iterator_Stream_Behavior_That_Throws_Throws_From_The_Stream_Call(CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
@@ -289,53 +135,14 @@ public class StreamRuntimeTests : HostTest
         await Assert.That(TakeLog(host)).IsEmpty();
     }
 
-    [Test]
-    public async Task An_Exception_From_An_Outer_Wrap_Behavior_Completes_The_Inner_Segment(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, "WrapFirst.item");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.WrapOuter", 3), cancellationToken), cancellationToken);
-
-        // OQ-21: the inner segment sees an early dispose, so its hooks complete; the exception still reaches the consumer.
-        await Assert.That(error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(error!.Message).IsEqualTo("WrapFirst.item");
-        await Assert.That(items).IsEmpty();
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["WrapFirst>", "HookA.start", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.complete", "HookA.complete"], CollectionOrdering.Matching);
-    }
-
-    [Test]
-    public async Task An_Exception_From_A_Hook_Of_An_Outer_Segment_Completes_The_Inner_Segment(CancellationToken cancellationToken)
-    {
-        var (host, provider) = await StartAsync(cancellationToken);
-        await using var owner = provider;
-        await using var scope = provider.CreateAsyncScope();
-        SetControl(host, "HookA.item");
-
-        var (items, error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.WrapMiddle", 3), cancellationToken), cancellationToken);
-
-        // OQ-21: HookA's segment observes its own hook's exception; HookB's segment, inside WrapMid, is disposed early and completes.
-        await Assert.That(error).IsTypeOf<InvalidOperationException>();
-        await Assert.That(error!.Message).IsEqualTo("HookA.item");
-        await Assert.That(items).IsEmpty();
-        await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(
-                         ["HookA.start", "WrapMid>", "HookB.start", "handler>", "HookB.item 1", "HookA.item 1", "HookB.complete", "HookA.error InvalidOperationException"],
-                         CollectionOrdering.Matching
-                     );
-    }
-
     /// <summary>
     ///     Cancellation through the <c>Stream</c> token, through the <c>WithCancellation</c> token, and through either when both are given
-    ///     (and linked once, by the outermost element): with a fused hook segment outermost (<c>Hooks</c>) and with a wrap behavior outermost
-    ///     (<c>WrapOuter</c>). The handler observes the token it is given and throws; the hooks see the exception.
+    ///     (and linked once, by the outermost stream behavior's iterator). The handler observes the token it is given and throws; the stream
+    ///     behaviors end with the exception.
     /// </summary>
     [Test]
     [MethodDataSource(nameof(CancellationCases))]
-    public async Task Cancellation_Reaches_The_Handler_Through_Both_Tokens(string request, bool streamToken, bool enumerationToken, bool cancelStreamToken, CancellationToken cancellationToken)
+    public async Task Cancellation_Reaches_The_Handler_Through_Both_Tokens(bool streamToken, bool enumerationToken, bool cancelStreamToken, CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var owner = provider;
@@ -343,7 +150,7 @@ public class StreamRuntimeTests : HostTest
         using var streamSource = new CancellationTokenSource();
         using var enumerationSource = new CancellationTokenSource();
 
-        var stream = Sender(scope).Stream((IStreamRequest<int>)Create(host, request, 3), streamToken ? streamSource.Token : default);
+        var stream = Sender(scope).Stream((IStreamRequest<int>)Create(host, "Sample.Wraps", 3), streamToken ? streamSource.Token : default);
         var (items, error) = await ConsumeAsync(
             stream,
             enumerationToken ? enumerationSource.Token : default,
@@ -352,20 +159,15 @@ public class StreamRuntimeTests : HostTest
 
         await Assert.That(error).IsAssignableTo<OperationCanceledException>();
         await Assert.That(Text(items)).IsEqualTo("1");
-        var log = TakeLog(host);
-        await Assert.That(log).Contains("HookB.error OperationCanceledException");
-        await Assert.That(log[^1]).IsEqualTo("HookA.error OperationCanceledException");
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "WrapB>", "handler>", "WrapB.abort", "WrapA.abort"], CollectionOrdering.Matching);
     }
 
-    public static IEnumerable<Func<(string, bool, bool, bool)>> CancellationCases()
+    public static IEnumerable<Func<(bool, bool, bool)>> CancellationCases()
     {
-        foreach (var request in (string[])["Sample.Hooks", "Sample.WrapOuter"])
-        {
-            yield return () => (request, true, false, true);
-            yield return () => (request, false, true, false);
-            yield return () => (request, true, true, true);
-            yield return () => (request, true, true, false);
-        }
+        yield return () => (true, false, true);
+        yield return () => (false, true, false);
+        yield return () => (true, true, true);
+        yield return () => (true, true, false);
     }
 
     [Test]
@@ -383,7 +185,7 @@ public class StreamRuntimeTests : HostTest
 
         var (Items, Error) = await ConsumeAsync(Sender(scope).Stream((IStreamRequest<string>)Create(host, "Sample.Names"), cancellationToken), cancellationToken);
         await Assert.That(Items).IsEquivalentTo(["a", "b"], CollectionOrdering.Matching);
-        await Assert.That(TakeLog(host)).IsEquivalentTo(["HookA.start", "HookA.item a", "HookA.item b", "HookA.complete"], CollectionOrdering.Matching);
+        await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "<WrapA"], CollectionOrdering.Matching);
 
         // The Shape overload, called with a Square (statically typed as a Shape), still dispatches on the runtime type (OQ-31).
         var shapeOverload = mediator.GetType().GetMethod("Stream", [host.GetType("Sample.Shape")!, typeof(CancellationToken)])!;
@@ -400,7 +202,7 @@ public class StreamRuntimeTests : HostTest
         var sender = Sender(scope);
 
         _ = Throws(() => sender.Stream<int>(null!, cancellationToken), typeof(ArgumentNullException));
-        _ = Throws(() => StreamTypedAs<int>(Mediator(host, scope), null!, cancellationToken, host.GetType("Sample.Hooks")!), typeof(ArgumentNullException));
+        _ = Throws(() => StreamTypedAs<int>(Mediator(host, scope), null!, cancellationToken, host.GetType("Sample.Wraps")!), typeof(ArgumentNullException));
         var unknown = (KeryxHandlerNotFoundException)Throws(() => sender.Stream(new ForeignStream(), cancellationToken), typeof(KeryxHandlerNotFoundException));
         await Assert.That(unknown.RequestType).IsEqualTo(typeof(ForeignStream));
         await Assert.That(TakeLog(host)).IsEmpty();
@@ -458,17 +260,14 @@ public class StreamRuntimeTests : HostTest
     private static string BuildSource() =>
         "using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\n"
       + Support
-      + Hook("HookA", 10)
-      + Hook("HookB", 20)
-      + Hook("HookC", 30)
-      + Wrap("WrapFirst", 5)
-      + Wrap("WrapMid", 15)
-      + Wrap("WrapLast", 40)
+      + Wrap("WrapA", 10)
+      + Wrap("WrapB", 20)
       + """
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 1)]
-        public sealed class Map : IStreamPipelineBehavior<Mapped, int>
+        public static class Map
         {
-            public async IAsyncEnumerable<int> Handle<TNext>(Mapped request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+            public static async IAsyncEnumerable<int> Handle<TNext>(Mapped request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int>
             {
                 await foreach (var item in next.InvokeAsync(cancellationToken))
@@ -478,10 +277,11 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 2)]
-        public sealed class Filter : IStreamPipelineBehavior<Mapped, int>
+        public static class Filter
         {
-            public async IAsyncEnumerable<int> Handle<TNext>(Mapped request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+            public static async IAsyncEnumerable<int> Handle<TNext>(Mapped request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int>
             {
                 await foreach (var item in next.InvokeAsync(cancellationToken))
@@ -494,9 +294,10 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
-        public sealed class Twice : IStreamPipelineBehavior<Retried, int>
+        [StreamBehavior]
+        public static class Twice
         {
-            public async IAsyncEnumerable<int> Handle<TNext>(Retried request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+            public static async IAsyncEnumerable<int> Handle<TNext>(Retried request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int>
             {
                 await foreach (var item in next.InvokeAsync(cancellationToken))
@@ -511,9 +312,10 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
-        public sealed class FromCache : IStreamPipelineBehavior<Cached, int>
+        [StreamBehavior]
+        public static class FromCache
         {
-            public async IAsyncEnumerable<int> Handle<TNext>(Cached request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+            public static async IAsyncEnumerable<int> Handle<TNext>(Cached request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int>
             {
                 await Task.Yield();
@@ -522,19 +324,21 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
-        /// <summary>Not an iterator: throws when called, inside the fused segment of HookA and HookB.</summary>
+        /// <summary>Not an iterator: throws when called, inside WrapA.</summary>
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 35)]
-        public sealed class ThrowNow : IStreamPipelineBehavior<ThrowInside, int>
+        public static class ThrowNow
         {
-            public IAsyncEnumerable<int> Handle<TNext>(ThrowInside request, TNext next, CancellationToken cancellationToken)
+            public static IAsyncEnumerable<int> Handle<TNext>(ThrowInside request, TNext next, CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int> => throw new InvalidOperationException("ThrowNow");
         }
 
         /// <summary>Not an iterator: throws when called, as the outermost element.</summary>
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 1)]
-        public sealed class ThrowFirst : IStreamPipelineBehavior<ThrowOutside, int>
+        public static class ThrowFirst
         {
-            public IAsyncEnumerable<int> Handle<TNext>(ThrowOutside request, TNext next, CancellationToken cancellationToken)
+            public static IAsyncEnumerable<int> Handle<TNext>(ThrowOutside request, TNext next, CancellationToken cancellationToken)
                 where TNext : struct, IStreamNext<int> => throw new InvalidOperationException("ThrowFirst");
         }
 
@@ -552,14 +356,14 @@ public class StreamRuntimeTests : HostTest
         public readonly record struct Ticks(int Count) : IStreamRequest<int>;
         public static partial class TicksHandler
         {
-            [Behavior(typeof(HookA<,>))]
+            [Behavior(typeof(WrapA))]
             private static IAsyncEnumerable<int> Handle(Ticks request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
         public sealed record Names : IStreamRequest<string>;
         public static partial class NamesHandler
         {
-            [Behavior(typeof(HookA<,>))]
+            [Behavior(typeof(WrapA))]
             private static async IAsyncEnumerable<string> Handle(Names request, [EnumeratorCancellation] CancellationToken cancellationToken)
             {
                 await Task.Yield();
@@ -584,55 +388,14 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
-        public sealed record Disposing(int Count) : IStreamRequest<int>;
-        public static partial class DisposingHandler
-        {
-            [Behavior(typeof(HookB<,>))]
-            [Behavior(typeof(HookA<,>))]
-            private static IAsyncEnumerable<int> Handle(Disposing request) => new CountThenThrowOnDispose(request.Count);
-        }
-
-        /// <summary>Yields 1 to <c>count</c>; its <c>DisposeAsync</c> logs and can throw on cue (<c>handler.dispose</c>).</summary>
-        public sealed class CountThenThrowOnDispose(int count) : IAsyncEnumerable<int>
-        {
-            public IAsyncEnumerator<int> GetAsyncEnumerator(CancellationToken cancellationToken = default) => new Enumerator(count);
-
-            private sealed class Enumerator(int count) : IAsyncEnumerator<int>
-            {
-                public int Current { get; private set; }
-
-                public ValueTask<bool> MoveNextAsync()
-                {
-                    if (Current == count)
-                    {
-                        return new ValueTask<bool>(false);
-                    }
-
-                    Current++;
-                    return new ValueTask<bool>(true);
-                }
-
-                public ValueTask DisposeAsync()
-                {
-                    Log.Write("handler.dispose");
-                    Control.Throw("handler.dispose");
-                    return default;
-                }
-            }
-        }
-
 
         """
-      + Request("Hooks", "HookB<,>", "HookA<,>")
-      + Request("WrapOuter", "HookB<,>", "HookA<,>", "WrapFirst<,>")
-      + Request("WrapMiddle", "HookB<,>", "WrapMid<,>", "HookA<,>")
-      + Request("WrapEnd", "WrapLast<,>", "HookB<,>", "HookA<,>")
-      + Request("Mixed", "WrapLast<,>", "HookC<,>", "HookB<,>", "WrapMid<,>", "HookA<,>", "WrapFirst<,>")
+      + Request("Wraps", "WrapB", "WrapA")
       + Request("Mapped", "Filter", "Map")
       + Request("Retried", "Twice")
       + Request("Cached", "FromCache")
-      + Request("ThrowInside", "ThrowNow", "HookB<,>", "HookA<,>")
-      + Request("ThrowOutside", "HookA<,>", "ThrowFirst");
+      + Request("ThrowInside", "ThrowNow", "WrapA")
+      + Request("ThrowOutside", "WrapA", "ThrowFirst");
 
     private sealed record ForeignStream : IStreamRequest<int>;
 }

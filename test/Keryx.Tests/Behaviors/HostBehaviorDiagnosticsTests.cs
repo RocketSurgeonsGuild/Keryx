@@ -6,9 +6,9 @@ using Microsoft.CodeAnalysis;
 namespace Keryx.Tests.Behaviors;
 
 /// <summary>
-///     The host's behavior diagnostics (ADR 0001, Diagnostics): KRX035 for every global behavior it applies, KRX036 for an
-///     <c>ExcludeBehavior</c> that removes nothing, and KRX008 for behavior pairs that involve a referenced behavior (in-source pairs are the
-///     analyzer's).
+///     The host's behavior diagnostics (ADR 0001, Diagnostics): KRX035 for every global behavior it applies (marked on the class or only on a
+///     behavior method), KRX036 for an <c>ExcludeBehavior</c> that removes nothing, and KRX008 for behavior pairs that involve a referenced
+///     behavior (in-source pairs are the analyzer's), per kind where a behavior method overrides its class's ordering.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HostBehaviorDiagnosticsTests : HostTest
@@ -19,29 +19,52 @@ public class HostBehaviorDiagnosticsTests : HostTest
 
         public sealed record Placed : INotification;
 
+        [RequestBehavior]
         [GlobalBehavior]
-        public sealed class Audit<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class Audit
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> =>
                 next.InvokeAsync(cancellationToken);
         }
 
+        [RequestBehavior]
         [GlobalBehavior]
-        public sealed class Trace<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class Trace
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> =>
                 next.InvokeAsync(cancellationToken);
         }
 
-        public sealed class Unused<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        // Global only through its method.
+        [RequestBehavior]
+        public static class MethodGlobal
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+            [GlobalBehavior]
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> =>
                 next.InvokeAsync(cancellationToken);
         }
 
-        public sealed class OnPublish<TNotification> : INotificationPipelineBehavior<TNotification> where TNotification : INotification
+        [RequestBehavior]
+        public static class Unused
         {
-            public ValueTask Handle<TNext>(TNotification notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> =>
+                next.InvokeAsync(cancellationToken);
+        }
+
+        [NotificationBehavior]
+        public static class OnPublish
+        {
+            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                where TNotification : INotification
+                where TNext : struct, INext =>
                 next.InvokeAsync(cancellationToken);
         }
 
@@ -54,11 +77,10 @@ public class HostBehaviorDiagnosticsTests : HostTest
                                            Usings
                                          + """
                                            [assembly: KeryxHost]
-                                           [assembly: ExcludeBehavior(typeof(Sample.Trace<,>))]
-                                           [assembly: ExcludeBehavior(typeof(Sample.Unused<,>))]
-                                           [assembly: ExcludeBehavior(typeof(Sample.Audit<Sample.Placed, int>))]
+                                           [assembly: ExcludeBehavior(typeof(Sample.Trace))]
+                                           [assembly: ExcludeBehavior(typeof(Sample.Unused))]
                                            [assembly: ExcludeBehavior(typeof(string))]
-                                           [assembly: ExcludeBehavior(typeof(Sample.OnPublish<>))]
+                                           [assembly: ExcludeBehavior(typeof(Sample.OnPublish))]
 
                                            namespace Sample;
 
@@ -72,17 +94,18 @@ public class HostBehaviorDiagnosticsTests : HostTest
         await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
                          [
-                             // Trace is excluded entirely, so only Audit is listed; an exclusion of one closing leaves the global applied.
-                             "KRX035: Global behavior 'Audit<TRequest, TResponse>' from assembly 'TestProject' applies in this host",
-                             "KRX036: [assembly: ExcludeBehavior(typeof(Audit<Placed, int>))] has no effect, because 'Audit<Placed, int>' is not part of any pipeline in this host",
-                             "KRX036: [assembly: ExcludeBehavior(typeof(OnPublish<>))] has no effect, because 'OnPublish<>' is not part of any pipeline in this host",
-                             "KRX036: [assembly: ExcludeBehavior(typeof(Unused<,>))] has no effect, because 'Unused<,>' is not part of any pipeline in this host",
+                             // Trace is excluded, so only Audit and the global marked only on its method are listed.
+                             "KRX035: Global behavior 'Audit' from assembly 'TestProject' applies in this host",
+                             "KRX035: Global behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
+                             "KRX036: [assembly: ExcludeBehavior(typeof(OnPublish))] has no effect, because 'OnPublish' is not part of any pipeline in this host",
+                             "KRX036: [assembly: ExcludeBehavior(typeof(Unused))] has no effect, because 'Unused' is not part of any pipeline in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(string))] has no effect, because 'string' is not part of any pipeline in this host",
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
 
-        // Reported where the user wrote them: KRX035 on [GlobalBehavior], KRX036 on the exclusion.
+        // Reported where the user wrote them: KRX035 on [GlobalBehavior] (the method's, for a global marked only there), KRX036 on the
+        // exclusion.
         foreach (var diagnostic in diagnostics)
         {
             var text = diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan);
@@ -93,42 +116,103 @@ public class HostBehaviorDiagnosticsTests : HostTest
     [Test]
     public async Task KRX036_Is_Not_Reported_For_An_Exclusion_That_Removes_A_Behavior(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\n[assembly: ExcludeBehavior(typeof(Sample.Audit<Sample.Ping, string>))]\nnamespace Sample;\n" + Behaviors)
+        var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\n[assembly: ExcludeBehavior(typeof(Sample.Audit))]\nnamespace Sample;\n" + Behaviors)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
-        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => d.Id).Order(StringComparer.Ordinal))
-                    .IsEquivalentTo(["KRX035", "KRX035"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "Global behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
+                             "Global behavior 'Trace' from assembly 'TestProject' applies in this host",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
     }
 
     [Test]
-    [MethodDataSource(nameof(Forms))]
-    public async Task KRX008_For_A_Pair_With_A_Referenced_Behavior(OrderingForm form, CancellationToken cancellationToken)
+    public async Task ExcludeBehavior_Removes_A_Class_From_Pipelines_Of_Every_Kind(CancellationToken cancellationToken)
+    {
+        // One exclusion names the class: its request, stream and notification behaviors all leave every pipeline, and the exclusion counts
+        // as used (no KRX036).
+        const string source = """
+            [assembly: KeryxHost]
+            [assembly: ExcludeBehavior(typeof(Sample.Everywhere))]
+
+            namespace Sample;
+
+            public sealed record Ping : IRequest<string>;
+            public sealed record Names : IStreamRequest<string>;
+            public sealed record Placed : INotification;
+            public static partial class PingHandler { private static string Handle(Ping request) => ""; }
+            public static partial class NamesHandler { private static IAsyncEnumerable<string> Handle(Names request) => null!; }
+            public static partial class PlacedHandler { private static ValueTask Handle(Placed notification) => default; }
+
+            [RequestBehavior]
+            [StreamBehavior]
+            [NotificationBehavior]
+            [GlobalBehavior]
+            public static class Everywhere
+            {
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
+
+                public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(default);
+
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next)
+                    where TNotification : INotification
+                    where TNext : struct, INext => next.InvokeAsync(default);
+            }
+            """;
+
+        var excluded = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var applied = await HostBuilder.WithProjectName("Applied")
+                                       .AddSources(Usings + source.Replace("[assembly: ExcludeBehavior(typeof(Sample.Everywhere))]", "", StringComparison.Ordinal))
+                                       .Build()
+                                       .GenerateAsync(cancellationToken);
+
+        excluded.AssertCompilationWasSuccessful();
+        await Assert.That(excluded.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
+        await Assert.That(PipelineGeneratorTests.Source(excluded, Analyzers.Hosts.HostEmitter.MediatorHintName)).DoesNotContain("Everywhere");
+        var mediator = PipelineGeneratorTests.Source(applied, Analyzers.Hosts.HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Sample.Everywhere.Handle<global::Sample.Ping, string, ");
+        await Assert.That(mediator).Contains("global::Sample.Everywhere.HandleAsync<global::Sample.Names, string, ");
+        await Assert.That(mediator).Contains("global::Sample.Everywhere.Handle<global::Sample.Placed, ");
+    }
+
+    [Test]
+    public async Task KRX008_For_A_Pair_With_A_Referenced_Behavior(CancellationToken cancellationToken)
     {
         // A library behavior in Phase.Transaction; the host's own behavior, in Phase.Observability, claims to run after it.
         var library = Library(
             """
+            using Keryx;
+
             namespace Lib;
 
-            [global::Keryx.BehaviorOrder(global::Keryx.Phase.Transaction)]
-            public sealed class Transaction<TRequest, TResponse> : global::Keryx.IRequestPipelineBehavior<TRequest, TResponse>
-                where TRequest : global::Keryx.IRequest<TResponse>
+            [RequestBehavior]
+            [BehaviorOrder(Phase.Transaction)]
+            public static class Transaction
             {
-                public global::System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                    where TNext : struct, global::Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
+                public static global::System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
             }
 
-            public sealed class Cycle1<TRequest, TResponse> : global::Keryx.IRequestPipelineBehavior<TRequest, TResponse>
-                where TRequest : global::Keryx.IRequest<TResponse>
+            [RequestBehavior]
+            public static class Cycle1
             {
-                public global::System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                    where TNext : struct, global::Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
+                public static global::System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
             }
             """
         );
-        var source = OrderingForms.Expand(
-            """
+        const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
@@ -136,46 +220,123 @@ public class HostBehaviorDiagnosticsTests : HostTest
             public sealed record Ping : IRequest<string>;
             public sealed record Pong : IRequest<string>;
 
+            [RequestBehavior]
             [BehaviorOrder(Phase.Observability)]
-            {{After:Lib.Transaction<Sample.Ping, string>}}
-            public sealed class Early : IRequestPipelineBehavior<Ping, string>
+            [RunsAfter(typeof(Lib.Transaction))]
+            public static class Early
             {
-                public ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
+                public static ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
                     next.InvokeAsync(cancellationToken);
             }
 
-            {{Before:Lib.Cycle1<Sample.Pong, string>}}
-            {{After:Lib.Cycle1<Sample.Pong, string>}}
-            public sealed class Both : IRequestPipelineBehavior<Pong, string>
+            [RequestBehavior]
+            [RunsBefore(typeof(Lib.Cycle1))]
+            [RunsAfter(typeof(Lib.Cycle1))]
+            public static class Both
             {
-                public ValueTask<string> Handle<TNext>(Pong request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
+                public static ValueTask<string> Handle<TNext>(Pong request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
                     next.InvokeAsync(cancellationToken);
             }
 
             public static partial class PingHandler
             {
                 [Behavior(typeof(Early))]
-                [Behavior(typeof(Lib.Transaction<,>))]
+                [Behavior(typeof(Lib.Transaction))]
                 private static string Handle(Ping request) => "";
             }
 
             public static partial class PongHandler
             {
                 [Behavior(typeof(Both))]
-                [Behavior(typeof(Lib.Cycle1<,>))]
+                [Behavior(typeof(Lib.Cycle1))]
                 private static string Handle(Pong request) => "";
             }
-            """,
-            form
-        );
+            """;
 
         var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
                          [
-                             "KRX008: 'Lib.Cycle1<Sample.Pong, string>' is part of a RunsAfter/RunsBefore cycle between 'Lib.Cycle1<Sample.Pong, string>', 'Sample.Both', so no order satisfies them",
-                             "KRX008: 'Sample.Early' declares RunsAfter 'Lib.Transaction<Sample.Ping, string>', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.Transaction<Sample.Ping, string>' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                             "KRX008: 'Lib.Cycle1' is part of a RunsAfter/RunsBefore cycle between 'Lib.Cycle1', 'Sample.Both', so no order satisfies them",
+                             "KRX008: 'Sample.Early' declares RunsAfter 'Lib.Transaction', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.Transaction' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+    }
+
+    [Test]
+    public async Task KRX008_Per_Kind_When_A_Method_Overrides_The_Class(CancellationToken cancellationToken)
+    {
+        // Early's class edge contradicts its phase in the request pipeline; its stream method's own [RunsAfter] list does too, in the stream
+        // pipeline: one KRX008 per kind.
+        var library = Library(
+            """
+            using Keryx;
+
+            namespace Lib;
+
+            [RequestBehavior]
+            [StreamBehavior]
+            [BehaviorOrder(Phase.Transaction)]
+            public static class Transaction
+            {
+                public static global::System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
+
+                public static global::System.Collections.Generic.IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(default);
+            }
+            """
+        );
+        const string source = """
+            [assembly: KeryxHost]
+
+            namespace Sample;
+
+            public sealed record Ping : IRequest<string>;
+            public sealed record Names : IStreamRequest<string>;
+
+            [RequestBehavior]
+            [StreamBehavior]
+            [BehaviorOrder(Phase.Observability)]
+            [RunsAfter(typeof(Lib.Transaction))]
+            public static class Early
+            {
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
+
+                [RunsAfter(typeof(Lib.Transaction))]
+                public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(default);
+            }
+
+            public static partial class PingHandler
+            {
+                [Behavior(typeof(Early))]
+                [Behavior(typeof(Lib.Transaction))]
+                private static string Handle(Ping request) => "";
+            }
+
+            public static partial class NamesHandler
+            {
+                [Behavior(typeof(Early))]
+                [Behavior(typeof(Lib.Transaction))]
+                private static IAsyncEnumerable<string> Handle(Names request) => null!;
+            }
+            """;
+
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX008: 'Sample.Early' declares RunsAfter 'Lib.Transaction' for its stream behavior, but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.Transaction' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                             "KRX008: 'Sample.Early' declares RunsAfter 'Lib.Transaction', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.Transaction' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
@@ -184,56 +345,43 @@ public class HostBehaviorDiagnosticsTests : HostTest
     [Test]
     public async Task KRX008_For_Notification_Behavior_Pairs_With_A_Referenced_Behavior(CancellationToken cancellationToken)
     {
-        // Per-publish and per-handler: a library behavior in Phase.Transaction; the host's own, in Phase.Observability, claims to run after
-        // it. The library behaviors are attached with [Behavior] (a referenced global behavior would apply to both as well).
+        // A library notification behavior in Phase.Transaction; the host's own, in Phase.Observability, claims to run after it.
         var library = Library(
             """
+            using Keryx;
+
             namespace Lib;
 
-            [global::Keryx.BehaviorOrder(global::Keryx.Phase.Transaction)]
-            public sealed class PublishTransaction<T> : global::Keryx.INotificationPipelineBehavior<T> where T : global::Keryx.INotification
+            [NotificationBehavior]
+            [BehaviorOrder(Phase.Transaction)]
+            public static class PublishTransaction
             {
-                public global::System.Threading.Tasks.ValueTask Handle<TNext>(T notification, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                    where TNext : struct, global::Keryx.INext => next.InvokeAsync(cancellationToken);
-            }
-
-            [global::Keryx.BehaviorOrder(global::Keryx.Phase.Transaction)]
-            public sealed class HandlerTransaction<T> : global::Keryx.INotificationHandlerPipelineBehavior<T> where T : global::Keryx.INotification
-            {
-                public global::System.Threading.Tasks.ValueTask Handle<TNext>(T notification, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                    where TNext : struct, global::Keryx.INext => next.InvokeAsync(cancellationToken);
+                public static global::System.Threading.Tasks.ValueTask Handle<T, TNext>(T notification, TNext next)
+                    where T : INotification
+                    where TNext : struct, INext => next.InvokeAsync(default);
             }
             """
         );
-        var source = """
+        const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
 
+            [NotificationBehavior]
             [BehaviorOrder(Phase.Observability)]
-            [RunsAfter(typeof(Lib.PublishTransaction<Sample.Placed>))]
-            public sealed class EarlyPublish : INotificationPipelineBehavior<Placed>
+            [RunsAfter(typeof(Lib.PublishTransaction))]
+            public static class EarlyPublish
             {
-                public ValueTask Handle<TNext>(Placed notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
-                    next.InvokeAsync(cancellationToken);
-            }
-
-            [BehaviorOrder(Phase.Observability)]
-            [RunsAfter(typeof(Lib.HandlerTransaction<Sample.Placed>))]
-            public sealed class EarlyHandler : INotificationHandlerPipelineBehavior<Placed>
-            {
-                public ValueTask Handle<TNext>(Placed notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+                public static ValueTask Handle<TNext>(Placed notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
                     next.InvokeAsync(cancellationToken);
             }
 
             [Behavior(typeof(EarlyPublish))]
-            [Behavior(typeof(Lib.PublishTransaction<>))]
+            [Behavior(typeof(Lib.PublishTransaction))]
             public sealed record Placed : INotification;
 
             public static partial class OnPlaced
             {
-                [Behavior(typeof(EarlyHandler))]
-                [Behavior(typeof(Lib.HandlerTransaction<>))]
                 private static ValueTask Handle(Placed notification) => default;
             }
             """;
@@ -241,13 +389,11 @@ public class HostBehaviorDiagnosticsTests : HostTest
         var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
-        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
+        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}"))
                     .IsEquivalentTo(
                          [
-                             "KRX008: 'Sample.EarlyHandler' declares RunsAfter 'Lib.HandlerTransaction<Sample.Placed>', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.HandlerTransaction<Sample.Placed>' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
-                             "KRX008: 'Sample.EarlyPublish' declares RunsAfter 'Lib.PublishTransaction<Sample.Placed>', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.PublishTransaction<Sample.Placed>' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
-                         ],
-                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                             "KRX008: 'Sample.EarlyPublish' declares RunsAfter 'Lib.PublishTransaction', but its position (Phase.Observability, order 0) puts it before (outside) 'Lib.PublishTransaction' (Phase.Transaction, order 0); RunsAfter and RunsBefore only order behaviors that have the same phase and order",
+                         ]
                      );
 
         // Reported at the edge.
@@ -258,42 +404,36 @@ public class HostBehaviorDiagnosticsTests : HostTest
     }
 
     [Test]
-    [MethodDataSource(nameof(Forms))]
-    public async Task KRX008_Is_Checked_Once_Per_Pair_Declared_From_Both_Sides(OrderingForm form, CancellationToken cancellationToken)
+    public async Task KRX008_Is_Checked_Once_Per_Pair_Declared_From_Both_Sides(CancellationToken cancellationToken)
     {
-        // Two referenced behaviors declare the same contradiction from both sides: A runs after B, and B runs before A. The filler edge before
-        // each significant one puts both forms on one class under Mixed.
+        // Two referenced behaviors declare the same contradiction from both sides: A runs after B, and B runs before A.
         var library = Library(
-            OrderingForms.Expand(
-                """
-                using Keryx;
+            """
+            using Keryx;
 
-                namespace Lib;
+            namespace Lib;
 
-                public sealed record Ping : IRequest<string>;
+            public sealed record Ping : IRequest<string>;
 
-                [BehaviorOrder(Phase.Observability)]
-                {{After:string}}
-                {{After:B}}
-                public sealed class A : IRequestPipelineBehavior<Ping, string>
-                {
-                    public global::System.Threading.Tasks.ValueTask<string> Handle<TNext>(Ping request, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                        where TNext : struct, INext<string> => next.InvokeAsync(cancellationToken);
-                }
+            [RequestBehavior]
+            [BehaviorOrder(Phase.Observability)]
+            [RunsAfter(typeof(string))]
+            [RunsAfter(typeof(B))]
+            public static class A
+            {
+                public static global::System.Threading.Tasks.ValueTask<string> Handle<TNext>(Ping request, TNext next) where TNext : struct, INext<string> => next.InvokeAsync(default);
+            }
 
-                [BehaviorOrder(Phase.Transaction)]
-                {{After:string}}
-                {{Before:A}}
-                public sealed class B : IRequestPipelineBehavior<Ping, string>
-                {
-                    public global::System.Threading.Tasks.ValueTask<string> Handle<TNext>(Ping request, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                        where TNext : struct, INext<string> => next.InvokeAsync(cancellationToken);
-                }
-                """,
-                form
-            )
+            [RequestBehavior]
+            [BehaviorOrder(Phase.Transaction)]
+            [RunsBefore(typeof(A))]
+            public static class B
+            {
+                public static global::System.Threading.Tasks.ValueTask<string> Handle<TNext>(Ping request, TNext next) where TNext : struct, INext<string> => next.InvokeAsync(default);
+            }
+            """
         );
-        var source = """
+        const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
@@ -319,9 +459,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
     [Test]
     public async Task KRX008_A_Cycle_Is_Reported_Once_However_Many_Pipelines_Contain_It(CancellationToken cancellationToken)
     {
-        // An open in-source behavior in a cycle with an open referenced one, both attached to two handlers: two pipelines, two closings of
-        // the same cycle, one KRX008. The edges name an open behavior, which only the typeof form can (C# has no RunsAfter<X<,>>).
-        var source = """
+        // An open in-source behavior in a cycle with an open referenced one, both attached to two handlers: two pipelines, one KRX008.
+        const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
@@ -329,25 +468,28 @@ public class HostBehaviorDiagnosticsTests : HostTest
             public sealed record Ping : IRequest<string>;
             public sealed record Pong : IRequest<string>;
 
-            [RunsBefore(typeof(Lib.Cycle1<,>))]
-            [RunsAfter(typeof(Lib.Cycle1<,>))]
-            public sealed class Both<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+            [RequestBehavior]
+            [RunsBefore(typeof(Lib.Cycle1))]
+            [RunsAfter(typeof(Lib.Cycle1))]
+            public static class Both
             {
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
                     next.InvokeAsync(cancellationToken);
             }
 
             public static partial class PingHandler
             {
-                [Behavior(typeof(Both<,>))]
-                [Behavior(typeof(Lib.Cycle1<,>))]
+                [Behavior(typeof(Both))]
+                [Behavior(typeof(Lib.Cycle1))]
                 private static string Handle(Ping request) => "";
             }
 
             public static partial class PongHandler
             {
-                [Behavior(typeof(Both<,>))]
-                [Behavior(typeof(Lib.Cycle1<,>))]
+                [Behavior(typeof(Both))]
+                [Behavior(typeof(Lib.Cycle1))]
                 private static string Handle(Pong request) => "";
             }
             """;
@@ -356,43 +498,37 @@ public class HostBehaviorDiagnosticsTests : HostTest
 
         var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
         await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}"))
-                    .IsEquivalentTo(
-                         [
-                             "KRX008: 'Lib.Cycle1<Sample.Ping, string>' is part of a RunsAfter/RunsBefore cycle between 'Lib.Cycle1<Sample.Ping, string>', 'Sample.Both<Sample.Ping, string>', so no order satisfies them",
-                         ]
-                     );
+                    .IsEquivalentTo(["KRX008: 'Lib.Cycle1' is part of a RunsAfter/RunsBefore cycle between 'Lib.Cycle1', 'Sample.Both', so no order satisfies them"]);
         var diagnostic = diagnostics.Single();
-        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("RunsBefore(typeof(Lib.Cycle1<,>))");
+        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("RunsBefore(typeof(Lib.Cycle1))");
     }
 
     [Test]
-    [MethodDataSource(nameof(Forms))]
-    public async Task KRX008_An_In_Source_Cycle_With_A_Referenced_Behavior_Downstream_Is_The_Analyzers(OrderingForm form, CancellationToken cancellationToken)
+    public async Task KRX008_An_In_Source_Cycle_With_A_Referenced_Behavior_Downstream_Is_The_Analyzers(CancellationToken cancellationToken)
     {
         // A and B (in source) form a cycle; A also runs before a referenced behavior in the same bucket, which waits on the cycle without
         // being part of it. The host reports nothing; the analyzer reports the cycle once.
-        var source = OrderingForms.Expand(
-            """
+        const string source = """
             [assembly: KeryxHost]
 
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
 
-            {{After:string}}
-            {{After:B}}
-            {{Before:Lib.Cycle1<Sample.Ping, string>}}
-            public sealed class A : IRequestPipelineBehavior<Ping, string>
+            [RequestBehavior]
+            [RunsAfter(typeof(B))]
+            [RunsBefore(typeof(Lib.Cycle1))]
+            public static class A
             {
-                public ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
+                public static ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
                     next.InvokeAsync(cancellationToken);
             }
 
-            {{After:string}}
-            {{After:A}}
-            public sealed class B : IRequestPipelineBehavior<Ping, string>
+            [RequestBehavior]
+            [RunsAfter(typeof(A))]
+            public static class B
             {
-                public ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
+                public static ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string> =>
                     next.InvokeAsync(cancellationToken);
             }
 
@@ -400,12 +536,10 @@ public class HostBehaviorDiagnosticsTests : HostTest
             {
                 [Behavior(typeof(A))]
                 [Behavior(typeof(B))]
-                [Behavior(typeof(Lib.Cycle1<,>))]
+                [Behavior(typeof(Lib.Cycle1))]
                 private static string Handle(Ping request) => "";
             }
-            """,
-            form
-        );
+            """;
 
         var result = await HostBuilder.WithAnalyzer<Analyzers.Diagnostics.BehaviorAnalyzer>()
                                       .AddReferences(Library(CycleLibrary))
@@ -422,17 +556,18 @@ public class HostBehaviorDiagnosticsTests : HostTest
     }
 
     private const string CycleLibrary = """
+        using Keryx;
+
         namespace Lib;
 
-        public sealed class Cycle1<TRequest, TResponse> : global::Keryx.IRequestPipelineBehavior<TRequest, TResponse>
-            where TRequest : global::Keryx.IRequest<TResponse>
+        [RequestBehavior]
+        public static class Cycle1
         {
-            public global::System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, global::System.Threading.CancellationToken cancellationToken)
-                where TNext : struct, global::Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
+            public static global::System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
         }
         """;
-
-    public static IEnumerable<Func<OrderingForm>> Forms() => [() => OrderingForm.TypeOf, () => OrderingForm.Generic, () => OrderingForm.Mixed];
 
     /// <summary>Compiles a referenced library against Keryx.</summary>
     private static MetadataReference Library(string source) => TestLibraries.Reference("Lib", source);

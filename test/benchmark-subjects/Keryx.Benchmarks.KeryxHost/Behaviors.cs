@@ -3,12 +3,15 @@ using Keryx.Benchmarks.Common;
 
 namespace Keryx.Benchmarks.KeryxHost;
 
-// Pass-through behaviors: each records the call (only in --verify runs) and hands the request on synchronously.
+// Pass-through static behaviors: each records the call (only in --verify runs) and hands the request on synchronously. The generated
+// pipeline calls each behavior method directly, with explicit type arguments.
 
-public sealed class Pass1<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass1
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -16,10 +19,12 @@ public sealed class Pass1<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass2<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass2
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -27,10 +32,12 @@ public sealed class Pass2<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass3<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass3
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -38,10 +45,12 @@ public sealed class Pass3<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass4<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass4
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -49,10 +58,12 @@ public sealed class Pass4<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass5<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass5
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -60,10 +71,12 @@ public sealed class Pass5<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass6<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass6
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -71,10 +84,12 @@ public sealed class Pass6<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass7<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass7
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -82,10 +97,12 @@ public sealed class Pass7<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-public sealed class Pass8<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+/// <summary>A pass-through request behavior: records the call and hands the request on synchronously.</summary>
+[RequestBehavior]
+public static class Pass8
 {
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
@@ -93,11 +110,16 @@ public sealed class Pass8<TRequest, TResponse> : IRequestPipelineBehavior<TReque
     }
 }
 
-/// <summary>A wrap stream behavior: re-yields the inner stream from its own iterator.</summary>
-public sealed class StreamPass1<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
+/// <summary>A stream behavior: re-yields the inner stream from its own iterator.</summary>
+[StreamBehavior]
+public static class StreamPass1
 {
-    public async IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public static async IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(
+        TRequest request,
+        TNext next,
+        [EnumeratorCancellation] CancellationToken cancellationToken
+    )
+        where TRequest : IStreamRequest<TItem>
         where TNext : struct, IStreamNext<TItem>
     {
         Probe.Hit();
@@ -108,11 +130,16 @@ public sealed class StreamPass1<TRequest, TItem> : IStreamPipelineBehavior<TRequ
     }
 }
 
-/// <summary>A wrap stream behavior: re-yields the inner stream from its own iterator.</summary>
-public sealed class StreamPass2<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
+/// <summary>A stream behavior: re-yields the inner stream from its own iterator.</summary>
+[StreamBehavior]
+public static class StreamPass2
 {
-    public async IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public static async IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(
+        TRequest request,
+        TNext next,
+        [EnumeratorCancellation] CancellationToken cancellationToken
+    )
+        where TRequest : IStreamRequest<TItem>
         where TNext : struct, IStreamNext<TItem>
     {
         Probe.Hit();
@@ -123,11 +150,16 @@ public sealed class StreamPass2<TRequest, TItem> : IStreamPipelineBehavior<TRequ
     }
 }
 
-/// <summary>A wrap stream behavior: re-yields the inner stream from its own iterator.</summary>
-public sealed class StreamPass3<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
+/// <summary>A stream behavior: re-yields the inner stream from its own iterator.</summary>
+[StreamBehavior]
+public static class StreamPass3
 {
-    public async IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public static async IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(
+        TRequest request,
+        TNext next,
+        [EnumeratorCancellation] CancellationToken cancellationToken
+    )
+        where TRequest : IStreamRequest<TItem>
         where TNext : struct, IStreamNext<TItem>
     {
         Probe.Hit();
@@ -136,55 +168,4 @@ public sealed class StreamPass3<TRequest, TItem> : IStreamPipelineBehavior<TRequ
             yield return item;
         }
     }
-}
-
-/// <summary>A hook stream behavior: adjacent hooks are fused into one generated iterator.</summary>
-public sealed class StreamHook1<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
-{
-    public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken)
-    {
-        Probe.Hit();
-        return default;
-    }
-
-    public bool OnItem(TRequest request, ref TItem item) => true;
-
-    public ValueTask OnCompleteAsync(TRequest request) => default;
-
-    public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
-}
-
-/// <summary>A hook stream behavior: adjacent hooks are fused into one generated iterator.</summary>
-public sealed class StreamHook2<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
-{
-    public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken)
-    {
-        Probe.Hit();
-        return default;
-    }
-
-    public bool OnItem(TRequest request, ref TItem item) => true;
-
-    public ValueTask OnCompleteAsync(TRequest request) => default;
-
-    public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
-}
-
-/// <summary>A hook stream behavior: adjacent hooks are fused into one generated iterator.</summary>
-public sealed class StreamHook3<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem>
-    where TRequest : IStreamRequest<TItem>
-{
-    public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken)
-    {
-        Probe.Hit();
-        return default;
-    }
-
-    public bool OnItem(TRequest request, ref TItem item) => true;
-
-    public ValueTask OnCompleteAsync(TRequest request) => default;
-
-    public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
 }

@@ -6,7 +6,7 @@
         public BehaviorAttribute(System.Type behaviorType) { }
         public System.Type BehaviorType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class)]
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method)]
     public sealed class BehaviorOrderAttribute : System.Attribute
     {
         public BehaviorOrderAttribute(Keryx.Phase phase) { }
@@ -31,7 +31,7 @@
         public ExternallyHandledAttribute(System.Type requestType) { }
         public System.Type RequestType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class)]
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method)]
     public sealed class GlobalBehaviorAttribute : System.Attribute
     {
         public GlobalBehaviorAttribute() { }
@@ -52,53 +52,21 @@
         System.Threading.Tasks.ValueTask<TResponse> InvokeAsync(System.Threading.CancellationToken cancellationToken);
     }
     public interface INotification { }
-    public interface INotificationHandlerPipelineBehavior<TNotification>
-        where TNotification : Keryx.INotification
-    {
-        System.Threading.Tasks.ValueTask Handle<TNext>(TNotification notification, TNext next, System.Threading.CancellationToken cancellationToken)
-            where TNext :  struct, Keryx.INext;
-    }
-    public interface INotificationPipelineBehavior<TNotification>
-        where TNotification : Keryx.INotification
-    {
-        System.Threading.Tasks.ValueTask Handle<TNext>(TNotification notification, TNext next, System.Threading.CancellationToken cancellationToken)
-            where TNext :  struct, Keryx.INext;
-    }
     public interface IPublisher
     {
         System.Threading.Tasks.ValueTask Publish<TNotification>(TNotification notification, System.Threading.CancellationToken cancellationToken = default)
             where TNotification : Keryx.INotification;
     }
     public interface IRequest : Keryx.IRequest<Keryx.Unit> { }
-    public interface IRequestPipelineBehavior<TRequest, TResponse>
-        where TRequest : Keryx.IRequest<TResponse>
-    {
-        System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
-            where TNext :  struct, Keryx.INext<TResponse>;
-    }
     public interface IRequest<TResponse> { }
     public interface ISender
     {
         System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(Keryx.IRequest<TResponse> request, System.Threading.CancellationToken cancellationToken = default);
         System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(Keryx.IStreamRequest<TItem> request, System.Threading.CancellationToken cancellationToken = default);
     }
-    public interface IStreamHookBehavior<TRequest, TItem>
-        where TRequest : Keryx.IStreamRequest<TItem>
-    {
-        System.Threading.Tasks.ValueTask OnCompleteAsync(TRequest request);
-        System.Threading.Tasks.ValueTask OnErrorAsync(TRequest request, System.Exception exception);
-        bool OnItem(TRequest request, ref TItem item);
-        System.Threading.Tasks.ValueTask OnStartAsync(TRequest request, System.Threading.CancellationToken cancellationToken);
-    }
     public interface IStreamNext<TItem>
     {
         System.Collections.Generic.IAsyncEnumerable<TItem> InvokeAsync(System.Threading.CancellationToken cancellationToken);
-    }
-    public interface IStreamPipelineBehavior<TRequest, TItem>
-        where TRequest : Keryx.IStreamRequest<TItem>
-    {
-        System.Collections.Generic.IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
-            where TNext :  struct, Keryx.IStreamNext<TItem>;
     }
     public interface IStreamRequest<TItem> { }
     [System.AttributeUsage(System.AttributeTargets.Assembly)]
@@ -115,6 +83,11 @@
     public sealed class KeryxHostAttribute : System.Attribute
     {
         public KeryxHostAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class NotificationBehaviorAttribute : System.Attribute
+    {
+        public NotificationBehaviorAttribute() { }
     }
     public enum Phase
     {
@@ -138,29 +111,27 @@
         public PublishStrategyAttribute(Keryx.PublishStrategy strategy) { }
         public Keryx.PublishStrategy Strategy { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class RequestBehaviorAttribute : System.Attribute
+    {
+        public RequestBehaviorAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple=true)]
     public sealed class RunsAfterAttribute : System.Attribute
     {
         public RunsAfterAttribute(System.Type behaviorType) { }
         public System.Type BehaviorType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
-    public sealed class RunsAfterAttribute<TBehavior> : System.Attribute
-    {
-        public RunsAfterAttribute() { }
-        public System.Type BehaviorType { get; }
-    }
-    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple=true)]
     public sealed class RunsBeforeAttribute : System.Attribute
     {
         public RunsBeforeAttribute(System.Type behaviorType) { }
         public System.Type BehaviorType { get; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true)]
-    public sealed class RunsBeforeAttribute<TBehavior> : System.Attribute
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class StreamBehaviorAttribute : System.Attribute
     {
-        public RunsBeforeAttribute() { }
-        public System.Type BehaviorType { get; }
+        public StreamBehaviorAttribute() { }
     }
     public readonly struct Unit : System.IComparable<Keryx.Unit>, System.IEquatable<Keryx.Unit>
     {

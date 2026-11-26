@@ -10,32 +10,24 @@ using static Keryx.Tests.Streams.StreamSources;
 namespace Keryx.Tests.Streams;
 
 /// <summary>
-///     Wrap and hook behaviors sorted in one list (ADR 0001, Streaming; Ordering): they interleave by <c>Phase</c>, by <c>Order</c> inside a
-///     phase and by <c>RunsAfter</c>/<c>RunsBefore</c> inside a (phase, order) bucket, each edge written in the <c>typeof</c> form, the generic
-///     form and both mixed, with the same result; and the sorted list splits into fused hook segments at every wrap behavior.
+///     Stream behaviors sorted like request behaviors (ADR 0001, Streaming; Ordering): by <c>Phase</c>, by <c>Order</c> inside a phase and by
+///     <c>typeof</c> <c>RunsAfter</c>/<c>RunsBefore</c> edges inside a (phase, order) bucket, with a behavior method's <c>[BehaviorOrder]</c>
+///     overriding its class's; one link per stream behavior, outermost first.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class StreamOrderingTests : HostTest
 {
     /// <summary>
-    ///     The sorted pipeline: <c>HObs</c> | <c>WSec</c> | <c>HValB</c> | <c>WVal</c> | <c>HVal1</c>, <c>HVal2</c>, <c>HDef2</c>,
-    ///     <c>HDef1</c> | <c>WTx</c> | <c>HInner</c>: four segments split by three wrap behaviors. By name alone the (Validation, 1) bucket would
-    ///     be <c>HVal1</c>, <c>HValB</c>, <c>WVal</c> and the Default bucket <c>HDef1</c>, <c>HDef2</c>; the edges reverse them.
+    ///     The sorted pipeline: <c>WInner</c> (its method moves it to <c>Phase.Outermost</c>), <c>WObs</c>, <c>WSec</c>, the (Validation, 1)
+    ///     bucket <c>WVal1</c>, <c>WValB</c>, <c>WVal</c> (by name alone <c>WVal</c> would be first; <c>WValB</c> runs before it), the Default
+    ///     bucket <c>WDef2</c>, <c>WDef1</c> (reversed by an edge), then <c>WTx</c>.
     /// </summary>
-    private static readonly string[] ExpectedLog =
-    [
-        "HObs.start", "WSec>", "HValB.start", "WVal>", "HVal1.start", "HVal2.start", "HDef2.start", "HDef1.start", "WTx>", "HInner.start", "handler>",
-        "HInner.item 1", "HDef1.item 1", "HDef2.item 1", "HVal2.item 1", "HVal1.item 1", "HValB.item 1", "HObs.item 1", "<handler", "HInner.complete", "<WTx",
-        "HDef1.complete", "HDef2.complete", "HVal2.complete", "HVal1.complete", "<WVal", "HValB.complete", "<WSec", "HObs.complete",
-    ];
+    private static readonly string[] Order = ["WInner", "WObs", "WSec", "WVal1", "WValB", "WVal", "WDef2", "WDef1", "WTx"];
 
     [Test]
-    [Arguments(OrderingForm.TypeOf)]
-    [Arguments(OrderingForm.Generic)]
-    [Arguments(OrderingForm.Mixed)]
-    public async Task Wrap_And_Hook_Behaviors_Run_In_Sort_Order(OrderingForm form, CancellationToken cancellationToken)
+    public async Task Stream_Behaviors_Run_In_Sort_Order(CancellationToken cancellationToken)
     {
-        var host = await CompileHostAsync(OrderingForms.Expand(Source, form), cancellationToken);
+        var host = await CompileHostAsync(Source, cancellationToken);
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
         _ = TakeLog(host);
@@ -47,34 +39,31 @@ public class StreamOrderingTests : HostTest
 
         await Assert.That(error).IsNull();
         await Assert.That(items.Count).IsEqualTo(1);
-        await Assert.That(TakeLog(host)).IsEquivalentTo(ExpectedLog, CollectionOrdering.Matching);
+        await Assert.That(TakeLog(host))
+                    .IsEquivalentTo([.. Order.Select(static b => b + ">"), "handler>", "<handler", .. Enumerable.Reverse(Order).Select(static b => "<" + b)], CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task Every_Form_Generates_The_Same_Segment_Split(CancellationToken cancellationToken)
+    public async Task One_Link_Per_Stream_Behavior_Outermost_First(CancellationToken cancellationToken)
     {
-        var sources = new List<string>();
-        foreach (var form in (OrderingForm[])[OrderingForm.TypeOf, OrderingForm.Generic, OrderingForm.Mixed])
-        {
-            var result = await HostBuilder.WithProjectName("Forms" + form).AddSources(Usings + OrderingForms.Expand(Source, form)).Build().GenerateAsync(cancellationToken);
-            result.AssertCompilationWasSuccessful();
-            await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-            sources.Add(PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName));
-        }
+        var result = await HostBuilder.AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
 
-        await Assert.That(sources[1]).IsEqualTo(sources[0]);
-        await Assert.That(sources[2]).IsEqualTo(sources[0]);
-
-        // The split, as the generated documentation of each link and segment states it, outermost first.
-        var split = string.Join(
-            "\n",
-            sources[0]
-               .Split('\n')
-               .Select(static line => line.Trim())
-               .Where(static line => line.StartsWith("/// <summary>The fused hook segment", StringComparison.Ordinal)
-                                  || line.StartsWith("/// <summary>The <c>next</c> of", StringComparison.Ordinal))
-        );
-        await Verify(split);
+        // The links, as their generated documentation states them.
+        var links = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName)
+                                          .Split('\n')
+                                          .Select(static line => line.Trim())
+                                          .Where(static line => line.StartsWith("/// <summary>The <c>next</c> of", StringComparison.Ordinal))
+                                          .ToArray();
+        await Assert.That(links)
+                    .IsEquivalentTo(
+                         [
+                             .. Order.Zip(Order.Skip(1)).Select(static pair => $"/// <summary>The <c>next</c> of <c>Sample.{pair.First}</c>: <c>Sample.{pair.Second}</c>.</summary>"),
+                             $"/// <summary>The <c>next</c> of <c>Sample.{Order[^1]}</c>: the handler.</summary>",
+                         ],
+                         CollectionOrdering.Matching
+                     );
     }
 
     private static readonly string Source = BuildSource();
@@ -82,40 +71,27 @@ public class StreamOrderingTests : HostTest
     private static string BuildSource()
     {
         var builder = new StringBuilder("using System.Runtime.CompilerServices;\n\n[assembly: KeryxHost]\n\nnamespace Sample;\n\n").Append(Support);
-        builder.Append(ClosedHook("HObs", "[BehaviorOrder(Phase.Observability)]"));
-        builder.Append(ClosedWrap("WSec", "[BehaviorOrder(Phase.Security)]"));
-        builder.Append(ClosedHook("HVal1", "[BehaviorOrder(Phase.Validation, Order = 1)]"));
-        builder.Append(ClosedWrap("WVal", "[BehaviorOrder(Phase.Validation, Order = 1)]\n{{Before:HVal1}}"));
-        builder.Append(ClosedHook("HValB", "[BehaviorOrder(Phase.Validation, Order = 1)]\n{{Before:WVal}}"));
-        builder.Append(ClosedHook("HVal2", "[BehaviorOrder(Phase.Validation, Order = 2)]"));
-        builder.Append(ClosedHook("HDef1", "{{After:HDef2}}"));
-        builder.Append(ClosedHook("HDef2", ""));
-        builder.Append(ClosedWrap("WTx", "[BehaviorOrder(Phase.Transaction)]"));
-        builder.Append(ClosedHook("HInner", "[BehaviorOrder(Phase.Innermost)]"));
-        builder.Append(Request("Interleaved", "HInner", "WTx", "HDef2", "HDef1", "HVal2", "HValB", "WVal", "HVal1", "WSec", "HObs"));
+        builder.Append(Closed("WObs", "[BehaviorOrder(Phase.Observability)]"));
+        builder.Append(Closed("WSec", "[BehaviorOrder(Phase.Security)]"));
+        builder.Append(Closed("WVal1", "[BehaviorOrder(Phase.Validation, Order = 1)]"));
+        builder.Append(Closed("WVal", "[BehaviorOrder(Phase.Validation, Order = 1)]"));
+        builder.Append(Closed("WValB", "[BehaviorOrder(Phase.Validation, Order = 1)]\n[RunsBefore(typeof(WVal))]"));
+        builder.Append(Closed("WDef1", "[RunsAfter(typeof(WDef2))]"));
+        builder.Append(Closed("WDef2", ""));
+        builder.Append(Closed("WTx", "[BehaviorOrder(Phase.Transaction)]"));
+        builder.Append(Closed("WInner", "[BehaviorOrder(Phase.Innermost)]", "[BehaviorOrder(Phase.Outermost)]"));
+        builder.Append(Request("Interleaved", "WInner", "WTx", "WDef2", "WDef1", "WValB", "WVal", "WVal1", "WSec", "WObs"));
         return builder.ToString();
     }
 
-    private static string ClosedHook(string name, string attributes) =>
+    private static string Closed(string name, string attributes, string methodAttributes = "") =>
         $$"""
+          [StreamBehavior]
           {{attributes}}
-          public sealed class {{name}} : IStreamHookBehavior<Interleaved, int>
+          public static class {{name}}
           {
-              public ValueTask OnStartAsync(Interleaved request, CancellationToken cancellationToken) { Log.Write("{{name}}.start"); return default; }
-              public bool OnItem(Interleaved request, ref int item) { Log.Write("{{name}}.item " + item.ToString(System.Globalization.CultureInfo.InvariantCulture)); return true; }
-              public ValueTask OnCompleteAsync(Interleaved request) { Log.Write("{{name}}.complete"); return default; }
-              public ValueTask OnErrorAsync(Interleaved request, Exception exception) { Log.Write("{{name}}.error"); return default; }
-          }
-
-
-          """;
-
-    private static string ClosedWrap(string name, string attributes) =>
-        $$"""
-          {{attributes}}
-          public sealed class {{name}} : IStreamPipelineBehavior<Interleaved, int>
-          {
-              public async IAsyncEnumerable<int> Handle<TNext>(Interleaved request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+              {{methodAttributes}}
+              public static async IAsyncEnumerable<int> Handle<TNext>(Interleaved request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
                   where TNext : struct, IStreamNext<int>
               {
                   Log.Write("{{name}}>");

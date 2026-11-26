@@ -25,7 +25,8 @@ internal static class ReferenceScan
     ///     The version of the projection's shape, its derivation and its JSON contract (<see cref="AssemblyProjection" />). Bump it whenever
     ///     one of them changes, so projections cached by an older Keryx are recomputed.
     /// </summary>
-    public const int ProjectionDataVersion = 1;
+    /// <remarks>2: global behaviors are static behavior classes with <c>[GlobalBehavior]</c> on the class or on a behavior method.</remarks>
+    public const int ProjectionDataVersion = 2;
 
     /// <summary>The newest <c>KeryxManifest.FormatVersion</c> this Keryx reads (ADR 0001, Versioning). A newer one is KRX032.</summary>
     public const int CurrentFormatVersion = 1;
@@ -34,15 +35,18 @@ internal static class ReferenceScan
     private const int MaxHandlerKind = (int)HandlerKind.Notification;
 
     /// <summary>
-    ///     The three scan requests, in this order (results are read by position): handler classes (<c>WithAttribute(KeryxHandler)</c>), global
-    ///     behaviors (<c>WithAttribute(GlobalBehavior)</c>), and non-abstract request, stream request and notification types. Each is pruned to
+    ///     The three scan requests, in this order (results are read by position): handler classes (<c>WithAttribute(KeryxHandler)</c>), behavior
+    ///     classes (any kind attribute; the transform keeps those with <c>[GlobalBehavior]</c> on the class or on a behavior method), and
+    ///     non-abstract request, stream request and notification types. Each is pruned to
     ///     the referenced assemblies that reference Keryx, without the host itself. Empty when the compilation is not a host.
     /// </summary>
     public static EquatableArray<ScanRequest> CreateRequests(Compilation compilation)
     {
         if (KeryxSymbols.Create(compilation) is not { IsHost: true } symbols
          || symbols.KeryxHandlerAttribute is not { } handlerAttribute
-         || symbols.GlobalBehaviorAttribute is not { } globalBehaviorAttribute)
+         || symbols.RequestBehaviorAttribute is not { } requestBehavior
+         || symbols.StreamBehaviorAttribute is not { } streamBehavior
+         || symbols.NotificationBehaviorAttribute is not { } notificationBehavior)
         {
             return EquatableArray<ScanRequest>.Empty;
         }
@@ -55,7 +59,11 @@ internal static class ReferenceScan
             ),
             ScanRequest.Build(
                 compilation,
-                s => s.FromAssemblies().DependenciesFromAssemblyOf(marker).NotFromAssembly(compilation.Assembly).GetTypes(f => f.WithAttribute(globalBehaviorAttribute))
+                s => s
+                    .FromAssemblies()
+                    .DependenciesFromAssemblyOf(marker)
+                    .NotFromAssembly(compilation.Assembly)
+                    .GetTypes(f => f.WithAnyAttribute(requestBehavior, streamBehavior, notificationBehavior))
             ),
             ScanRequest.Build(
                 compilation,
@@ -157,9 +165,11 @@ internal static class ReferenceScan
         var globals = ImmutableArray.CreateBuilder<KeryxTypeReference>();
         foreach (var scanned in globalTypes)
         {
-            if (scanned.IsAccessible && ScanSymbolNames.FindType(assembly, scanned.MetadataName) is { } type)
+            if (scanned.IsAccessible
+             && ScanSymbolNames.FindType(assembly, scanned.MetadataName) is { } type
+             && GlobalBehavior.Of(type, symbols) is not null)
             {
-                globals.Add(Reference(type.IsGenericType ? type.ConstructUnboundGenericType() : type));
+                globals.Add(Reference(type));
             }
         }
 

@@ -9,8 +9,9 @@ using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 namespace Keryx.Tests.Behaviors;
 
 /// <summary>
-///     Snapshots of generated request pipelines (ADR 0001, Generated pipeline shape; the Phase 4 brief): depths 0 to 8, each with its pipeline
-///     context, one flat link struct per behavior and the closed behavior registrations in <c>AddKeryx()</c>.
+///     Snapshots of generated request pipelines (ADR 0001, Generated pipeline shape): depths 0 to 8, each with its pipeline context holding
+///     the injected services of the behavior methods, one flat link struct per behavior, direct static calls with explicit type arguments,
+///     and no behavior registrations in <c>AddKeryx()</c>.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class PipelineGeneratorTests : HostTest
@@ -31,8 +32,9 @@ public class PipelineGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Verify(new { Mediator = Source(result, HostEmitter.MediatorHintName), AddKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName) })
-             .UseParameters(depth);
+        var addKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName);
+        await Assert.That(addKeryx).DoesNotContain("Step");
+        await Verify(new { Mediator = Source(result, HostEmitter.MediatorHintName), AddKeryx = addKeryx }).UseParameters(depth);
     }
 
     [Test]
@@ -60,27 +62,32 @@ public class PipelineGeneratorTests : HostTest
                                            public static partial class MaybeHandler { private static string? Handle(Maybe request) => null; }
                                            public static partial class MakeHandler { private static Reply Handle(Make request) => new() { Text = "" }; }
 
+                                           [RequestBehavior]
                                            [GlobalBehavior]
-                                           public sealed class Nested<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-                                               where TRequest : IRequest<TResponse>, Outer<TResponse>.IMarker
+                                           public static class Nested
                                            {
-                                               public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>, Outer<TResponse>.IMarker
                                                    where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
                                            }
 
+                                           [RequestBehavior]
                                            [GlobalBehavior]
-                                           public sealed class Eq<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-                                               where TRequest : IRequest<TResponse> where TResponse : IEquatable<TResponse>
+                                           public static class Eq
                                            {
-                                               public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TResponse : IEquatable<TResponse>
                                                    where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
                                            }
 
+                                           [RequestBehavior]
                                            [GlobalBehavior]
-                                           public sealed class Creates<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-                                               where TRequest : IRequest<TResponse> where TResponse : new()
+                                           public static class Creates
                                            {
-                                               public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TResponse : new()
                                                    where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
                                            }
                                            """
@@ -90,12 +97,89 @@ public class PipelineGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        var addKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName);
-        await Assert.That(addKeryx).Contains("global::Sample.Nested<global::Sample.Marked, string>");
-        await Assert.That(addKeryx).DoesNotContain("global::Sample.Nested<global::Sample.Unmarked, string>");
-        await Assert.That(addKeryx).Contains("global::Sample.Eq<global::Sample.Marked, string>");
-        await Assert.That(addKeryx).DoesNotContain("global::Sample.Eq<global::Sample.Maybe");
-        await Assert.That(addKeryx).DoesNotContain("global::Sample.Creates<");
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Sample.Nested.Handle<global::Sample.Marked, string, ");
+        await Assert.That(mediator).DoesNotContain("global::Sample.Nested.Handle<global::Sample.Unmarked, string, ");
+        await Assert.That(mediator).Contains("global::Sample.Eq.Handle<global::Sample.Marked, string, ");
+        await Assert.That(mediator).DoesNotContain("global::Sample.Eq.Handle<global::Sample.Maybe");
+        await Assert.That(mediator).DoesNotContain("global::Sample.Creates.");
+    }
+
+    [Test]
+    public async Task Should_Skip_Behaviors_The_Analyzer_Rejects_For_Reach_Or_An_Annotated_Response(CancellationToken cancellationToken)
+    {
+        // File-local behaviors (KRX016: generated code in another file cannot name them), attached, assembly and global; and open behaviors
+        // that carry 'TResponse?' in their message constraint or 'next' (KRX019), which used to reach generated code as CS8631 against
+        // a request that responds with string. None of them may appear in the mediator or the handler's manifest, and the host still
+        // compiles.
+        var result = await HostBuilder.AddSources(
+                                           Usings
+                                         + """
+                                           [assembly: KeryxHost]
+                                           [assembly: Behavior(typeof(Sample.FileLocalAssembly))]
+                                           [assembly: Behavior(typeof(Sample.AnnotatedConstraint))]
+
+                                           namespace Sample;
+
+                                           public sealed record Pong(string Text) : IRequest<string>;
+
+                                           public static partial class PongHandler
+                                           {
+                                               [Behavior(typeof(FileLocal))]
+                                               [Behavior(typeof(AnnotatedNext))]
+                                               private static string Handle(Pong request) => request.Text;
+                                           }
+
+                                           [RequestBehavior]
+                                           file static class FileLocal
+                                           {
+                                               public static ValueTask<string> Handle<TNext>(Pong request, TNext next) where TNext : struct, INext<string> => next.InvokeAsync(default);
+                                           }
+
+                                           [RequestBehavior]
+                                           [GlobalBehavior]
+                                           file static class FileLocalGlobal
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
+                                           }
+
+                                           [RequestBehavior]
+                                           file static class FileLocalAssembly
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
+                                           }
+
+                                           [RequestBehavior]
+                                           public static class AnnotatedConstraint
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse?>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [RequestBehavior]
+                                           [GlobalBehavior]
+                                           public static class AnnotatedNext
+                                           {
+                                               public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse?> => next.InvokeAsync(cancellationToken);
+                                           }
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
+        result.AssertCompilationWasSuccessful();
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("Send(global::Sample.Pong request");
+        await Assert.That(mediator).DoesNotContain("FileLocal");
+        await Assert.That(mediator).DoesNotContain("Annotated");
     }
 
     [Test]
@@ -110,10 +194,17 @@ public class PipelineGeneratorTests : HostTest
 
                                            public interface IAudit { void Write(string text); }
 
-                                           public sealed class Audit<TRequest, TResponse>(IAudit audit, [FromKeyedServices("retries")] int retries = 3)
-                                               : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+                                           [RequestBehavior]
+                                           public static class Audit
                                            {
-                                               public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(
+                                                   TRequest request,
+                                                   IAudit audit,
+                                                   TNext next,
+                                                   CancellationToken cancellationToken,
+                                                   [FromKeyedServices("retries")] int retries = 3
+                                               )
+                                                   where TRequest : IRequest<TResponse>
                                                    where TNext : struct, INext<TResponse>
                                                {
                                                    audit.Write(typeof(TRequest).Name + retries);
@@ -121,31 +212,31 @@ public class PipelineGeneratorTests : HostTest
                                                }
                                            }
 
-                                           public sealed class TickOnly : IRequestPipelineBehavior<Tick, int>
+                                           [RequestBehavior]
+                                           public static class TickOnly
                                            {
-                                               public ValueTask<int> Handle<TNext>(Tick request, TNext next, CancellationToken cancellationToken)
-                                                   where TNext : struct, INext<int> => next.InvokeAsync(cancellationToken);
+                                               public static ValueTask<int> HandleAsync<TNext>(TNext next, Tick request) where TNext : struct, INext<int> => next.InvokeAsync(default);
                                            }
 
                                            public readonly record struct Tick(int Value) : IRequest<int>;
                                            public static partial class TickHandler
                                            {
                                                [Behavior(typeof(TickOnly))]
-                                               [Behavior(typeof(Audit<,>))]
+                                               [Behavior(typeof(Audit))]
                                                private static int Handle(Tick request) => request.Value + 1;
                                            }
 
                                            public sealed record Touch : IRequest;
                                            public static partial class TouchHandler
                                            {
-                                               [Behavior(typeof(Audit<,>))]
+                                               [Behavior(typeof(Audit))]
                                                private static void Handle(Touch request) { }
                                            }
 
                                            public sealed record Find(string Key) : IRequest<string?>;
                                            public static partial class FindHandler
                                            {
-                                               [Behavior(typeof(Audit<,>))]
+                                               [Behavior(typeof(Audit))]
                                                private static string? Handle(Find request) => null;
                                            }
                                            """
@@ -159,21 +250,25 @@ public class PipelineGeneratorTests : HostTest
     }
 
     /// <summary>
-    ///     A host whose <c>Ping</c> handler has <paramref name="depth" /> behaviors: open behaviors <c>Step1</c> to <c>StepN</c>, ordered by
-    ///     <c>[BehaviorOrder(Phase.Default, Order = k)]</c> and attached in reverse order, so the snapshot also shows the sort.
+    ///     A host whose <c>Ping</c> handler has <paramref name="depth" /> behaviors: static behaviors <c>Step1</c> to <c>StepN</c> with open
+    ///     behavior methods, ordered by <c>[BehaviorOrder(Phase.Default, Order = k)]</c> and attached in reverse order, so the snapshot also
+    ///     shows the sort. The odd steps inject an <c>IClock</c>, which the pipeline context holds.
     /// </summary>
     internal static string Depth(int depth)
     {
         var builder = new StringBuilder("[assembly: KeryxHost]\n\nnamespace Sample;\n\npublic interface IClock { }\n\n");
         for (var k = 1; k <= depth; k++)
         {
+            var clock = k % 2 == 1 ? "IClock clock, " : "";
             builder.Append(
                 CultureInfo.InvariantCulture,
                 $$"""
+                  [RequestBehavior]
                   [BehaviorOrder(Phase.Default, Order = {{k}})]
-                  public sealed class Step{{k}}<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+                  public static class Step{{k}}
                   {
-                      public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                      public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, {{clock}}CancellationToken cancellationToken)
+                          where TRequest : IRequest<TResponse>
                           where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
                   }
 
@@ -185,7 +280,7 @@ public class PipelineGeneratorTests : HostTest
         builder.Append("public sealed record Ping(string Text) : IRequest<string>;\n\npublic partial class PingHandler\n{\n");
         for (var k = depth; k >= 1; k--)
         {
-            builder.Append(CultureInfo.InvariantCulture, $"    [Behavior(typeof(Step{k}<,>))]\n");
+            builder.Append(CultureInfo.InvariantCulture, $"    [Behavior(typeof(Step{k}))]\n");
         }
 
         builder.Append("    private static string Handle(Ping request, IClock clock) => request.Text;\n}\n");

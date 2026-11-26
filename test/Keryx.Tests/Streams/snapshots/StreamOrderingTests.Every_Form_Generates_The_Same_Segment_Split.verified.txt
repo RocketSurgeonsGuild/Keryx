@@ -1,7 +1,0 @@
-﻿/// <summary>The fused hook segment <c>Segment1</c>: <c>Sample.HObs</c> (outer to inner), over <c>Sample.WSec</c>.</summary>
-/// <summary>The <c>next</c> of <c>Sample.WSec</c>: the fused hook segment <c>Segment2</c>.</summary>
-/// <summary>The fused hook segment <c>Segment2</c>: <c>Sample.HValB</c> (outer to inner), over <c>Sample.WVal</c>.</summary>
-/// <summary>The <c>next</c> of <c>Sample.WVal</c>: the fused hook segment <c>Segment3</c>.</summary>
-/// <summary>The fused hook segment <c>Segment3</c>: <c>Sample.HVal1</c>, <c>Sample.HVal2</c>, <c>Sample.HDef2</c>, <c>Sample.HDef1</c> (outer to inner), over <c>Sample.WTx</c>.</summary>
-/// <summary>The <c>next</c> of <c>Sample.WTx</c>: the fused hook segment <c>Segment4</c>.</summary>
-/// <summary>The fused hook segment <c>Segment4</c>: <c>Sample.HInner</c> (outer to inner), over the handler.</summary>

@@ -4,14 +4,21 @@ namespace Keryx.Samples.Orders;
 
 /// <summary>
 ///     Logs every request, around everything else: a global behavior, so every host that references this library applies it to every
-///     request it composes (a host removes it with <c>[assembly: ExcludeBehavior(typeof(LoggingBehavior&lt;,&gt;))]</c>).
+///     request it composes (a host removes it with <c>[assembly: ExcludeBehavior(typeof(Logging))]</c>). The behavior method is open, and
+///     its activity log is injected once per scope into the generated pipeline context.
 /// </summary>
+[RequestBehavior]
 [GlobalBehavior]
 [BehaviorOrder(Phase.Observability)]
-public sealed class LoggingBehavior<TRequest, TResponse>(IActivityLog log) : IRequestPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+public static class Logging
 {
-    public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+    public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(
+        TRequest request,
+        TNext next,
+        IActivityLog log,
+        CancellationToken cancellationToken
+    )
+        where TRequest : IRequest<TResponse>
         where TNext : struct, INext<TResponse>
     {
         log.Write("-> " + typeof(TRequest).Name);
@@ -21,11 +28,14 @@ public sealed class LoggingBehavior<TRequest, TResponse>(IActivityLog log) : IRe
     }
 }
 
-/// <summary>Rejects an order without a positive quantity: a closed behavior, attached to the <see cref="PlaceOrder" /> handler only.</summary>
+/// <summary>
+///     Rejects an order without a positive quantity: a closed behavior method, attached to the <see cref="PlaceOrder" /> handler only.
+/// </summary>
+[RequestBehavior]
 [BehaviorOrder(Phase.Validation)]
-public sealed class ValidateQuantity : IRequestPipelineBehavior<PlaceOrder, int>
+public static class ValidateQuantity
 {
-    public ValueTask<int> Handle<TNext>(PlaceOrder request, TNext next, CancellationToken cancellationToken)
+    public static ValueTask<int> Handle<TNext>(PlaceOrder request, TNext next, CancellationToken cancellationToken)
         where TNext : struct, INext<int> =>
         request.Quantity > 0
             ? next.InvokeAsync(cancellationToken)

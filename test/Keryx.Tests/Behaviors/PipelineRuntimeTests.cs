@@ -7,16 +7,17 @@ namespace Keryx.Tests.Behaviors;
 /// <summary>
 ///     Compiles a host with behaviors and sends through it (ADR 0001, Behaviors): the three scopes and their de-duplication, constraint
 ///     matching for assembly and global behaviors, <c>ExcludeBehavior</c>, behaviors that call <c>next</c> twice or not at all, injected
-///     behavior constructors, and the same pipeline on the typed overload and the generic entry point.
+///     behavior method parameters resolved once per scope and pipeline, and the same pipeline on the typed overload and the generic entry
+///     point.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class PipelineRuntimeTests : HostTest
 {
     internal const string Source = """
         [assembly: KeryxHost]
-        [assembly: Behavior(typeof(Sample.AssemblyWide<,>))]
-        [assembly: Behavior(typeof(Sample.OnlyForCommands<,>))]
-        [assembly: ExcludeBehavior(typeof(Sample.Excluded<,>))]
+        [assembly: Behavior(typeof(Sample.AssemblyWide))]
+        [assembly: Behavior(typeof(Sample.OnlyForCommands))]
+        [assembly: ExcludeBehavior(typeof(Sample.Excluded))]
 
         namespace Sample;
 
@@ -47,10 +48,19 @@ public class PipelineRuntimeTests : HostTest
         public interface IGreeter { string Greet(string name); }
         public sealed class Greeter : IGreeter { public string Greet(string name) => "hello " + name; }
 
-        [BehaviorOrder(Phase.Outermost)]
-        public sealed class Outer<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        /// <summary>A transient service a behavior method injects: counts its instances.</summary>
+        public sealed class Counter
         {
-            public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static int Created;
+            public Counter() => Interlocked.Increment(ref Created);
+        }
+
+        [RequestBehavior]
+        [BehaviorOrder(Phase.Outermost)]
+        public static class Outer
+        {
+            public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write("outer>");
@@ -60,10 +70,12 @@ public class PipelineRuntimeTests : HostTest
             }
         }
 
+        [RequestBehavior]
         [BehaviorOrder(Phase.Observability)]
-        public sealed class AssemblyWide<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class AssemblyWide
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write("assembly");
@@ -71,12 +83,20 @@ public class PipelineRuntimeTests : HostTest
             }
         }
 
+        [RequestBehavior]
         [GlobalBehavior]
         [BehaviorOrder(Phase.Security)]
-        public sealed class GlobalAudit<TRequest, TResponse>(IGreeter greeter, [FromKeyedServices("suffix")] string suffix = "!")
-            : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class GlobalAudit
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(
+                IGreeter greeter,
+                TRequest request,
+                Counter counter,
+                TNext next,
+                CancellationToken cancellationToken,
+                [FromKeyedServices("suffix")] string suffix = "!"
+            )
+                where TRequest : IRequest<TResponse>
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write(greeter.Greet("global") + suffix);
@@ -85,11 +105,12 @@ public class PipelineRuntimeTests : HostTest
         }
 
         /// <summary>Applies only to commands: the assembly scope skips it silently for other requests.</summary>
+        [RequestBehavior]
         [BehaviorOrder(Phase.Validation)]
-        public sealed class OnlyForCommands<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-            where TRequest : IRequest<TResponse>, ICommand
+        public static class OnlyForCommands
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>, ICommand
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write("command");
@@ -98,10 +119,12 @@ public class PipelineRuntimeTests : HostTest
         }
 
         /// <summary>A global behavior the host excludes.</summary>
+        [RequestBehavior]
         [GlobalBehavior]
-        public sealed class Excluded<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class Excluded
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write("excluded");
@@ -110,10 +133,12 @@ public class PipelineRuntimeTests : HostTest
         }
 
         /// <summary>Calls the rest of the pipeline twice.</summary>
+        [RequestBehavior]
         [BehaviorOrder(Phase.Transaction)]
-        public sealed class Twice<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class Twice
         {
-            public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+            public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
                 where TNext : struct, INext<TResponse>
             {
                 Log.Write("twice");
@@ -123,10 +148,11 @@ public class PipelineRuntimeTests : HostTest
         }
 
         /// <summary>A closed behavior that never calls the rest of the pipeline.</summary>
+        [RequestBehavior]
         [BehaviorOrder(Phase.Caching)]
-        public sealed class FromCache : IRequestPipelineBehavior<Cached, string>
+        public static class FromCache
         {
-            public ValueTask<string> Handle<TNext>(Cached request, TNext next, CancellationToken cancellationToken)
+            public static ValueTask<string> Handle<TNext>(Cached request, TNext next, CancellationToken cancellationToken)
                 where TNext : struct, INext<string>
             {
                 Log.Write("cache hit");
@@ -137,9 +163,9 @@ public class PipelineRuntimeTests : HostTest
         public sealed record Ping(string Text) : IRequest<string>, ICommand;
         public partial class PingHandler
         {
-            [Behavior(typeof(Twice<,>))]
-            [Behavior(typeof(Outer<,>))]
-            [Behavior(typeof(GlobalAudit<,>))]
+            [Behavior(typeof(Twice))]
+            [Behavior(typeof(Outer))]
+            [Behavior(typeof(GlobalAudit))]
             private static string Handle(Ping request, IGreeter greeter)
             {
                 Log.Write("handler");
@@ -167,7 +193,7 @@ public class PipelineRuntimeTests : HostTest
         public readonly record struct Tick(int Value) : IRequest<int>, ICommand;
         public static partial class TickHandler
         {
-            [Behavior(typeof(Outer<,>))]
+            [Behavior(typeof(Outer))]
             private static int Handle(Tick request)
             {
                 Log.Write("handler");
@@ -178,7 +204,7 @@ public class PipelineRuntimeTests : HostTest
         public sealed record Touch : IRequest;
         public static partial class TouchHandler
         {
-            [Behavior(typeof(Outer<,>))]
+            [Behavior(typeof(Outer))]
             private static Task Handle(Touch request, CancellationToken cancellationToken)
             {
                 Log.Write("handler");
@@ -192,6 +218,7 @@ public class PipelineRuntimeTests : HostTest
             {
                 services.AddSingleton<IGreeter>(new Greeter());
                 services.AddKeyedSingleton<string>("suffix", "?");
+                services.AddTransient<Counter>();
             }
         }
         """;
@@ -260,43 +287,39 @@ public class PipelineRuntimeTests : HostTest
     }
 
     [Test]
-    public async Task Behaviors_Are_Resolved_Once_Per_Scope(CancellationToken cancellationToken)
+    public async Task Injected_Services_Are_Resolved_Once_Per_Scope_And_Pipeline(CancellationToken cancellationToken)
+    {
+        var (host, provider) = await StartAsync(cancellationToken);
+        await using var owner = provider;
+        var counter = host.GetType("Sample.Counter", throwOnError: true)!.GetField("Created")!;
+        var before = (int)counter.GetValue(null)!;
+
+        // GlobalAudit injects a transient Counter: the pipeline context resolves it once per scope and pipeline, never per call.
+        await using var first = provider.CreateAsyncScope();
+        var sender = first.ServiceProvider.GetRequiredService<ISender>();
+        _ = await sender.Send((IRequest<int>)Create(host, "Sample.Query", 1), cancellationToken);
+        _ = await sender.Send((IRequest<int>)Create(host, "Sample.Query", 2), cancellationToken);
+        await Assert.That((int)counter.GetValue(null)! - before).IsEqualTo(1);
+
+        _ = await sender.Send((IRequest<string>)Create(host, "Sample.Ping", "x"), cancellationToken);
+        await Assert.That((int)counter.GetValue(null)! - before).IsEqualTo(2);
+
+        await using var second = provider.CreateAsyncScope();
+        _ = await second.ServiceProvider.GetRequiredService<ISender>().Send((IRequest<int>)Create(host, "Sample.Query", 3), cancellationToken);
+        await Assert.That((int)counter.GetValue(null)! - before).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task AddKeryx_Registers_No_Behaviors(CancellationToken cancellationToken)
     {
         var (host, provider) = await StartAsync(cancellationToken);
         await using var _ = provider;
-        var behaviorType = host.GetType("Sample.GlobalAudit`2", throwOnError: true)!.MakeGenericType(host.GetType("Sample.Ping", throwOnError: true)!, typeof(string));
 
-        await using var first = provider.CreateAsyncScope();
-        await using var second = provider.CreateAsyncScope();
-        await Assert.That(first.ServiceProvider.GetRequiredService(behaviorType)).IsSameReferenceAs(first.ServiceProvider.GetRequiredService(behaviorType));
-        await Assert.That(first.ServiceProvider.GetRequiredService(behaviorType)).IsNotSameReferenceAs(second.ServiceProvider.GetRequiredService(behaviorType));
-
-        // AddKeryx() registers closed behaviors only, each with a factory; the excluded and the skipped closings are not registered.
+        // Behaviors are static: AddKeryx() registers the mediator and the handlers with injected parameters, nothing else.
         var services = new ServiceCollection();
         AddKeryx(host, services);
-        var registered = services.Select(static d => d.ServiceType).Where(static t => t.IsGenericType).Select(static t => t.Name + "[" + string.Join(",", t.GenericTypeArguments.Select(static a => a.Name)) + "]").Order(StringComparer.Ordinal).ToArray();
-        await Assert.That(registered)
-                    .IsEquivalentTo(
-                         [
-                             "AssemblyWide`2[Cached,String]",
-                             "AssemblyWide`2[Ping,String]",
-                             "AssemblyWide`2[Query,Int32]",
-                             "AssemblyWide`2[Tick,Int32]",
-                             "AssemblyWide`2[Touch,Unit]",
-                             "GlobalAudit`2[Cached,String]",
-                             "GlobalAudit`2[Ping,String]",
-                             "GlobalAudit`2[Query,Int32]",
-                             "GlobalAudit`2[Tick,Int32]",
-                             "GlobalAudit`2[Touch,Unit]",
-                             "OnlyForCommands`2[Ping,String]",
-                             "OnlyForCommands`2[Tick,Int32]",
-                             "Outer`2[Ping,String]",
-                             "Outer`2[Tick,Int32]",
-                             "Outer`2[Touch,Unit]",
-                             "Twice`2[Ping,String]",
-                         ],
-                         TUnit.Assertions.Enums.CollectionOrdering.Matching
-                     );
+        await Assert.That(services.Select(static d => d.ServiceType.Name).Order(StringComparer.Ordinal).ToArray())
+                    .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator", "PingHandler"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(services.All(static d => d.Lifetime == ServiceLifetime.Scoped && d.ImplementationType is null)).IsTrue();
     }
 

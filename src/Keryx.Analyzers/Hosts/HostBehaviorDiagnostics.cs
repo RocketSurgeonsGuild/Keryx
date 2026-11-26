@@ -7,7 +7,8 @@ namespace Keryx.Analyzers.Hosts;
 /// <summary>
 ///     KRX008 as the host checks it (ADR 0001, Ordering; Diagnostics): for behavior pairs in its composed pipelines where at least one
 ///     behavior is referenced (declared in another assembly). Pairs of behaviors declared in the host's own source are the analyzer's. Each
-///     pair is reported once, however many pipelines contain it.
+///     pair of behavior classes is reported once, however many pipelines contain it, and once per kind where a behavior method overrides its
+///     class's ordering.
 /// </summary>
 internal static class HostBehaviorDiagnostics
 {
@@ -30,7 +31,8 @@ internal static class HostBehaviorDiagnostics
                         // Normalised to (outer, inner), so the pair is reported once whichever side declares the edge: RunsAfter X puts X
                         // outside, RunsBefore X puts X inside.
                         var (outer, inner) = edge.Edge.RunsAfter ? (target, behavior) : (behavior, target);
-                        if (Compare(outer, inner) <= 0 || !reported.Add($"{outer.Definition}|{inner.Definition}"))
+                        var kind = KindText(behavior, target);
+                        if (Compare(outer, inner) <= 0 || !reported.Add($"{outer.Identity}|{inner.Identity}|{kind}"))
                         {
                             continue;
                         }
@@ -38,7 +40,7 @@ internal static class HostBehaviorDiagnostics
                         yield return new(
                             Descriptors.InvalidBehaviorOrdering,
                             edge.Location ?? settings.HostAttribute,
-                            new([Display(behavior.Identity), Contradiction(behavior, edge.Edge.RunsAfter, target)])
+                            new([Display(behavior.Identity), Contradiction(behavior, edge.Edge.RunsAfter, target, kind)])
                         );
                     }
                 }
@@ -47,9 +49,9 @@ internal static class HostBehaviorDiagnostics
 
         foreach (var cycle in composition.Cycles)
         {
-            // Keyed on the behavior classes, so the same cycle in pipelines of other closings is reported once.
+            // Keyed on the behavior classes, so the same cycle in pipelines of other targets is reported once.
             if (CycleDiagnostic(settings, cycle) is { } diagnostic
-             && reported.Add("cycle|" + string.Join("|", cycle.Select(static b => b.Definition).Order(StringComparer.Ordinal))))
+             && reported.Add("cycle|" + string.Join("|", cycle.Select(static b => b.Identity).Order(StringComparer.Ordinal)) + "|" + KindText([.. cycle])))
             {
                 yield return diagnostic;
             }
@@ -83,7 +85,7 @@ internal static class HostBehaviorDiagnostics
         return new(
             Descriptors.InvalidBehaviorOrdering,
             location ?? settings.HostAttribute,
-            new([Display(cycle[0].Identity), $"is part of a RunsAfter/RunsBefore cycle between {names}, so no order satisfies them"])
+            new([Display(cycle[0].Identity), BehaviorOrderingText.Cycle(names, KindText([.. cycle]))])
         );
     }
 
@@ -95,8 +97,15 @@ internal static class HostBehaviorDiagnostics
     }
 
     /// <summary>The KRX008 message for an edge that contradicts phase or order.</summary>
-    internal static string Contradiction(PipelineBehaviorModel behavior, bool runsAfter, PipelineBehaviorModel target) =>
-        BehaviorOrderingText.Contradiction(runsAfter, Display(target.Identity), (behavior.Phase, behavior.Order), (target.Phase, target.Order));
+    internal static string Contradiction(PipelineBehaviorModel behavior, bool runsAfter, PipelineBehaviorModel target, string? kind) =>
+        BehaviorOrderingText.Contradiction(runsAfter, Display(target.Identity), (behavior.Phase, behavior.Order), (target.Phase, target.Order), kind);
+
+    /// <summary>
+    ///     The kind a check is specific to, when a behavior method of one of the behaviors overrides its class's ordering; otherwise
+    ///     <see langword="null" />, and the check holds for every kind the classes share.
+    /// </summary>
+    private static string? KindText(params PipelineBehaviorModel[] behaviors) =>
+        behaviors.Any(static b => b.OrderOverridden) ? BehaviorShapes.KindName(behaviors[0].Kind) : null;
 
     private static string Display(string type) => type.Replace("global::", "");
 }

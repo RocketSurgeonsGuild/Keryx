@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -98,7 +99,9 @@ internal static class HandlerAnalysis
         if (method is not { MethodKind: MethodKind.Ordinary, Name: HandleName or HandleAsyncName, IsOverride: false, IsAbstract: false, IsGenericMethod: false }
          || !method.ExplicitInterfaceImplementations.IsEmpty
          || method.ContainingType is not { } containingType
-         || ImplementsInterfaceMember(method, containingType))
+         || ImplementsInterfaceMember(method, containingType)
+         // A Handle in a behavior class is a behavior method (or KRX019), never a handler.
+         || BehaviorShapes.IsBehaviorClass(containingType, symbols))
         {
             return false;
         }
@@ -273,13 +276,21 @@ internal static class HandlerAnalysis
             }
         }
 
-        if (symbols.BehaviorAttribute is { } behaviorAttribute)
+        // A notification handler has no behaviors of its own ([Behavior] there is KRX042), so only request and stream handlers attach any.
+        if (symbols.BehaviorAttribute is { } behaviorAttribute && signature is { MessageParameter: not null, Kind: not HandlerKind.Notification })
         {
+            var kind = signature.Kind == HandlerKind.Stream ? BehaviorKind.Stream : BehaviorKind.Request;
             foreach (var attribute in method.GetAttributes())
             {
                 if (KeryxSymbols.IsAttribute(attribute, behaviorAttribute)
-                 && attribute.ConstructorArguments is [{ Value: ITypeSymbol behaviorType }]
-                 && TypeAccessibility.Of(behaviorType) != AccessLevel.Public)
+                 && attribute.ConstructorArguments is [{ Value: INamedTypeSymbol behaviorType }]
+                 && behaviorType.TypeKind != TypeKind.Error
+                 && BehaviorShapes.IsBehaviorClass(behaviorType, symbols)
+                 && BehaviorShapes.NarrowerThan(
+                        behaviorType,
+                        BehaviorShapes.CandidateOfKind(behaviorType, kind, symbols),
+                        AccessLevel.Public
+                    ) is { } narrow)
                 {
                     issues.Add(
                         new(
@@ -287,7 +298,7 @@ internal static class HandlerAnalysis
                             AttributeLocation(attribute) ?? methodLocation,
                             true,
                             null,
-                            behaviorType.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                            narrow,
                             Descriptors.Public,
                             $"the handler '{methodName}' attaches it and this assembly is not a host"
                         )

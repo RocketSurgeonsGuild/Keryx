@@ -7,9 +7,10 @@ using static Keryx.Tests.Streams.StreamSources;
 namespace Keryx.Tests.Streams;
 
 /// <summary>
-///     The three scopes for both stream behavior kinds (ADR 0001, Three ways to attach a behavior): per target, <c>[assembly: Behavior]</c>
-///     and <c>[GlobalBehavior]</c>, de-duplicated by closed type, minus <c>ExcludeBehavior</c>; open generic wrap and hook behaviors
-///     substituted with <c>TRequest</c>/<c>TItem</c> and kept only where their constraints hold; request behaviors never applied to a stream.
+///     The three scopes for stream behaviors (ADR 0001, Three ways to attach a behavior): per target, <c>[assembly: Behavior]</c> and
+///     <c>[GlobalBehavior]</c> (on the class or only on the stream behavior method), de-duplicated by behavior class, minus
+///     <c>ExcludeBehavior</c>; open behavior methods matched with <c>TRequest</c>/<c>TItem</c> and kept only where their constraints hold;
+///     request behaviors never applied to a stream.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class StreamScopeTests : HostTest
@@ -17,32 +18,57 @@ public class StreamScopeTests : HostTest
     private static readonly string Source =
         "using System.Runtime.CompilerServices;\n\n"
       + "[assembly: KeryxHost]\n"
-      + "[assembly: Behavior(typeof(Sample.AsmWrap<,>))]\n"
-      + "[assembly: Behavior(typeof(Sample.AsmHook<,>))]\n"
-      + "[assembly: ExcludeBehavior(typeof(Sample.Excluded<,>))]\n\n"
+      + "[assembly: Behavior(typeof(Sample.AsmWrap))]\n"
+      + "[assembly: Behavior(typeof(Sample.AsmAudit))]\n"
+      + "[assembly: ExcludeBehavior(typeof(Sample.Excluded))]\n\n"
       + "namespace Sample;\n\n"
       + "public interface IAudited { }\n\n"
       + Support
-      // Per assembly: a wrap behavior only for value-type items, a hook only for audited requests.
+      // Per assembly: one only for value-type items, one only for audited requests.
       + Wrap("AsmWrap", 5, constraints: " where TItem : struct")
-      + Hook("AsmHook", 20, constraints: ", IAudited")
-      // Global: a wrap behavior only for reference-type items, a wrap behavior only for audited requests, a hook for every stream
-      // request, a hook only for reference-type items, and one the host excludes.
+      + Wrap("AsmAudit", 20, constraints: ", IAudited")
+      // Global: one only for audited requests, one only for reference-type items, one for every stream request, and one the host excludes.
       + Wrap("AuditWrap", 4, "[GlobalBehavior]", ", IAudited")
       + Wrap("GlobalWrap", 6, "[GlobalBehavior]", " where TItem : class")
-      + Hook("GlobalHook", 10, "[GlobalBehavior]")
-      + Hook("RefHook", 15, "[GlobalBehavior]", " where TItem : class")
-      + Hook("Excluded", 25, "[GlobalBehavior]")
+      + Wrap("Everywhere", 10, "[GlobalBehavior]")
+      + Wrap("Excluded", 25, "[GlobalBehavior]")
       // Per target.
-      + Hook("TargetHook", 30)
+      + Wrap("Target", 30)
       + """
         /// <summary>A global request behavior: never applied to a stream request.</summary>
+        [RequestBehavior]
         [GlobalBehavior]
-        public sealed class RequestOnly<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class RequestOnly
         {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
             {
                 Log.Write("request behavior");
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        /// <summary>A request behavior class whose stream behavior method alone is global.</summary>
+        [RequestBehavior]
+        [StreamBehavior]
+        [BehaviorOrder(Phase.Default, Order = 40)]
+        public static class StreamOnlyGlobal
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Log.Write("never");
+                return next.InvokeAsync(cancellationToken);
+            }
+
+            [GlobalBehavior]
+            public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem>
+            {
+                Log.Write("method global");
                 return next.InvokeAsync(cancellationToken);
             }
         }
@@ -50,8 +76,8 @@ public class StreamScopeTests : HostTest
         public sealed record AuditedInts(int Count) : IStreamRequest<int>, IAudited;
         public static partial class AuditedIntsHandler
         {
-            [Behavior(typeof(GlobalHook<,>))]
-            [Behavior(typeof(TargetHook<,>))]
+            [Behavior(typeof(Everywhere))]
+            [Behavior(typeof(Target))]
             private static IAsyncEnumerable<int> Handle(AuditedInts request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
@@ -81,38 +107,34 @@ public class StreamScopeTests : HostTest
         var sender = scope.ServiceProvider.GetRequiredService<ISender>();
         _ = TakeLog(host);
 
-        // AuditWrap (audited), AsmWrap (int items), GlobalHook (once, although also attached to the method), AsmHook (audited), TargetHook;
-        // not GlobalWrap or RefHook (int is not a class), not Excluded, not the request behavior.
+        // AuditWrap (audited), AsmWrap (int items), Everywhere (once, although also attached to the method), AsmAudit (audited), Target and
+        // the method-only global; not GlobalWrap (int is not a class), not Excluded, not the request behaviors.
         _ = await ConsumeAsync(sender.Stream((IStreamRequest<int>)Create(host, "Sample.AuditedInts", 1), cancellationToken), cancellationToken);
         await Assert.That(TakeLog(host))
                     .IsEquivalentTo(
                          [
-                             "AuditWrap>", "AsmWrap>", "GlobalHook.start", "AsmHook.start", "TargetHook.start", "handler>", "TargetHook.item 1",
-                             "AsmHook.item 1", "GlobalHook.item 1", "<handler", "TargetHook.complete", "AsmHook.complete", "GlobalHook.complete",
-                             "<AsmWrap", "<AuditWrap",
+                             "AuditWrap>", "AsmWrap>", "Everywhere>", "AsmAudit>", "Target>", "method global", "handler>", "<handler", "<Target",
+                             "<AsmAudit", "<Everywhere", "<AsmWrap", "<AuditWrap",
                          ],
                          CollectionOrdering.Matching
                      );
 
-        // Not audited: no AuditWrap, no AsmHook.
+        // Not audited: no AuditWrap, no AsmAudit.
         _ = await ConsumeAsync(sender.Stream((IStreamRequest<int>)Create(host, "Sample.PlainInts", 1), cancellationToken), cancellationToken);
         await Assert.That(TakeLog(host))
-                    .IsEquivalentTo(["AsmWrap>", "GlobalHook.start", "handler>", "GlobalHook.item 1", "<handler", "GlobalHook.complete", "<AsmWrap"], CollectionOrdering.Matching);
+                    .IsEquivalentTo(["AsmWrap>", "Everywhere>", "method global", "handler>", "<handler", "<Everywhere", "<AsmWrap"], CollectionOrdering.Matching);
 
-        // Audited, with string items: AuditWrap, GlobalWrap instead of AsmWrap, and RefHook.
+        // Audited, with string items: AuditWrap, GlobalWrap instead of AsmWrap.
         _ = await ConsumeAsync(sender.Stream((IStreamRequest<string>)Create(host, "Sample.Words"), cancellationToken), cancellationToken);
         await Assert.That(TakeLog(host))
                     .IsEquivalentTo(
-                         [
-                             "AuditWrap>", "GlobalWrap>", "GlobalHook.start", "RefHook.start", "AsmHook.start", "AsmHook.item w", "RefHook.item w",
-                             "GlobalHook.item w", "AsmHook.complete", "RefHook.complete", "GlobalHook.complete", "<GlobalWrap", "<AuditWrap",
-                         ],
+                         ["AuditWrap>", "GlobalWrap>", "Everywhere>", "AsmAudit>", "method global", "<AsmAudit", "<Everywhere", "<GlobalWrap", "<AuditWrap"],
                          CollectionOrdering.Matching
                      );
     }
 
     [Test]
-    public async Task AddKeryx_Registers_The_Closed_Stream_Behaviors_The_Pipelines_Use(CancellationToken cancellationToken)
+    public async Task The_Exclusion_Is_Used_And_AddKeryx_Registers_No_Stream_Behaviors(CancellationToken cancellationToken)
     {
         var result = await HostBuilder.AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
         result.AssertCompilationWasSuccessful();
@@ -122,28 +144,7 @@ public class StreamScopeTests : HostTest
 
         var services = new ServiceCollection();
         AddKeryx(result.Assembly!, services);
-        var registered = services.Select(static d => d.ServiceType)
-                                 .Where(static t => t.IsGenericType)
-                                 .Select(static t => t.Name + "[" + string.Join(",", t.GenericTypeArguments.Select(static a => a.Name)) + "]")
-                                 .Order(StringComparer.Ordinal)
-                                 .ToArray();
-        await Assert.That(registered)
-                    .IsEquivalentTo(
-                         [
-                             "AsmHook`2[AuditedInts,Int32]",
-                             "AsmHook`2[Words,String]",
-                             "AsmWrap`2[AuditedInts,Int32]",
-                             "AsmWrap`2[PlainInts,Int32]",
-                             "AuditWrap`2[AuditedInts,Int32]",
-                             "AuditWrap`2[Words,String]",
-                             "GlobalHook`2[AuditedInts,Int32]",
-                             "GlobalHook`2[PlainInts,Int32]",
-                             "GlobalHook`2[Words,String]",
-                             "GlobalWrap`2[Words,String]",
-                             "RefHook`2[Words,String]",
-                             "TargetHook`2[AuditedInts,Int32]",
-                         ],
-                         CollectionOrdering.Matching
-                     );
+        await Assert.That(services.Select(static d => d.ServiceType.Name).Order(StringComparer.Ordinal).ToArray())
+                    .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator"], CollectionOrdering.Matching);
     }
 }

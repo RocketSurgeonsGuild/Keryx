@@ -24,11 +24,13 @@ public abstract class AnalyzerTest : GeneratorTest
     protected async Task<ImmutableArray<Diagnostic>> AnalyzeAsync<TAnalyzer>(
         string source,
         CancellationToken cancellationToken,
-        LanguageVersion languageVersion = LanguageVersion.Latest
+        LanguageVersion languageVersion = LanguageVersion.Latest,
+        string? projectName = null
     )
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
-        var result = await Builder
+        var builder = projectName is null ? Builder : Builder.WithProjectName(projectName);
+        var result = await builder
                           .WithLanguageVersion(languageVersion)
                           .WithAnalyzer<TAnalyzer>()
                           .AddSources(Usings + source)

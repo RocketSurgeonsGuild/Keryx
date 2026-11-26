@@ -4,8 +4,9 @@ namespace Keryx.Benchmarks.Prototype;
 
 // The Phase 4 gate (ADR 0001, Phase 4 gate): a hand-written struct pipeline in exactly the shape the host generator emits for a request
 // with behaviors, measured against a hand-written nested-call baseline that does the same work. Pipeline: a sealed pipeline context created
-// lazily once per scope, holding the closed behavior instances; one flat readonly link struct per position, holding the context and the
-// request; each behavior's Handle<TNext> called on its concrete closed type; the last link calls the handler's static InvokeAsync.
+// lazily once per scope, holding the handler and the injected services of the behavior methods; one flat readonly link struct per position,
+// holding the context and the request; each static behavior method called directly with explicit type arguments (no behavior instance, no
+// interface); the last link calls the handler's InvokeAsync.
 
 /// <summary>The request every prototype pipeline sends.</summary>
 public sealed record Ping(int Value) : IRequest<int>;
@@ -19,100 +20,106 @@ public sealed class PingHandler
     public ValueTask<int> InvokeAsync(Ping request, CancellationToken cancellationToken) => new(request.Value * 2);
 }
 
-// Eight distinct open behaviors, closed over (Ping, int) in the pipeline, as AuditBehavior<TRequest, TResponse> would be. Each does the
-// same small piece of work (count the call) and passes the request on, synchronously.
-
-public sealed class Behavior1<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+/// <summary>The service each prototype behavior method injects: it counts the calls, the work the nested-call baseline does too.</summary>
+public sealed class CallCounter
 {
     public int Calls;
+}
 
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+// Eight distinct static request behaviors with open behavior methods, called with (Ping, int) in the pipeline, as an Audit behavior would be.
+// Each does the same small piece of work (count the call on its injected counter) and passes the request on, synchronously.
+
+public static class Behavior1
+{
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior2<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior2
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior3<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior3
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior4<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior4
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior5<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior5
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior6<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior6
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior7<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior7
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
-public sealed class Behavior8<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+public static class Behavior8
 {
-    public int Calls;
-
-    public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+    public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CallCounter counter, CancellationToken cancellationToken)
+        where TRequest : IRequest<TResponse>
+        where TNext : struct, INext<TResponse>
     {
-        Calls++;
+        counter.Calls++;
         return next.InvokeAsync(cancellationToken);
     }
 }
 
 /// <summary>
 ///     The prototype mediator: one lazily created pipeline context per depth, as the generated <c>KeryxMediator</c> holds one per request
-///     type. Behaviors are constructed directly here; the generated context resolves them from the scope.
+///     type. The injected services are constructed directly here; the generated context resolves them from the scope.
 /// </summary>
 public sealed class PrototypeMediator
 {
@@ -123,19 +130,19 @@ public sealed class PrototypeMediator
     public ValueTask<int> SendDepth1(Ping request, CancellationToken cancellationToken)
     {
         var context = Volatile.Read(ref _depth1) ?? CreateDepth1();
-        return context.Behavior1.Handle(request, new Depth1Context.Link1(context, request), cancellationToken);
+        return Behavior1.Handle<Ping, int, Depth1Context.Link1>(request, new Depth1Context.Link1(context, request), context.Behavior1Service0, cancellationToken);
     }
 
     public ValueTask<int> SendDepth3(Ping request, CancellationToken cancellationToken)
     {
         var context = Volatile.Read(ref _depth3) ?? CreateDepth3();
-        return context.Behavior1.Handle(request, new Depth3Context.Link1(context, request), cancellationToken);
+        return Behavior1.Handle<Ping, int, Depth3Context.Link1>(request, new Depth3Context.Link1(context, request), context.Behavior1Service0, cancellationToken);
     }
 
     public ValueTask<int> SendDepth8(Ping request, CancellationToken cancellationToken)
     {
         var context = Volatile.Read(ref _depth8) ?? CreateDepth8();
-        return context.Behavior1.Handle(request, new Depth8Context.Link1(context, request), cancellationToken);
+        return Behavior1.Handle<Ping, int, Depth8Context.Link1>(request, new Depth8Context.Link1(context, request), context.Behavior1Service0, cancellationToken);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -150,7 +157,7 @@ public sealed class PrototypeMediator
     private sealed class Depth1Context
     {
         public readonly PingHandler Handler = new();
-        public readonly Behavior1<Ping, int> Behavior1 = new();
+        public readonly CallCounter Behavior1Service0 = new();
 
         public readonly struct Link1(Depth1Context context, Ping request) : INext<int>
         {
@@ -165,9 +172,9 @@ public sealed class PrototypeMediator
     private sealed class Depth3Context
     {
         public readonly PingHandler Handler = new();
-        public readonly Behavior1<Ping, int> Behavior1 = new();
-        public readonly Behavior2<Ping, int> Behavior2 = new();
-        public readonly Behavior3<Ping, int> Behavior3 = new();
+        public readonly CallCounter Behavior1Service0 = new();
+        public readonly CallCounter Behavior2Service0 = new();
+        public readonly CallCounter Behavior3Service0 = new();
 
         public readonly struct Link1(Depth3Context context, Ping request) : INext<int>
         {
@@ -175,7 +182,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior2.Handle(_request, new Link2(_context, _request), cancellationToken);
+                Behavior2.Handle<Ping, int, Link2>(_request, new Link2(_context, _request), _context.Behavior2Service0, cancellationToken);
         }
 
         public readonly struct Link2(Depth3Context context, Ping request) : INext<int>
@@ -184,7 +191,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior3.Handle(_request, new Link3(_context, _request), cancellationToken);
+                Behavior3.Handle<Ping, int, Link3>(_request, new Link3(_context, _request), _context.Behavior3Service0, cancellationToken);
         }
 
         public readonly struct Link3(Depth3Context context, Ping request) : INext<int>
@@ -200,14 +207,14 @@ public sealed class PrototypeMediator
     private sealed class Depth8Context
     {
         public readonly PingHandler Handler = new();
-        public readonly Behavior1<Ping, int> Behavior1 = new();
-        public readonly Behavior2<Ping, int> Behavior2 = new();
-        public readonly Behavior3<Ping, int> Behavior3 = new();
-        public readonly Behavior4<Ping, int> Behavior4 = new();
-        public readonly Behavior5<Ping, int> Behavior5 = new();
-        public readonly Behavior6<Ping, int> Behavior6 = new();
-        public readonly Behavior7<Ping, int> Behavior7 = new();
-        public readonly Behavior8<Ping, int> Behavior8 = new();
+        public readonly CallCounter Behavior1Service0 = new();
+        public readonly CallCounter Behavior2Service0 = new();
+        public readonly CallCounter Behavior3Service0 = new();
+        public readonly CallCounter Behavior4Service0 = new();
+        public readonly CallCounter Behavior5Service0 = new();
+        public readonly CallCounter Behavior6Service0 = new();
+        public readonly CallCounter Behavior7Service0 = new();
+        public readonly CallCounter Behavior8Service0 = new();
 
         public readonly struct Link1(Depth8Context context, Ping request) : INext<int>
         {
@@ -215,7 +222,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior2.Handle(_request, new Link2(_context, _request), cancellationToken);
+                Behavior2.Handle<Ping, int, Link2>(_request, new Link2(_context, _request), _context.Behavior2Service0, cancellationToken);
         }
 
         public readonly struct Link2(Depth8Context context, Ping request) : INext<int>
@@ -224,7 +231,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior3.Handle(_request, new Link3(_context, _request), cancellationToken);
+                Behavior3.Handle<Ping, int, Link3>(_request, new Link3(_context, _request), _context.Behavior3Service0, cancellationToken);
         }
 
         public readonly struct Link3(Depth8Context context, Ping request) : INext<int>
@@ -233,7 +240,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior4.Handle(_request, new Link4(_context, _request), cancellationToken);
+                Behavior4.Handle<Ping, int, Link4>(_request, new Link4(_context, _request), _context.Behavior4Service0, cancellationToken);
         }
 
         public readonly struct Link4(Depth8Context context, Ping request) : INext<int>
@@ -242,7 +249,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior5.Handle(_request, new Link5(_context, _request), cancellationToken);
+                Behavior5.Handle<Ping, int, Link5>(_request, new Link5(_context, _request), _context.Behavior5Service0, cancellationToken);
         }
 
         public readonly struct Link5(Depth8Context context, Ping request) : INext<int>
@@ -251,7 +258,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior6.Handle(_request, new Link6(_context, _request), cancellationToken);
+                Behavior6.Handle<Ping, int, Link6>(_request, new Link6(_context, _request), _context.Behavior6Service0, cancellationToken);
         }
 
         public readonly struct Link6(Depth8Context context, Ping request) : INext<int>
@@ -260,7 +267,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior7.Handle(_request, new Link7(_context, _request), cancellationToken);
+                Behavior7.Handle<Ping, int, Link7>(_request, new Link7(_context, _request), _context.Behavior7Service0, cancellationToken);
         }
 
         public readonly struct Link7(Depth8Context context, Ping request) : INext<int>
@@ -269,7 +276,7 @@ public sealed class PrototypeMediator
             private readonly Ping _request = request;
 
             public ValueTask<int> InvokeAsync(CancellationToken cancellationToken) =>
-                _context.Behavior8.Handle(_request, new Link8(_context, _request), cancellationToken);
+                Behavior8.Handle<Ping, int, Link8>(_request, new Link8(_context, _request), _context.Behavior8Service0, cancellationToken);
         }
 
         public readonly struct Link8(Depth8Context context, Ping request) : INext<int>

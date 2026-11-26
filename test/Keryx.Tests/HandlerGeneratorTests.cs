@@ -310,67 +310,51 @@ public class HandlerGeneratorTests : GeneratorTest
     [Test]
     public async Task Should_List_Attached_Behaviors_In_The_Manifest(CancellationToken cancellationToken)
     {
+        // A request handler's attached behavior classes go into KeryxHandler.Behaviors; a notification handler has no behaviors of its own,
+        // so its [Behavior] (KRX042) is not listed.
         var result = await Generate(
             """
             namespace Sample;
 
             public sealed record Ping : IRequest<string>;
+            public sealed record Placed : INotification;
 
-            public sealed class AuditBehavior<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-                where TRequest : IRequest<TResponse>
+            [RequestBehavior]
+            [NotificationBehavior]
+            public static class Audit
             {
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
                     where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                    where TNotification : INotification
+                    where TNext : struct, INext => next.InvokeAsync(cancellationToken);
             }
 
-            public sealed class PingBehavior : IRequestPipelineBehavior<Ping, string>
+            [RequestBehavior]
+            public static class PingBehavior
             {
-                public ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken)
+                public static ValueTask<string> Handle<TNext>(Ping request, TNext next, CancellationToken cancellationToken)
                     where TNext : struct, INext<string> => next.InvokeAsync(cancellationToken);
             }
 
             public static partial class PingHandler
             {
-                [Behavior(typeof(AuditBehavior<,>))]
+                [Behavior(typeof(Audit))]
                 [Behavior(typeof(PingBehavior))]
                 private static string Handle(Ping request) => "pong";
             }
-            """,
-            cancellationToken
-        );
 
-        await Verify(result);
-    }
-
-    [Test]
-    public async Task Should_Compile_A_Closed_Generic_Behavior_Over_A_Nullable_Response(CancellationToken cancellationToken)
-    {
-        // typeof drops nullable annotations, so the manifest line would name Tag<Ping, string> against a constraint that needs
-        // IRequest<string?> (CS8631, an error); the manifest attribute is written with nullable annotations disabled.
-        var result = await Generate(
-            """
-            namespace Sample;
-
-            public sealed record Ping : IRequest<string?>;
-
-            public sealed class Tag<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
-                where TRequest : IRequest<TResponse>
+            public static partial class PlacedHandler
             {
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
-                    where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
-            }
-
-            public static partial class PingHandler
-            {
-                [Behavior(typeof(Tag<Ping, string?>))]
-                private static string? Handle(Ping request) => null;
+                [Behavior(typeof(Audit))]
+                private static ValueTask Handle(Placed notification) => default;
             }
             """,
             cancellationToken
         );
 
-        result.AssertCompilationWasSuccessful();
-        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         await Verify(result);
     }
 

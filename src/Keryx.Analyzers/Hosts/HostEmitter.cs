@@ -8,7 +8,8 @@ namespace Keryx.Analyzers.Hosts;
 /// <summary>
 ///     Writes the host's generated types (ADR 0001, Generated host): the scoped <c>KeryxMediator</c> with its typed overloads, generic
 ///     exact-type dispatch (runtime-type dispatch for notifications), lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
-///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers and closed behaviors.
+///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
+///     their behavior methods directly, and the pipeline contexts resolve their injected services.
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -170,8 +171,8 @@ internal static partial class HostEmitter
         writer.Open();
         writer.Line("/// <summary>");
         writer.Line("///     Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,");
-        writer.Line("///     <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), every handler");
-        writer.Line("///     class that has injected parameters and every closed behavior a pipeline uses, all scoped and with generated factories.");
+        writer.Line("///     <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), and every");
+        writer.Line("///     handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.");
         writer.Line("///     Registrations that already exist are kept, so a second call does nothing.");
         writer.Line("/// </summary>");
         writer.Line("/// <param name=\"services\">The service collection.</param>");
@@ -190,11 +191,6 @@ internal static partial class HostEmitter
         foreach (var handler in composition.ConstructedHandlers)
         {
             WriteFactory(writer, handler.HandlerClass, handler.Services);
-        }
-
-        foreach (var behavior in composition.Behaviors)
-        {
-            WriteFactory(writer, behavior.Type, behavior.Services);
         }
 
         writer.Line("return services;");
@@ -363,7 +359,7 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     The pipeline of one request, without checks: the typed overload and generic dispatch both call it. Without behaviors it calls the
-    ///     handler's invoker; with behaviors it calls the outermost behavior's <c>Handle</c> on its concrete type, with the first link.
+    ///     handler's invoker; with behaviors it calls the outermost behavior method directly, with explicit type arguments and the first link.
     /// </summary>
     private static void WriteCore(CodeWriter writer, HostPipeline pipeline, int index)
     {
@@ -381,7 +377,7 @@ internal static partial class HostEmitter
             writer.Line(signature);
             writer.Open();
             writer.Line($"var pipeline = {context};");
-            writer.Line($"return pipeline.{BehaviorField(0)}.Handle<{ContextName(index)}.{LinkName(0)}>(request, new(pipeline, request), cancellationToken);");
+            writer.Line($"return {BehaviorCall(pipeline.Behaviors[0], 0, ContextName(index) + "." + LinkName(0), "pipeline", "request")};");
             writer.Close();
         }
 
@@ -400,17 +396,16 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The pipeline context of one request: its handler (unless the invoker is static) and its behaviors, resolved once per scope, and one
-    ///     flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the <c>next</c> of behavior <c>k</c>: it calls
-    ///     behavior <c>k + 1</c> on its concrete type with <c>Link{k + 1}</c>, and the last link calls the handler's invoker. Each link holds the
-    ///     context and the request, whatever the depth; the token is an argument, never stored.
+    ///     The pipeline context of one request: its handler (unless the invoker is static) and the injected services of its behavior methods,
+    ///     resolved once per scope, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
+    ///     <c>next</c> of behavior <c>k</c>: it calls behavior <c>k + 1</c>'s method with <c>Link{k + 1}</c>, and the last link calls the
+    ///     handler's invoker. Each link holds the context and the request, whatever the depth; the token is an argument, never stored.
     /// </summary>
     private static void WriteContext(CodeWriter writer, HostPipeline pipeline, int index)
     {
         var request = pipeline.Handler;
         var behaviors = pipeline.Behaviors;
-        var holds = request.StaticInvoker ? "its behaviors" : behaviors.IsEmpty ? "its handler" : "its handler and behaviors";
-        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: {holds}, resolved once per scope.</summary>");
+        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request, behaviors)}, resolved once per scope.</summary>");
         writer.Line($"private sealed class {ContextName(index)}");
         writer.Open();
         if (!request.StaticInvoker)
@@ -418,11 +413,7 @@ internal static partial class HostEmitter
             writer.Line($"public readonly {request.HandlerClass} Handler;");
         }
 
-        for (var k = 0; k < behaviors.Length; k++)
-        {
-            writer.Line($"public readonly {behaviors[k].Type} {BehaviorField(k)};");
-        }
-
+        WriteServiceFields(writer, behaviors);
         writer.Line();
         writer.Line($"public {ContextName(index)}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -431,11 +422,7 @@ internal static partial class HostEmitter
             writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
         }
 
-        for (var k = 0; k < behaviors.Length; k++)
-        {
-            writer.Line($"{BehaviorField(k)} = {ServiceProviderExtensions}.GetRequiredService<{behaviors[k].Type}>({ServiceProviderName});");
-        }
-
+        WriteServiceResolution(writer, behaviors);
         writer.Close();
 
         for (var k = 0; k < behaviors.Length; k++)
@@ -482,7 +469,7 @@ internal static partial class HostEmitter
         writer.Line($"public {ValueTask}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
         if (!isLast)
         {
-            writer.Line($"    _pipeline.{BehaviorField(position + 1)}.Handle<{LinkName(position + 1)}>(_request, new(_pipeline, _request), cancellationToken);");
+            writer.Line($"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_request")};");
         }
         else if (request.StaticInvoker)
         {
@@ -494,6 +481,76 @@ internal static partial class HostEmitter
         }
 
         writer.Close();
+    }
+
+    /// <summary>
+    ///     The direct call of the behavior method at <paramref name="position" /> (ADR 0001, Behavior methods): the class's static method with
+    ///     explicit type arguments (<paramref name="link" /> in place of <c>TNext</c>) and the arguments in declared order: the message, a new
+    ///     <paramref name="link" /> over the context and the message, the call's token, and its injected services read from the context.
+    /// </summary>
+    /// <param name="behavior">The behavior.</param>
+    /// <param name="position">Its position in the pipeline, which names its service fields.</param>
+    /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
+    /// <param name="context">The pipeline context expression.</param>
+    /// <param name="message">The request or notification expression.</param>
+    private static string BehaviorCall(PipelineBehaviorModel behavior, int position, string link, string context, string message)
+    {
+        var typeArguments = string.Join(", ", behavior.TypeArguments.Select(t => t.Length == 0 ? link : t));
+        var arguments = new List<string>(behavior.Parameters.Count);
+        var service = 0;
+        foreach (var role in behavior.Parameters)
+        {
+            arguments.Add(
+                role switch
+                {
+                    BehaviorParameterRole.Message => message,
+                    BehaviorParameterRole.Next => $"new {link}({context}, {message})",
+                    BehaviorParameterRole.CancellationToken => "cancellationToken",
+                    BehaviorParameterRole.Service => $"{context}.{ServiceField(position, service++)}",
+                    _ => "default",
+                }
+            );
+        }
+
+        return $"{behavior.Class}.{behavior.Method}<{typeArguments}>({string.Join(", ", arguments)})";
+    }
+
+    /// <summary>What a pipeline context holds, for its documentation.</summary>
+    private static string Holds(HostHandlerModel handler, ImmutableArray<PipelineBehaviorModel> behaviors)
+    {
+        var services = behaviors.Any(static b => b.Services.Count > 0);
+        return (handler.StaticInvoker, services) switch
+        {
+            (false, true) => "its handler and the injected services of its behaviors",
+            (false, false) => "its handler",
+            (true, true) => "the injected services of its behaviors",
+            (true, false) => "nothing but its links",
+        };
+    }
+
+    /// <summary>One field per injected service of each behavior method, in pipeline and declared order.</summary>
+    private static void WriteServiceFields(CodeWriter writer, ImmutableArray<PipelineBehaviorModel> behaviors)
+    {
+        for (var k = 0; k < behaviors.Length; k++)
+        {
+            for (var j = 0; j < behaviors[k].Services.Count; j++)
+            {
+                writer.Line($"public readonly {behaviors[k].Services[j].Type} {ServiceField(k, j)};");
+            }
+        }
+    }
+
+    /// <summary>Resolves each injected service of each behavior method from the scope, in pipeline and declared order.</summary>
+    private static void WriteServiceResolution(CodeWriter writer, ImmutableArray<PipelineBehaviorModel> behaviors)
+    {
+        var variable = 0;
+        for (var k = 0; k < behaviors.Length; k++)
+        {
+            for (var j = 0; j < behaviors[k].Services.Count; j++)
+            {
+                writer.Line($"{ServiceField(k, j)} = {Resolve(behaviors[k].Services[j], variable++)};");
+            }
+        }
     }
 
     private static void WriteFactory(CodeWriter writer, string type, Specular.Scanning.EquatableArray<ServiceParameterModel> services)
@@ -565,7 +622,8 @@ internal static partial class HostEmitter
 
     private static bool NeedsContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || !pipeline.Behaviors.IsEmpty;
 
-    private static string BehaviorField(int position) => "Behavior" + Number(position + 1);
+    /// <summary>The context field of injected service <paramref name="service" /> of the behavior at <paramref name="position" />.</summary>
+    private static string ServiceField(int position, int service) => "Behavior" + Number(position + 1) + "Service" + Number(service);
 
     private static string LinkName(int position) => "Link" + Number(position + 1);
 
@@ -602,24 +660,21 @@ internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<Pip
 ///     notification type.
 /// </param>
 /// <param name="ConstructedHandlers">The handler classes with injected parameters, ordered by class, each once.</param>
-/// <param name="Behaviors">Every closed behavior a pipeline uses, ordered by closed type, each once.</param>
 /// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
 internal sealed record HostComposition(
     ImmutableArray<HostPipeline> Requests,
     ImmutableArray<HostPipeline> Streams,
     ImmutableArray<NotificationPipeline> Notifications,
     ImmutableArray<HostHandlerModel> ConstructedHandlers,
-    ImmutableArray<PipelineBehaviorModel> Behaviors,
     ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
 )
 {
-    /// <summary>Every sorted behavior list of every pipeline: requests, streams, per-publish and per-handler notification pipelines.</summary>
+    /// <summary>Every sorted behavior list of every pipeline: requests, streams and publishes.</summary>
     public IEnumerable<ImmutableArray<PipelineBehaviorModel>> BehaviorLists =>
         Requests
            .Concat(Streams)
            .Select(static p => p.Behaviors)
-           .Concat(Notifications.Select(static n => n.Behaviors))
-           .Concat(Notifications.SelectMany(static n => n.Handlers.Select(static h => h.Behaviors)));
+           .Concat(Notifications.Select(static n => n.Behaviors));
 
     public static HostComposition Create(IEnumerable<HostHandlerModel> handlers, IEnumerable<HostNotificationModel> notifications)
     {
@@ -637,16 +692,7 @@ internal sealed record HostComposition(
                          .OrderBy(static h => h.HandlerClass, StringComparer.Ordinal)
                          .ToImmutableArray();
 
-        var behaviors = requests
-                       .Concat(streams)
-                       .SelectMany(static p => p.Behaviors)
-                       .Concat(notificationPipelines.SelectMany(static n => n.Behaviors.Concat(n.Handlers.SelectMany(static h => h.Behaviors))))
-                       .GroupBy(static b => b.Identity, StringComparer.Ordinal)
-                       .Select(static g => g.First())
-                       .OrderBy(static b => b.Identity, StringComparer.Ordinal)
-                       .ToImmutableArray();
-
-        return new(requests, streams, notificationPipelines, constructed, behaviors, [.. cycles]);
+        return new(requests, streams, notificationPipelines, constructed, [.. cycles]);
     }
 
     /// <summary>
@@ -666,9 +712,8 @@ internal sealed record HostComposition(
 
     /// <summary>
     ///     One pipeline per concrete notification type the host knows (declared in its source, or delivered to one of its handlers), ordered
-    ///     by type: its per-publish behaviors sorted, and every handler that receives it (exact-type and polymorphic), ordered by
-    ///     <c>[HandlerOrder]</c>, then by the ordinal fully qualified handler class name (ADR 0001, Handler order), each with its per-handler
-    ///     behaviors sorted.
+    ///     by type: its notification behaviors sorted, and every handler that receives it (exact-type and polymorphic), ordered by
+    ///     <c>[HandlerOrder]</c>, then by the ordinal fully qualified handler class name (ADR 0001, Handler order).
     /// </summary>
     private static ImmutableArray<NotificationPipeline> NotificationPipelines(
         HostHandlerModel[] all,
@@ -678,7 +723,7 @@ internal sealed record HostComposition(
     {
         var handlers = all.Where(static h => h.Kind == HandlerKind.Notification).ToArray();
         var known = new SortedDictionary<string, HostNotificationModel>(StringComparer.Ordinal);
-        foreach (var notification in declared.Concat(handlers.SelectMany(static h => h.Deliveries.Select(static d => d.Notification))))
+        foreach (var notification in declared.Concat(handlers.SelectMany(static h => h.Deliveries)))
         {
             if (!known.ContainsKey(notification.Type))
             {
@@ -691,19 +736,13 @@ internal sealed record HostComposition(
         {
             foreach (var delivery in handler.Deliveries)
             {
-                if (!received.TryGetValue(delivery.Notification.Type, out var list))
+                if (!received.TryGetValue(delivery.Type, out var list))
                 {
                     list = [];
-                    received.Add(delivery.Notification.Type, list);
+                    received.Add(delivery.Type, list);
                 }
 
-                list.Add(
-                    new(
-                        handler,
-                        Sorted(delivery.Behaviors, cycles),
-                        delivery.Notification.IsValueType && handler.MessageType != delivery.Notification.Type
-                    )
-                );
+                list.Add(new(handler, delivery.IsValueType && handler.MessageType != delivery.Type));
             }
         }
 
@@ -730,12 +769,12 @@ internal sealed record HostComposition(
 }
 
 /// <summary>
-///     One notification type's publish pipeline: its per-publish behaviors, sorted outermost first, around its publish strategy over its
-///     handler pipelines (ADR 0001, Notifications).
+///     One notification type's publish pipeline: its notification behaviors, sorted outermost first, around its publish strategy over its
+///     handlers (ADR 0001, Notifications).
 /// </summary>
 /// <param name="Notification">The concrete notification type.</param>
-/// <param name="Behaviors">The per-publish behaviors, outermost first.</param>
-/// <param name="Handlers">The handler pipelines, in handler order.</param>
+/// <param name="Behaviors">The notification behaviors, outermost first.</param>
+/// <param name="Handlers">The handlers, in handler order.</param>
 internal sealed record NotificationPipeline(
     HostNotificationModel Notification,
     ImmutableArray<PipelineBehaviorModel> Behaviors,
@@ -743,7 +782,7 @@ internal sealed record NotificationPipeline(
 )
 {
     /// <summary>
-    ///     Whether anything runs when the type is published: a handler or a per-publish behavior (OQ-18). Otherwise <c>Publish</c> completes
+    ///     Whether anything runs when the type is published: a handler or a notification behavior (OQ-18). Otherwise <c>Publish</c> completes
     ///     immediately.
     /// </summary>
     public bool IsActive => !Handlers.IsEmpty || !Behaviors.IsEmpty;
@@ -753,12 +792,11 @@ internal sealed record NotificationPipeline(
 }
 
 /// <summary>
-///     One handler of a notification type, with its per-handler behaviors closed over the concrete type, sorted outermost first.
+///     One handler of a notification type. Handlers have no behaviors of their own: the publish strategy calls them directly.
 /// </summary>
 /// <param name="Handler">The handler.</param>
-/// <param name="Behaviors">The per-handler behaviors, outermost first.</param>
 /// <param name="Boxed">
 ///     Whether the notification is a struct and the handler's parameter an interface or <c>INotification</c>, so the handler receives the
 ///     publish's one box (OQ-17).
 /// </param>
-internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, ImmutableArray<PipelineBehaviorModel> Behaviors, bool Boxed);
+internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, bool Boxed);

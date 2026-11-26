@@ -217,9 +217,35 @@ internal static class HostComposer
             }
         }
 
-        // Behaviors the catalog skipped because generated code would name a constructor parameter type the host cannot resolve (OQ-47):
-        // per-publish behaviors of referenced notification types, and assembly behaviors read from metadata.
-        foreach (var (behavior, error) in catalog.UnresolvedConstructors)
+        // KRX009 for a [Behavior] on a referenced notification type that does not fit the type as the host resolves it (OQ-55): the behavior
+        // is skipped and the rest of the publish pipeline kept.
+        foreach (var (notification, behavior, reason) in catalog.UnfitNotificationBehaviors)
+        {
+            context.Report(
+                Descriptors.BehaviorDoesNotFit,
+                null,
+                behavior.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                notification.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                reason
+            );
+        }
+
+        // KRX034 for a [Behavior] on a referenced notification type whose behavior class the host cannot resolve: the behavior is skipped and
+        // the rest of the publish pipeline kept.
+        foreach (var (error, assembly) in catalog.UnresolvedNotificationBehaviors)
+        {
+            context.Report(
+                Descriptors.UnresolvedManifestType,
+                null,
+                error.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                assembly,
+                error.ContainingAssembly?.Identity.Name ?? assembly
+            );
+        }
+
+        // Behaviors the catalog skipped because generated code would name an injected parameter type the host cannot resolve (OQ-47):
+        // notification behaviors of referenced notification types, and assembly behaviors read from metadata.
+        foreach (var (behavior, error) in catalog.UnresolvedServices)
         {
             context.Report(
                 Descriptors.UnresolvedManifestType,
@@ -350,25 +376,25 @@ internal static class HostComposer
     }
 
     /// <summary>
-    ///     The global behaviors the host applies, for KRX035: every <c>[GlobalBehavior]</c>, own or referenced, that the behavior rules accept
-    ///     and no <c>ExcludeBehavior</c> removes entirely (an exclusion of one closing of an open global behavior leaves the others).
+    ///     The global behaviors the host applies, for KRX035: every <c>[GlobalBehavior]</c>, own or referenced, on a class or a behavior
+    ///     method, that the behavior rules accept and no <c>ExcludeBehavior</c> removes.
     /// </summary>
     private static ImmutableArray<GlobalBehaviorModel> GlobalBehaviors(BehaviorCatalog catalog)
     {
         var excluded = new HashSet<string>(catalog.Exclusions.Select(static e => BehaviorOrdering.Operand(e.Type)), StringComparer.Ordinal);
         var globals = ImmutableArray.CreateBuilder<GlobalBehaviorModel>();
-        foreach (var (type, attribute) in catalog.GlobalBehaviors)
+        foreach (var global in catalog.GlobalBehaviors)
         {
-            if (catalog.Shape(type) is null || excluded.Contains(BehaviorOrdering.DefinitionOperand(type)))
+            if (catalog.Shape(global.Type) is null || excluded.Contains(BehaviorOrdering.Operand(global.Type)))
             {
                 continue;
             }
 
             globals.Add(
                 new(
-                    type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                    type.ContainingAssembly?.Name ?? "",
-                    LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute) ?? type.Locations.FirstOrDefault())
+                    global.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    global.Type.ContainingAssembly?.Name ?? "",
+                    LocationInfo.From(HandlerAnalysis.AttributeLocation(global.Attribute) ?? global.Type.Locations.FirstOrDefault())
                 )
             );
         }
@@ -460,19 +486,19 @@ internal static class HostComposer
 
         /// <summary>
         ///     A behavior a manifest names (a global behavior, an <c>[assembly: Behavior]</c> type or a handler's attached behavior), or
-        ///     <see langword="null" /> after reporting KRX034 when it does not resolve, or when a parameter type of its public constructors, which
-        ///     the generated factory names, does not (OQ-47).
+        ///     <see langword="null" /> after reporting KRX034 when it does not resolve, or when an injected parameter type of one of its behavior
+        ///     methods, which the generated pipeline context names, does not (OQ-47).
         /// </summary>
         public INamedTypeSymbol? ResolveBehavior(KeryxTypeReference reference, string manifestAssembly) =>
-            Resolve(reference, manifestAssembly) is { } type && ReportConstructorError(type, manifestAssembly) ? type : null;
+            Resolve(reference, manifestAssembly) is { } type && ReportServiceError(type, manifestAssembly) ? type : null;
 
         /// <summary>
-        ///     Reports KRX034 for the first parameter type of a public instance constructor of <paramref name="type" /> that does not resolve;
+        ///     Reports KRX034 for the first injected parameter type of a behavior method of <paramref name="type" /> that does not resolve;
         ///     <see langword="true" /> when there is none.
         /// </summary>
-        private bool ReportConstructorError(INamedTypeSymbol type, string manifestAssembly)
+        private bool ReportServiceError(INamedTypeSymbol type, string manifestAssembly)
         {
-            if (ConstructorError(type) is not { } error)
+            if (ServiceError(type, symbols) is not { } error)
             {
                 return true;
             }
@@ -585,13 +611,15 @@ internal static class HostComposer
         };
 
     /// <summary>
-    ///     The first parameter type of a public instance constructor of a behavior (its definition) that does not resolve, or
-    ///     <see langword="null" />: generated factories name these types, so one the host cannot resolve breaks the generated code (OQ-47).
+    ///     The first injected parameter type of a behavior method of a behavior class that does not resolve, or <see langword="null" />: the
+    ///     generated pipeline context names these types, so one the host cannot resolve breaks the generated code (OQ-47). Every parameter
+    ///     other than the message, <c>next</c> and the token is injected; those three always resolve when the method's kind can be told.
     /// </summary>
-    internal static ITypeSymbol? ConstructorError(INamedTypeSymbol type) =>
-        type.OriginalDefinition.InstanceConstructors
-            .Where(static c => c.DeclaredAccessibility == Accessibility.Public)
-            .SelectMany(static c => c.Parameters)
-            .Select(static p => FirstError(p.Type))
-            .FirstOrDefault(static e => e is not null);
+    internal static ITypeSymbol? ServiceError(INamedTypeSymbol type, KeryxSymbols symbols) =>
+        BehaviorShapes.Candidates(type)
+                      .Where(m => BehaviorShapes.BehaviorMethodKind(m, symbols) is not null)
+                      .SelectMany(static m => m.Parameters)
+                      .Where(p => !symbols.IsCancellationToken(p.Type) && p.Type is not ITypeParameterSymbol && !MessageType.Classify(p.Type, symbols).IsMessage)
+                      .Select(static p => FirstError(p.Type))
+                      .FirstOrDefault(static e => e is not null);
 }

@@ -183,7 +183,7 @@ public sealed class HostGenerator : IIncrementalGenerator
 
         var used = new HashSet<string>(
             models
-               .SelectMany(static m => m.UsedExclusions.Concat(m.Deliveries.SelectMany(static d => d.UsedExclusions.Concat(d.Notification.UsedExclusions))))
+               .SelectMany(static m => m.UsedExclusions.Concat(m.Deliveries.SelectMany(static d => d.UsedExclusions)))
                .Concat(model.Notifications.SelectMany(static n => n.UsedExclusions)),
             StringComparer.Ordinal
         );

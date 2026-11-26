@@ -6,14 +6,14 @@ namespace Keryx.Tests.Streams;
 /// <summary>
 ///     The stream allocation contract (ADR 0001, Performance contract, Stream; the Phase 5 brief), measured inside a compiled Release host
 ///     with a handler and behaviors that complete synchronously: with no behaviors <c>Stream</c> adds nothing to what the handler
-///     allocates; with behaviors it adds exactly one iterator per wrap behavior plus one per fused hook segment per <c>Stream</c> call, and
-///     nothing per item. Two distinct cancellable tokens (the <c>Stream</c> token and the <c>WithCancellation</c> token) add exactly one
-///     linked <c>CancellationTokenSource</c> in total, with a fused hook segment outermost and with a wrap behavior outermost over an inner
-///     fused hook segment; one <c>default</c> token, or the same token twice, adds none.
+///     allocates; with static stream behaviors it adds exactly one iterator per stream behavior per <c>Stream</c> call, and nothing per item.
+///     Two distinct cancellable tokens (the <c>Stream</c> token and the <c>WithCancellation</c> token) add exactly one linked
+///     <c>CancellationTokenSource</c> in total, with a stream behavior outermost (alone, or over another one); one <c>default</c> token, or the
+///     same token twice, adds none.
 /// </summary>
 /// <remarks>
-///     Iterator sizes are not hard-coded: each wrap behavior records the runtime type of its own iterator and of the inner stream it gets
-///     from <c>next</c> (a fused segment or the next wrap behavior), and the probe measures what one instance of each type costs with
+///     Iterator sizes are not hard-coded: each stream behavior records the runtime type of its own iterator per request type, and the probe
+///     measures what one instance of each type costs with
 ///     <c>RuntimeHelpers.GetUninitializedObject</c>. Measured like <see cref="HostAllocationTests" />: smallest of several regions, not in
 ///     parallel.
 /// </remarks>
@@ -22,7 +22,7 @@ namespace Keryx.Tests.Streams;
 public class StreamAllocationTests : HostTest
 {
     [Test]
-    public async Task Stream_Allocates_One_Iterator_Per_Wrap_Behavior_And_Fused_Segment_And_Nothing_Per_Item(CancellationToken cancellationToken)
+    public async Task Stream_Allocates_One_Iterator_Per_Stream_Behavior_And_Nothing_Per_Item(CancellationToken cancellationToken)
     {
         var host = await CompileReleaseHostAsync(Source, cancellationToken);
         await using var provider = BuildProvider(host);
@@ -30,16 +30,15 @@ public class StreamAllocationTests : HostTest
 
         var measured = Call<Dictionary<string, long[]>>(host, "Sample.Probe", "Iterators", scope.ServiceProvider);
 
-        await Assert.That(measured.Count).IsEqualTo(14);
+        await Assert.That(measured.Count).IsEqualTo(12);
         foreach (var (scenario, values) in measured)
         {
             await Assert.That(values[0]).IsEqualTo(values[1]).Because($"{scenario}: measured {values[0]} B, expected {values[1]} B");
         }
 
-        // The measurement sees the iterators at all: a fused segment, and each wrap behavior, costs something.
-        await Assert.That(measured["hooks only, typed, 1 items"][1]).IsGreaterThan(measured["no behaviors, typed, 1 items"][1]);
-        await Assert.That(measured["mixed, 1 items"][1]).IsGreaterThan(measured["wraps only, 1 items"][1]);
-        await Assert.That(measured["wraps only, 1 items"][1]).IsGreaterThan(measured["hooks only, typed, 1 items"][1]);
+        // The measurement sees the iterators at all: each stream behavior costs something.
+        await Assert.That(measured["one stream behavior, 1 items"][1]).IsGreaterThan(measured["no behaviors, typed, 1 items"][1]);
+        await Assert.That(measured["two stream behaviors, typed, 1 items"][1]).IsGreaterThan(measured["one stream behavior, 1 items"][1]);
     }
 
     [Test]
@@ -58,7 +57,7 @@ public class StreamAllocationTests : HostTest
         }
 
         // The linked token source is visible to the measurement.
-        foreach (var outermost in (string[])["segment outermost", "wrap outermost over a segment"])
+        foreach (var outermost in (string[])["one stream behavior", "a stream behavior outermost over another"])
         {
             await Assert.That(measured[$"{outermost}: Stream token and WithCancellation token"][0]).IsGreaterThan(measured[$"{outermost}: Stream token only"][0]);
         }
@@ -71,78 +70,55 @@ public class StreamAllocationTests : HostTest
 
         namespace Sample;
 
-        [BehaviorOrder(Phase.Default, Order = 10)]
-        public sealed class Hook1<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>
+        /// <summary>The runtime types of the stream behaviors' own iterators, per request type.</summary>
+        public static class Recorded<TRequest>
         {
-            public int Items;
-            public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken) => default;
-            public bool OnItem(TRequest request, ref TItem item) { Items++; return true; }
-            public ValueTask OnCompleteAsync(TRequest request) => default;
-            public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
+            public static Type? Wrap1;
+            public static Type? Wrap2;
         }
 
-        [BehaviorOrder(Phase.Default, Order = 20)]
-        public sealed class Hook2<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>
-        {
-            public async ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken) => await default(ValueTask);
-            public bool OnItem(TRequest request, ref TItem item) => true;
-            public async ValueTask OnCompleteAsync(TRequest request) => await default(ValueTask);
-            public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
-        }
-
-        [BehaviorOrder(Phase.Default, Order = 40)]
-        public sealed class Hook3<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>
-        {
-            public ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken) => default;
-            public bool OnItem(TRequest request, ref TItem item) => true;
-            public ValueTask OnCompleteAsync(TRequest request) => default;
-            public ValueTask OnErrorAsync(TRequest request, Exception exception) => default;
-        }
-
-        /// <summary>A wrap behavior whose own iterator, and the inner stream it gets from next, record their runtime types.</summary>
+        /// <summary>A stream behavior whose own iterator records its runtime type.</summary>
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 5)]
-        public sealed class Wrap1<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>
+        public static class Wrap1
         {
-            public static Type? IteratorType;
-            public static Type? InnerType;
-
-            public IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem>
+            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem>
             {
-                var items = Iterate(next, cancellationToken);
-                IteratorType = items.GetType();
+                var items = Iterate<TItem, TNext>(next, cancellationToken);
+                Recorded<TRequest>.Wrap1 = items.GetType();
                 return items;
             }
 
-            private static async IAsyncEnumerable<TItem> Iterate<TNext>(TNext next, [EnumeratorCancellation] CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem>
+            private static async IAsyncEnumerable<TItem> Iterate<TItem, TNext>(TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+                where TNext : struct, IStreamNext<TItem>
             {
-                var inner = next.InvokeAsync(cancellationToken);
-                InnerType = inner.GetType();
-                await foreach (var item in inner)
+                await foreach (var item in next.InvokeAsync(cancellationToken))
                 {
                     yield return item;
                 }
             }
         }
 
-        /// <summary>Like <see cref="Wrap1{TRequest,TItem}" />, further in.</summary>
+        /// <summary>Like <see cref="Wrap1" />, further in, and an async iterator of its own.</summary>
+        [StreamBehavior]
         [BehaviorOrder(Phase.Default, Order = 30)]
-        public sealed class Wrap2<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>
+        public static class Wrap2
         {
-            public static Type? IteratorType;
-            public static Type? InnerType;
-
-            public IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem>
+            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem>
             {
-                var items = Iterate(next, cancellationToken);
-                IteratorType = items.GetType();
+                var items = Iterate<TItem, TNext>(next, cancellationToken);
+                Recorded<TRequest>.Wrap2 = items.GetType();
                 return items;
             }
 
-            private static async IAsyncEnumerable<TItem> Iterate<TNext>(TNext next, [EnumeratorCancellation] CancellationToken cancellationToken) where TNext : struct, IStreamNext<TItem>
+            private static async IAsyncEnumerable<TItem> Iterate<TItem, TNext>(TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+                where TNext : struct, IStreamNext<TItem>
             {
-                var inner = next.InvokeAsync(cancellationToken);
-                InnerType = inner.GetType();
-                await foreach (var item in inner)
+                await foreach (var item in next.InvokeAsync(cancellationToken))
                 {
                     yield return item;
                 }
@@ -172,42 +148,19 @@ public class StreamAllocationTests : HostTest
             private static IAsyncEnumerable<int> Handle(Plain request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
-        public sealed record Hooks(int Count) : IStreamRequest<int>;
-        public static partial class HooksHandler
+        public sealed record Solo(int Count) : IStreamRequest<int>;
+        public static partial class SoloHandler
         {
-            [Behavior(typeof(Hook2<,>))]
-            [Behavior(typeof(Hook1<,>))]
-            private static IAsyncEnumerable<int> Handle(Hooks request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
+            [Behavior(typeof(Wrap1))]
+            private static IAsyncEnumerable<int> Handle(Solo request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
         public sealed record Wraps(int Count) : IStreamRequest<int>;
         public static partial class WrapsHandler
         {
-            [Behavior(typeof(Wrap2<,>))]
-            [Behavior(typeof(Wrap1<,>))]
+            [Behavior(typeof(Wrap2))]
+            [Behavior(typeof(Wrap1))]
             private static IAsyncEnumerable<int> Handle(Wraps request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
-        }
-
-        /// <summary>Wrap1, then Hook1 and Hook2 (one segment), then Wrap2, then Hook3 (a second segment).</summary>
-        public sealed record Mixed(int Count) : IStreamRequest<int>;
-        public static partial class MixedHandler
-        {
-            [Behavior(typeof(Hook3<,>))]
-            [Behavior(typeof(Wrap2<,>))]
-            [Behavior(typeof(Hook2<,>))]
-            [Behavior(typeof(Hook1<,>))]
-            [Behavior(typeof(Wrap1<,>))]
-            private static IAsyncEnumerable<int> Handle(Mixed request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
-        }
-
-        /// <summary>A wrap behavior outermost, over one fused segment.</summary>
-        public sealed record Outer(int Count) : IStreamRequest<int>;
-        public static partial class OuterHandler
-        {
-            [Behavior(typeof(Hook2<,>))]
-            [Behavior(typeof(Hook1<,>))]
-            [Behavior(typeof(Wrap1<,>))]
-            private static IAsyncEnumerable<int> Handle(Outer request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
         public static class Probe
@@ -225,38 +178,29 @@ public class StreamAllocationTests : HostTest
                 foreach (var count in (int[])[1, 64])
                 {
                     var plain = new Plain(count);
-                    var hooks = new Hooks(count);
+                    var single = new Solo(count);
                     var wraps = new Wraps(count);
-                    var mixed = new Mixed(count);
                     var handler = Measure(() => PlainHandler.InvokeAsync(plain, default), default);
 
                     // No behaviors: the handler's own enumerable, nothing more.
                     results[$"no behaviors, typed, {count} items"] = [Measure(() => mediator.Stream(plain), default), handler];
                     results[$"no behaviors, generic, {count} items"] = [Measure(() => sender.Stream(plain), default), handler];
 
-                    // Hooks only: one fused segment (the outermost element, so Stream returns it).
-                    var segment = mediator.Stream(hooks).GetType();
-                    results[$"hooks only, typed, {count} items"] = [Measure(() => mediator.Stream(hooks), default), handler + Calls * SizeOf(segment)];
-                    results[$"hooks only, generic, {count} items"] = [Measure(() => sender.Stream(hooks), default), handler + Calls * SizeOf(segment)];
+                    // One stream behavior: its iterator.
+                    Run(mediator.Stream(single), default);
+                    results[$"one stream behavior, {count} items"] = [Measure(() => mediator.Stream(single), default), handler + Calls * SizeOf(Recorded<Solo>.Wrap1!)];
 
-                    // Wraps only: one iterator per wrap behavior.
+                    // Two stream behaviors: one iterator each.
                     Run(mediator.Stream(wraps), default);
-                    var wrapIterators = SizeOf(Wrap1<Wraps, int>.IteratorType!) + SizeOf(Wrap2<Wraps, int>.IteratorType!);
-                    results[$"wraps only, {count} items"] = [Measure(() => mediator.Stream(wraps), default), handler + Calls * wrapIterators];
-
-                    // Wrap1, segment (Hook1, Hook2), Wrap2, segment (Hook3): two wrap iterators and two segment iterators.
-                    Run(mediator.Stream(mixed), default);
-                    var mixedIterators = SizeOf(Wrap1<Mixed, int>.IteratorType!)
-                                       + SizeOf(Wrap1<Mixed, int>.InnerType!)
-                                       + SizeOf(Wrap2<Mixed, int>.IteratorType!)
-                                       + SizeOf(Wrap2<Mixed, int>.InnerType!);
-                    results[$"mixed, {count} items"] = [Measure(() => mediator.Stream(mixed), default), handler + Calls * mixedIterators];
-                    perCount.Add(Measure(() => mediator.Stream(mixed), default));
+                    var iterators = SizeOf(Recorded<Wraps>.Wrap1!) + SizeOf(Recorded<Wraps>.Wrap2!);
+                    results[$"two stream behaviors, typed, {count} items"] = [Measure(() => mediator.Stream(wraps), default), handler + Calls * iterators];
+                    results[$"two stream behaviors, generic, {count} items"] = [Measure(() => sender.Stream(wraps), default), handler + Calls * iterators];
+                    perCount.Add(Measure(() => mediator.Stream(wraps), default));
                     perCount.Add(Measure(() => PlainHandler.InvokeAsync(plain, default), default));
                 }
 
                 // Nothing per item: 64 items cost what 1 item costs, through the pipeline and in the handler alone.
-                results["mixed, per item"] = [perCount[2], perCount[0]];
+                results["two stream behaviors, per item"] = [perCount[2], perCount[0]];
                 results["handler alone, per item"] = [perCount[3], perCount[1]];
                 return results;
             }
@@ -273,10 +217,10 @@ public class StreamAllocationTests : HostTest
                 var linked = LinkedTokenSourceSize(first.Token, second.Token);
                 var results = new Dictionary<string, long[]>();
 
-                var hooks = new Hooks(3);
-                var outer = new Outer(3);
+                var single = new Solo(3);
+                var wraps = new Wraps(3);
                 foreach (var (name, stream) in (ValueTuple<string, Func<CancellationToken, IAsyncEnumerable<int>>>[])
-                         [("segment outermost", token => mediator.Stream(hooks, token)), ("wrap outermost over a segment", token => mediator.Stream(outer, token))])
+                         [("one stream behavior", token => mediator.Stream(single, token)), ("a stream behavior outermost over another", token => mediator.Stream(wraps, token))])
                 {
                     var none = Measure(() => stream(default), default);
                     results[$"{name}: Stream token and WithCancellation token"] = [Measure(() => stream(first.Token), second.Token), none + Calls * linked];

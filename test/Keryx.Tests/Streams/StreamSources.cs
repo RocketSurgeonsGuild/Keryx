@@ -5,8 +5,8 @@ using System.Runtime.ExceptionServices;
 namespace Keryx.Tests.Streams;
 
 /// <summary>
-///     Building blocks for stream test hosts: a log, a switchboard that makes hooks, wrap behaviors and handlers throw or drop items on cue,
-///     open generic hook and wrap behaviors that log what they see, and helpers that consume a stream on the test side.
+///     Building blocks for stream test hosts: a log, a switchboard that makes stream behaviors and handlers throw on cue, static stream
+///     behaviors with open behavior methods that log what they see, and helpers that consume a stream on the test side.
 /// </summary>
 internal static class StreamSources
 {
@@ -21,13 +21,10 @@ internal static class StreamSources
 
         public static class Control
         {
-            /// <summary>The point that throws an <c>InvalidOperationException</c>, such as <c>HookA.start</c> or <c>handler.2</c>.</summary>
+            /// <summary>The point that throws an <c>InvalidOperationException</c>, such as <c>WrapA.item</c> or <c>handler.2</c>.</summary>
             public static string? ThrowAt;
 
-            /// <summary>A hook and an item it drops, such as <c>HookB:2</c>.</summary>
-            public static string? DropAt;
-
-            public static void Set(string? throwAt, string? dropAt) { ThrowAt = throwAt; DropAt = dropAt; }
+            public static void Set(string? throwAt) { ThrowAt = throwAt; }
 
             public static void Throw(string point)
             {
@@ -60,72 +57,38 @@ internal static class StreamSources
         """;
 
     /// <summary>
-    ///     An open generic hook behavior named <paramref name="name" /> at <c>Phase.Default</c>, <c>Order = order</c>, that logs every hook
-    ///     call, can throw from any hook call and drop an item on cue, and yields once in <c>OnStartAsync</c>.
-    /// </summary>
-    public static string Hook(string name, int order, string attributes = "", string constraints = "") =>
-        """
-        ATTRIBUTES
-        [BehaviorOrder(Phase.Default, Order = ORDER)]
-        public sealed class NAME<TRequest, TItem> : IStreamHookBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>CONSTRAINTS
-        {
-            public async ValueTask OnStartAsync(TRequest request, CancellationToken cancellationToken)
-            {
-                Log.Write("NAME.start");
-                await Task.Yield();
-                Control.Throw("NAME.start");
-            }
-
-            public bool OnItem(TRequest request, ref TItem item)
-            {
-                var text = item?.ToString();
-                Log.Write("NAME.item " + text);
-                Control.Throw("NAME.item");
-                return Control.DropAt != "NAME:" + text;
-            }
-
-            public ValueTask OnCompleteAsync(TRequest request)
-            {
-                Log.Write("NAME.complete");
-                Control.Throw("NAME.complete");
-                return default;
-            }
-
-            public ValueTask OnErrorAsync(TRequest request, Exception exception)
-            {
-                Log.Write("NAME.error " + exception.GetType().Name);
-                Control.Throw("NAME.error");
-                return default;
-            }
-        }
-
-
-        """.Replace("ATTRIBUTES", attributes, StringComparison.Ordinal)
-           .Replace("ORDER", order.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
-           .Replace("CONSTRAINTS", constraints, StringComparison.Ordinal)
-           .Replace("NAME", name, StringComparison.Ordinal);
-
-    /// <summary>
-    ///     An open generic wrap behavior named <paramref name="name" /> at <c>Phase.Default</c>, <c>Order = order</c>: an <c>async</c> iterator
-    ///     that logs when it starts and ends and re-yields the inner stream, and can throw on each item on cue.
+    ///     A static stream behavior named <paramref name="name" /> at <c>Phase.Default</c>, <c>Order = order</c>, with an open behavior method:
+    ///     an <c>async</c> iterator that logs when it starts, re-yields the inner stream (and can throw on each item on cue), and logs when it
+    ///     ends: <c>&lt;NAME</c> after the inner stream completed, <c>NAME.abort</c> when it ended any other way (an exception, cancellation or
+    ///     early dispose). <paramref name="constraints" /> follows the message constraint (<c>, IAudited</c> or <c> where TItem : class</c>).
     /// </summary>
     public static string Wrap(string name, int order, string attributes = "", string constraints = "") =>
         """
+        [StreamBehavior]
         ATTRIBUTES
         [BehaviorOrder(Phase.Default, Order = ORDER)]
-        public sealed class NAME<TRequest, TItem> : IStreamPipelineBehavior<TRequest, TItem> where TRequest : IStreamRequest<TItem>CONSTRAINTS
+        public static class NAME
         {
-            public async IAsyncEnumerable<TItem> Handle<TNext>(TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+            public static async IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, [EnumeratorCancellation] CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>CONSTRAINTS
                 where TNext : struct, IStreamNext<TItem>
             {
                 Log.Write("NAME>");
-                await foreach (var item in next.InvokeAsync(cancellationToken))
+                var completed = false;
+                try
                 {
-                    Control.Throw("NAME.item");
-                    yield return item;
-                }
+                    await foreach (var item in next.InvokeAsync(cancellationToken))
+                    {
+                        Control.Throw("NAME.item");
+                        yield return item;
+                    }
 
-                Log.Write("<NAME");
+                    completed = true;
+                }
+                finally
+                {
+                    Log.Write(completed ? "<NAME" : "NAME.abort");
+                }
             }
         }
 
@@ -153,8 +116,8 @@ internal static class StreamSources
     public static string[] TakeLog(Assembly host) =>
         (string[])host.GetType("Sample.Log", throwOnError: true)!.GetMethod("Take", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null)!;
 
-    public static void SetControl(Assembly host, string? throwAt = null, string? dropAt = null) =>
-        _ = host.GetType("Sample.Control", throwOnError: true)!.GetMethod("Set")!.Invoke(null, [throwAt, dropAt]);
+    public static void SetControl(Assembly host, string? throwAt = null) =>
+        _ = host.GetType("Sample.Control", throwOnError: true)!.GetMethod("Set")!.Invoke(null, [throwAt]);
 
     /// <summary>
     ///     Enumerates a stream to the end (or until <paramref name="take" /> items), with <paramref name="enumerationToken" /> as the

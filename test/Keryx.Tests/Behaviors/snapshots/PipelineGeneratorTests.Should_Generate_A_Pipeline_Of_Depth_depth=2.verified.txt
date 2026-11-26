@@ -80,7 +80,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<string> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline0) ?? __CreatePipeline0();
-            return pipeline.Behavior1.Handle<__Pipeline0.Link1>(request, new(pipeline, request), cancellationToken);
+            return global::Sample.Step1.Handle<global::Sample.Ping, string, __Pipeline0.Link1>(request, new __Pipeline0.Link1(pipeline, request), pipeline.Behavior1Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -90,21 +90,19 @@ namespace Sample
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType) => new(requestType);
 
-        /// <summary>The pipeline context of <c>Sample.Ping</c>: its handler and behaviors, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Ping</c>: its handler and the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
             public readonly global::Sample.PingHandler Handler;
-            public readonly global::Sample.Step1<global::Sample.Ping, string> Behavior1;
-            public readonly global::Sample.Step2<global::Sample.Ping, string> Behavior2;
+            public readonly global::Sample.IClock Behavior1Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
                 Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.PingHandler>(serviceProvider);
-                Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Step1<global::Sample.Ping, string>>(serviceProvider);
-                Behavior2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Step2<global::Sample.Ping, string>>(serviceProvider);
+                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
-            /// <summary>The <c>next</c> of <c>Sample.Step1&lt;Sample.Ping, string&gt;</c>: <c>Sample.Step2&lt;Sample.Ping, string&gt;</c>.</summary>
+            /// <summary>The <c>next</c> of <c>Sample.Step1</c>: <c>Sample.Step2</c>.</summary>
             public readonly struct Link1 : global::Keryx.INext<string>
             {
                 private readonly __Pipeline0 _pipeline;
@@ -117,10 +115,10 @@ namespace Sample
                 }
 
                 public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Behavior2.Handle<Link2>(_request, new(_pipeline, _request), cancellationToken);
+                    global::Sample.Step2.Handle<global::Sample.Ping, string, Link2>(_request, new Link2(_pipeline, _request), cancellationToken);
             }
 
-            /// <summary>The <c>next</c> of <c>Sample.Step2&lt;Sample.Ping, string&gt;</c>: the handler.</summary>
+            /// <summary>The <c>next</c> of <c>Sample.Step2</c>: the handler.</summary>
             public readonly struct Link2 : global::Keryx.INext<string>
             {
                 private readonly __Pipeline0 _pipeline;
@@ -152,8 +150,8 @@ namespace Sample
     {
         /// <summary>
         ///     Registers the scoped <see cref="KeryxMediator" />, as itself and as <see cref="global::Keryx.IMediator" />,
-        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), every handler
-        ///     class that has injected parameters and every closed behavior a pipeline uses, all scoped and with generated factories.
+        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), and every
+        ///     handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -166,8 +164,6 @@ namespace Sample
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.ISender>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.IPublisher>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.PingHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Step1<global::Sample.Ping, string>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Step2<global::Sample.Ping, string>());
             return services;
         }
     }

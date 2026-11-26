@@ -61,9 +61,8 @@ public class StreamDepth0 : ComparisonBenchmark
 }
 
 /// <summary>
-///     <c>Stream</c> of 100 items through 3 pass-through stream behaviors that re-yield the inner stream. Keryx runs twice: with 3 wrap
-///     behaviors (<c>IStreamPipelineBehavior</c>, one iterator each, the shape the other libraries use) and with 3 hook behaviors
-///     (<c>IStreamHookBehavior</c>, fused into one generated iterator). ZeroAlloc.Mediator has no stream behaviors.
+///     <c>Stream</c> of 100 items through 3 pass-through stream behaviors that re-yield the inner stream (for Keryx, static
+///     <c>[StreamBehavior]</c>s, one iterator each, the shape the other libraries use). ZeroAlloc.Mediator has no stream behaviors.
 /// </summary>
 [Expect(Result = 4950, Hits = 4, BaselineHits = 1)]
 public class StreamDepth3 : ComparisonBenchmark
@@ -71,7 +70,6 @@ public class StreamDepth3 : ComparisonBenchmark
     private readonly B.Count3 _baseline = new(Numbers.StreamLength);
     private readonly IH.Count3 _immediate = new(Numbers.StreamLength);
     private readonly K.Count3 _keryx = new(Numbers.StreamLength);
-    private readonly K.CountHooks3 _keryxHooks = new(Numbers.StreamLength);
     private readonly MR.Count3 _mediatr = new(Numbers.StreamLength);
     private readonly MS.Count3 _mediatorScoped = new(Numbers.StreamLength);
     private readonly MSi.Count3 _mediatorSingleton = new(Numbers.StreamLength);
@@ -87,12 +85,6 @@ public class StreamDepth3 : ComparisonBenchmark
 
     [Benchmark]
     public ValueTask<int> Keryx_Generic() => Drain.Sum(KeryxGeneric.Stream(_keryx));
-
-    [Benchmark]
-    public ValueTask<int> KeryxHooks_Typed() => Drain.Sum(KeryxTyped.Stream(_keryxHooks));
-
-    [Benchmark]
-    public ValueTask<int> KeryxHooks_Generic() => Drain.Sum(KeryxGeneric.Stream(_keryxHooks));
 
     [Benchmark]
     public ValueTask<int> MediatorScoped_Typed() => Drain.Sum(MediatorScopedTyped.CreateStream(_mediatorScoped));

@@ -1,8 +1,8 @@
 namespace Keryx;
 
 /// <summary>
-///     The rest of a request pipeline, as seen by an <see cref="IRequestPipelineBehavior{TRequest,TResponse}" />: the next behavior, or the
-///     handler.
+///     The rest of a request pipeline, as seen by a request behavior method (<see cref="RequestBehaviorAttribute" />): the next behavior, or
+///     the handler.
 /// </summary>
 /// <remarks>
 ///     Implemented by generated link structs. A behavior may call <see cref="InvokeAsync" /> more than once (for example to retry), or not at
@@ -20,8 +20,8 @@ public interface INext<TResponse>
 }
 
 /// <summary>
-///     The rest of a notification pipeline, as seen by an <see cref="INotificationPipelineBehavior{TNotification}" /> or an
-///     <see cref="INotificationHandlerPipelineBehavior{TNotification}" />: the next behavior, or the handlers.
+///     The rest of a publish pipeline, as seen by a notification behavior method (<see cref="NotificationBehaviorAttribute" />): the next
+///     behavior, or the notification's handlers under its publish strategy.
 /// </summary>
 /// <remarks>
 ///     Implemented by generated link structs. A behavior may call <see cref="InvokeAsync" /> more than once, or not at all.

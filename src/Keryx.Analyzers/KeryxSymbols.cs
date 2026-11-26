@@ -31,18 +31,17 @@ internal sealed class KeryxSymbols
         KeryxManifestAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxManifestAttribute);
         BehaviorOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.BehaviorOrderAttribute);
         RunsAfterAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttribute);
-        RunsAfterAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttributeOfT);
         RunsBeforeAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttribute);
-        RunsBeforeAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttributeOfT);
         ExcludeBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeBehaviorAttribute);
         ExcludeHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeHandlerAttribute);
         ExternallyHandledAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExternallyHandledAttribute);
         KeryxHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHandlerAttribute);
-        RequestPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IRequestPipelineBehavior);
-        StreamPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamPipelineBehavior);
-        StreamHookBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamHookBehavior);
-        NotificationPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.INotificationPipelineBehavior);
-        NotificationHandlerPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.INotificationHandlerPipelineBehavior);
+        RequestBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RequestBehaviorAttribute);
+        StreamBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.StreamBehaviorAttribute);
+        NotificationBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.NotificationBehaviorAttribute);
+        NextOfT = compilation.GetTypeByMetadataName(KnownTypeNames.INextOfT);
+        Next = compilation.GetTypeByMetadataName(KnownTypeNames.INext);
+        StreamNext = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamNext);
         CancellationToken = compilation.GetTypeByMetadataName(WellKnownTypeNames.CancellationToken);
         Task = compilation.GetTypeByMetadataName(WellKnownTypeNames.Task);
         TaskOfT = compilation.GetTypeByMetadataName(WellKnownTypeNames.TaskOfT);
@@ -66,18 +65,17 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? KeryxManifestAttribute { get; }
     public INamedTypeSymbol? BehaviorOrderAttribute { get; }
     public INamedTypeSymbol? RunsAfterAttribute { get; }
-    public INamedTypeSymbol? RunsAfterAttributeOfT { get; }
     public INamedTypeSymbol? RunsBeforeAttribute { get; }
-    public INamedTypeSymbol? RunsBeforeAttributeOfT { get; }
     public INamedTypeSymbol? ExcludeBehaviorAttribute { get; }
     public INamedTypeSymbol? ExcludeHandlerAttribute { get; }
     public INamedTypeSymbol? ExternallyHandledAttribute { get; }
     public INamedTypeSymbol? KeryxHandlerAttribute { get; }
-    public INamedTypeSymbol? RequestPipelineBehavior { get; }
-    public INamedTypeSymbol? StreamPipelineBehavior { get; }
-    public INamedTypeSymbol? StreamHookBehavior { get; }
-    public INamedTypeSymbol? NotificationPipelineBehavior { get; }
-    public INamedTypeSymbol? NotificationHandlerPipelineBehavior { get; }
+    public INamedTypeSymbol? RequestBehaviorAttribute { get; }
+    public INamedTypeSymbol? StreamBehaviorAttribute { get; }
+    public INamedTypeSymbol? NotificationBehaviorAttribute { get; }
+    public INamedTypeSymbol? NextOfT { get; }
+    public INamedTypeSymbol? Next { get; }
+    public INamedTypeSymbol? StreamNext { get; }
     public INamedTypeSymbol? CancellationToken { get; }
     public INamedTypeSymbol? Task { get; }
     public INamedTypeSymbol? TaskOfT { get; }

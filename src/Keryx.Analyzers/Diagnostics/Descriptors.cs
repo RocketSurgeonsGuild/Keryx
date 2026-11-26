@@ -135,7 +135,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A behavior attached with [Behavior] to a handler method or a notification type must be the behavior kind the target needs, and an open behavior's constraints must hold for the target's types; a closed behavior must be closed over exactly the target's types. Assembly and global behaviors that do not fit are skipped silently.",
+        description: "A behavior attached with [Behavior] to a request or stream handler method or a notification type must be a behavior class with a behavior method of the target's kind; an open method's constraints must hold for the target's types, and a closed method must be closed over exactly the target's types. Assembly and global behaviors that do not fit are skipped silently.",
         helpLinkUri: HelpLinkBase + "krx009"
     );
 
@@ -168,7 +168,19 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Handler parameters are passed by value. A handler takes at most one CancellationToken. An injected service is stored in a field of the handler class, so it cannot be a ref struct or a pointer.",
+        description: "Handler and behavior method parameters are passed by value. A handler or behavior method takes at most one CancellationToken. An injected service is stored in a field (of the handler class, or of the pipeline context for a behavior method), so it cannot be a ref struct or a pointer.",
+        helpLinkUri: HelpLinkBase + "krx013"
+    );
+
+    /// <summary>KRX013 on a behavior method parameter.</summary>
+    public static readonly DiagnosticDescriptor InvalidBehaviorParameterKind = new(
+        "KRX013",
+        "Behavior method parameter is ref, in, out or params, or there is more than one CancellationToken",
+        "Parameter '{0}' of behavior method '{1}' {2}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Handler and behavior method parameters are passed by value. A handler or behavior method takes at most one CancellationToken. An injected service is stored in a field (of the handler class, or of the pipeline context for a behavior method), so it cannot be a ref struct or a pointer.",
         helpLinkUri: HelpLinkBase + "krx013"
     );
 
@@ -207,7 +219,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Outside a host, every request, response, notification and behavior type that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions must be at least internal, because the generated mediator and AddKeryx() use it from outside the handler class.",
+        description: "Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator and AddKeryx() use them from outside their containing types.",
         helpLinkUri: HelpLinkBase + "krx016"
     );
 
@@ -229,7 +241,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "[FromKeyedServices(key)] on a handler parameter needs a compile-time constant key. The parameterless (InheritKey) form is not supported.",
+        description: "[FromKeyedServices(key)] on a handler or behavior method parameter needs a compile-time constant key. The parameterless (InheritKey) form is not supported.",
         helpLinkUri: HelpLinkBase + "krx018"
     );
 
@@ -240,19 +252,8 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A behavior is a non-abstract class that implements exactly one Keryx behavior interface closing, either open with the interface's type parameters in order or closed and non-generic, and implements the interface's methods as public, non-virtual methods: generated code calls them directly on the concrete type.",
+        description: "A behavior is a non-generic static class with one or more kind attributes ([RequestBehavior], [StreamBehavior], [NotificationBehavior]) that declares exactly one static Handle or HandleAsync behavior method per kind it carries. The method takes the message, a 'next' method type parameter constrained 'struct' and the kind's next interface, an optional CancellationToken and injected services, returns the kind's type, and is fully open (with the message type parameter constrained to the kind's message interface) or fully closed (generic only in 'next', with 'next' carrying exactly the message's response or item type).",
         helpLinkUri: HelpLinkBase + "krx019"
-    );
-
-    public static readonly DiagnosticDescriptor InvalidBehaviorConstructor = new(
-        "KRX020",
-        "Behavior class does not have exactly one public constructor",
-        "Behavior '{0}' {1}",
-        Category,
-        DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "The host registers each behavior with a generated factory that calls its one public constructor, resolving each parameter like a handler's injected parameter.",
-        helpLinkUri: HelpLinkBase + "krx020"
     );
 
     public static readonly DiagnosticDescriptor BoxedStructRequest = new(
@@ -329,7 +330,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A referenced handler or behavior names a type from an assembly the host does not reference (for example a contracts assembly hidden with PrivateAssets). The handler is left out of the host until the assembly is referenced.",
+        description: "A referenced handler or behavior names a type from an assembly the host does not reference (for example a contracts assembly hidden with PrivateAssets), such as a handler's response or constructor parameter type or the injected parameter type of a behavior method. The handler or behavior is left out of the host until the assembly is referenced.",
         helpLinkUri: HelpLinkBase + "krx034"
     );
 
@@ -410,7 +411,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "[Behavior] attaches a behavior to a handler method, a notification type or the assembly; on any other class, struct or method it does nothing. [GlobalBehavior] marks a class that implements exactly one Keryx behavior interface closing.",
+        description: "[Behavior] attaches a behavior to a request or stream handler method, a notification type or the assembly; on any other class, struct or method, including a notification handler method (notification behaviors wrap the whole publish), it does nothing. [GlobalBehavior] marks a behavior class (a class with a behavior kind attribute) or one of its behavior methods.",
         helpLinkUri: HelpLinkBase + "krx042"
     );
 

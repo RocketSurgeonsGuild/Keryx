@@ -9,11 +9,6 @@ public class InterfaceShapeTests
     [Arguments(typeof(IStreamRequest<>))]
     [Arguments(typeof(INext<>))]
     [Arguments(typeof(IStreamNext<>))]
-    [Arguments(typeof(IRequestPipelineBehavior<,>))]
-    [Arguments(typeof(IStreamPipelineBehavior<,>))]
-    [Arguments(typeof(IStreamHookBehavior<,>))]
-    [Arguments(typeof(INotificationPipelineBehavior<>))]
-    [Arguments(typeof(INotificationHandlerPipelineBehavior<>))]
     public async Task Generic_Interface_Is_Invariant(Type type)
     {
         foreach (var parameter in type.GetGenericArguments())
@@ -62,59 +57,44 @@ public class InterfaceShapeTests
     }
 
     [Test]
-    public async Task Request_Behaviors_Constrain_The_Request_To_Its_Response()
+    [Arguments(typeof(INext<>))]
+    [Arguments(typeof(INext))]
+    [Arguments(typeof(IStreamNext<>))]
+    public async Task Next_Has_One_InvokeAsync_That_Takes_The_Token(Type nextType)
     {
-        var pipeline = typeof(IRequestPipelineBehavior<,>).GetGenericArguments();
-        var stream = typeof(IStreamPipelineBehavior<,>).GetGenericArguments();
-        var hook = typeof(IStreamHookBehavior<,>).GetGenericArguments();
+        var invoke = nextType.GetMethods().Single();
+        var expected = nextType == typeof(INext) ? typeof(ValueTask)
+            : nextType == typeof(INext<>) ? typeof(ValueTask<>).MakeGenericType(nextType.GetGenericArguments()[0])
+            : typeof(IAsyncEnumerable<>).MakeGenericType(nextType.GetGenericArguments()[0]);
 
-        await Assert.That(pipeline[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IRequest<>).MakeGenericType(pipeline[1])]);
-        await Assert.That(stream[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(stream[1])]);
-        await Assert.That(hook[0].GetGenericParameterConstraints()).IsEquivalentTo([typeof(IStreamRequest<>).MakeGenericType(hook[1])]);
-        await Assert.That(typeof(INotificationPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
-                    .IsEquivalentTo([typeof(INotification)]);
-        await Assert.That(typeof(INotificationHandlerPipelineBehavior<>).GetGenericArguments()[0].GetGenericParameterConstraints())
-                    .IsEquivalentTo([typeof(INotification)]);
-    }
-
-    [Test]
-    [Arguments(typeof(IRequestPipelineBehavior<,>), typeof(INext<>))]
-    [Arguments(typeof(IStreamPipelineBehavior<,>), typeof(IStreamNext<>))]
-    [Arguments(typeof(INotificationPipelineBehavior<>), typeof(INext))]
-    [Arguments(typeof(INotificationHandlerPipelineBehavior<>), typeof(INext))]
-    public async Task Behavior_Next_Is_A_Struct_Link(Type behaviorType, Type nextType)
-    {
-        var handle = behaviorType.GetMethod("Handle")!;
-        var next = handle.GetGenericArguments().Single();
-        var expected = nextType.IsGenericTypeDefinition ? nextType.MakeGenericType(behaviorType.GetGenericArguments()[1]) : nextType;
-
-        await Assert.That(next.GenericParameterAttributes & GenericParameterAttributes.SpecialConstraintMask)
-                    .IsEqualTo(GenericParameterAttributes.NotNullableValueTypeConstraint | GenericParameterAttributes.DefaultConstructorConstraint);
-        await Assert.That(next.GetGenericParameterConstraints().Where(static t => t != typeof(ValueType)).ToArray()).IsEquivalentTo([expected]);
-    }
-
-    [Test]
-    public async Task Stream_Behavior_Wraps_The_Inner_Stream()
-    {
-        var handle = typeof(IStreamPipelineBehavior<,>).GetMethod("Handle")!;
-        var item = typeof(IStreamPipelineBehavior<,>).GetGenericArguments()[1];
-        var invoke = typeof(IStreamNext<>).GetMethod(nameof(IStreamNext<string>.InvokeAsync))!;
-
-        await Assert.That(typeof(IStreamPipelineBehavior<,>).GetMethods()).HasSingleItem();
-        await Assert.That(handle.ReturnType).IsEqualTo(typeof(IAsyncEnumerable<>).MakeGenericType(item));
-        await Assert.That(handle.GetParameters().Select(static p => p.ParameterType.Name).ToArray())
-                    .IsEquivalentTo(["TRequest", "TNext", nameof(CancellationToken)]);
-        await Assert.That(invoke.ReturnType).IsEqualTo(typeof(IAsyncEnumerable<>).MakeGenericType(typeof(IStreamNext<>).GetGenericArguments()[0]));
+        await Assert.That(invoke.Name).IsEqualTo(nameof(INext.InvokeAsync));
+        await Assert.That(invoke.ReturnType).IsEqualTo(expected);
         await Assert.That(invoke.GetParameters().Single().ParameterType).IsEqualTo(typeof(CancellationToken));
     }
 
     [Test]
-    public async Task Stream_Hook_OnItem_Takes_The_Item_By_Reference()
+    public async Task Behaviors_Are_Static_Classes_With_Kind_Attributes()
     {
-        var onItem = typeof(IStreamHookBehavior<,>).GetMethod(nameof(IStreamHookBehavior<StringStream, string>.OnItem))!;
+        // No behavior interface exists: a behavior is a static class marked with one or more kind attributes (ADR 0001, Behavior kinds).
+        var exported = typeof(Unit).Assembly.GetExportedTypes().Select(static t => t.Name).ToArray();
 
-        await Assert.That(onItem.ReturnType).IsEqualTo(typeof(bool));
-        await Assert.That(onItem.GetParameters()[1].ParameterType.IsByRef).IsTrue();
+        await Assert.That(exported.Where(static n => n.StartsWith('I') && ( n.EndsWith("Behavior`1", StringComparison.Ordinal) || n.EndsWith("Behavior`2", StringComparison.Ordinal) ))).IsEmpty();
+        await Assert.That(exported).Contains(nameof(RequestBehaviorAttribute));
+        await Assert.That(exported).Contains(nameof(StreamBehaviorAttribute));
+        await Assert.That(exported).Contains(nameof(NotificationBehaviorAttribute));
+        // The only behavior attributes: the three kind attributes and the attaching, global and exclusion attributes (no per-handler kind).
+        await Assert.That(exported.Where(static n => n.EndsWith("BehaviorAttribute", StringComparison.Ordinal)).Order(StringComparer.Ordinal).ToArray())
+                    .IsEquivalentTo(
+                         [
+                             "BehaviorAttribute",
+                             "ExcludeBehaviorAttribute",
+                             "GlobalBehaviorAttribute",
+                             "NotificationBehaviorAttribute",
+                             "RequestBehaviorAttribute",
+                             "StreamBehaviorAttribute",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
     }
 
     [Test]

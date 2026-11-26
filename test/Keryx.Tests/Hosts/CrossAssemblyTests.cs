@@ -46,26 +46,26 @@ public class CrossAssemblyTests : HostTest
 
         public interface IJournal { void Write(string entry); }
 
+        [RequestBehavior]
         [GlobalBehavior]
         [BehaviorOrder(Phase.Observability)]
-        public sealed class Journaled<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+        public static class Journaled
         {
-            private readonly IJournal _journal;
-
-            public Journaled(IJournal journal) => _journal = journal;
-
-            public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+            public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, IJournal journal, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
             {
-                _journal.Write("before " + typeof(TRequest).Name);
+                journal.Write("before " + typeof(TRequest).Name);
                 var response = await next.InvokeAsync(cancellationToken);
-                _journal.Write("after " + typeof(TRequest).Name);
+                journal.Write("after " + typeof(TRequest).Name);
                 return response;
             }
         }
 
-        public sealed class Doubling : IRequestPipelineBehavior<Contracts.CreateOrder, int>
+        [RequestBehavior]
+        public static class Doubling
         {
-            public async ValueTask<int> Handle<TNext>(Contracts.CreateOrder request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<int> =>
+            public static async ValueTask<int> Handle<TNext>(Contracts.CreateOrder request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<int> =>
                 2 * await next.InvokeAsync(cancellationToken);
         }
 
@@ -187,8 +187,9 @@ public class CrossAssemblyTests : HostTest
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("Send(global::Contracts.CreateOrder request");
         await Assert.That(mediator).Contains("Stream(global::Contracts.Countdown request");
-        await Assert.That(mediator).Contains("global::Orders.Journaled<global::Contracts.CreateOrder, int> Behavior1;");
-        await Assert.That(mediator).Contains("global::Orders.Doubling Behavior2;");
+        await Assert.That(mediator).Contains("global::Orders.Journaled.Handle<global::Contracts.CreateOrder, int, ");
+        await Assert.That(mediator).Contains("global::Orders.IJournal Behavior1Service0;");
+        await Assert.That(mediator).Contains("global::Orders.Doubling.Handle<Link2>(");
         await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName))
                     .Contains("new global::Orders.CreateOrderHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Orders.IJournal>(serviceProvider))");
     }
@@ -199,7 +200,7 @@ public class CrossAssemblyTests : HostTest
         var result = await GenerateAsync(Host, cancellationToken);
 
         await Assert.That(Diagnostics(result))
-                    .IsEquivalentTo(["KRX035: Global behavior 'Journaled<TRequest, TResponse>' from assembly 'Orders' applies in this host"]);
+                    .IsEquivalentTo(["KRX035: Global behavior 'Journaled' from assembly 'Orders' applies in this host"]);
         // The referenced global has no source location, so it is reported on [assembly: KeryxHost].
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
     }
@@ -207,7 +208,7 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task ExcludeBehavior_Removes_A_Referenced_Global_Behavior(CancellationToken cancellationToken)
     {
-        var result = await GenerateAsync("[assembly: ExcludeBehavior(typeof(Orders.Journaled<,>))]\n" + Host, cancellationToken);
+        var result = await GenerateAsync("[assembly: ExcludeBehavior(typeof(Orders.Journaled))]\n" + Host, cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(Diagnostics(result)).IsEmpty();
@@ -221,12 +222,15 @@ public class CrossAssemblyTests : HostTest
             Host
           + """
 
+            [RequestBehavior]
             [GlobalBehavior]
             [BehaviorOrder(Phase.Outermost)]
-            [RunsAfter(typeof(Orders.Journaled<,>))]
-            public sealed class Early<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+            [RunsAfter(typeof(Orders.Journaled))]
+            public static class Early
             {
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
                     next.InvokeAsync(cancellationToken);
             }
             """,
@@ -236,7 +240,7 @@ public class CrossAssemblyTests : HostTest
         // Checked once per pair of behavior classes, however many pipelines (CreateOrder, GetName) contain it.
         var ordering = Diagnostics(result).Where(static d => d.StartsWith("KRX008", StringComparison.Ordinal)).ToArray();
         await Assert.That(ordering).Count().IsEqualTo(1);
-        await Assert.That(ordering[0]).Contains("declares RunsAfter 'Orders.Journaled<");
+        await Assert.That(ordering[0]).Contains("declares RunsAfter 'Orders.Journaled'");
     }
 
     [Test]
@@ -622,10 +626,10 @@ public class CrossAssemblyTests : HostTest
     }
 
     [Test]
-    public async Task KRX034_For_A_Referenced_Global_Behavior_Whose_Constructor_Needs_An_Unreferenced_Assembly(CancellationToken cancellationToken)
+    public async Task KRX034_For_A_Referenced_Global_Behavior_Whose_Method_Injects_An_Unreferenced_Type(CancellationToken cancellationToken)
     {
-        // The behavior itself resolves, but AddKeryx() would name its constructor's parameter type (OQ-47): it is left out, so the generated
-        // code compiles, and KRX035 does not list it.
+        // The behavior itself resolves, but the pipeline context would name its behavior method's injected parameter type (OQ-47): it is
+        // left out, so the generated code compiles, and KRX035 does not list it.
         var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface ILog { }");
         var library = TestLibraries.Reference(
             "Lib",
@@ -643,12 +647,13 @@ public class CrossAssemblyTests : HostTest
                 private static int Handle(Ping request) => 1;
             }
 
+            [RequestBehavior]
             [GlobalBehavior]
-            public sealed class Logged<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+            public static class Logged
             {
-                public Logged(Infra.ILog log) { }
-
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, Infra.ILog log, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
                     next.InvokeAsync(cancellationToken);
             }
             """,
@@ -665,14 +670,15 @@ public class CrossAssemblyTests : HostTest
                          ]
                      );
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
-        await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("Logged");
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Logged");
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("Send(global::Lib.Ping request");
     }
 
     [Test]
-    public async Task KRX034_For_A_Per_Publish_Behavior_Whose_Constructor_Needs_An_Unreferenced_Assembly(CancellationToken cancellationToken)
+    public async Task KRX034_For_A_Notification_Behavior_Whose_Method_Injects_An_Unreferenced_Type(CancellationToken cancellationToken)
     {
-        // A [Behavior] on a referenced notification type is read from the type, not from the manifest; the host checks its constructor too.
+        // A [Behavior] on a referenced notification type is read from the type, not from the manifest; the host checks its injected
+        // parameter types too.
         var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface ILog { }");
         var library = TestLibraries.Reference(
             "Lib",
@@ -683,14 +689,15 @@ public class CrossAssemblyTests : HostTest
 
             namespace Lib;
 
-            [Behavior(typeof(Audited<>))]
+            [Behavior(typeof(Audited))]
             public sealed record Placed : INotification;
 
-            public sealed class Audited<TNotification> : INotificationPipelineBehavior<TNotification> where TNotification : INotification
+            [NotificationBehavior]
+            public static class Audited
             {
-                public Audited(Infra.ILog log) { }
-
-                public ValueTask Handle<TNext>(TNotification notification, TNext next, CancellationToken cancellationToken) where TNext : struct, INext =>
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, Infra.ILog log, TNext next, CancellationToken cancellationToken)
+                    where TNotification : INotification
+                    where TNext : struct, INext =>
                     next.InvokeAsync(cancellationToken);
             }
             """,
@@ -755,15 +762,18 @@ public class CrossAssemblyTests : HostTest
 
             namespace Lib;
 
-            public sealed class Tagged<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>, Contracts.ITagged
+            [RequestBehavior]
+            public static class Tagged
             {
-                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>, Contracts.ITagged
+                    where TNext : struct, INext<TResponse> =>
                     next.InvokeAsync(cancellationToken);
             }
 
             public static partial class NameHandler
             {
-                [Behavior(typeof(Tagged<,>))]
+                [Behavior(typeof(Tagged))]
                 private static string Handle(Contracts.GetName request) => "name";
             }
             """,
@@ -774,12 +784,213 @@ public class CrossAssemblyTests : HostTest
 
         var diagnostics = HostDiagnostics(result).ToArray();
         await Assert.That(diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX009"]);
-        await Assert.That(diagnostics[0].GetMessage(CultureInfo.InvariantCulture)).StartsWith("Behavior 'Tagged<");
+        await Assert.That(diagnostics[0].GetMessage(CultureInfo.InvariantCulture))
+                    .IsEqualTo("Behavior 'Tagged' does not fit 'NameHandler.Handle': 'GetName' does not satisfy the constraint 'TRequest : ITagged'");
         await Assert.That(diagnostics[0].GetMessage(CultureInfo.InvariantCulture)).Contains("does not fit 'NameHandler.Handle': ");
         await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
         await AssertOnHostAttributeAsync(diagnostics);
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX009"]);
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Tagged");
+    }
+
+    [Test]
+    public async Task KRX009_For_A_Behavior_On_A_Referenced_Notification_Type_That_No_Longer_Fits(CancellationToken cancellationToken)
+    {
+        // OQ-55: Contracts was built against a Behaviors assembly whose Tagged fit every notification; the Behaviors assembly the host
+        // references constrains it to IUrgent, which Placed is not. Tagged is skipped with KRX009 on [assembly: KeryxHost]; Kept still runs.
+        const string behaviorsV1 = """
+            using System.Threading.Tasks;
+            using Keryx;
+
+            namespace Behaviors;
+
+            public interface IUrgent : INotification { }
+
+            [NotificationBehavior]
+            public static class Tagged
+            {
+                public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : CONSTRAINT where TNext : struct, INext => next.InvokeAsync(default);
+            }
+
+            [NotificationBehavior]
+            public static class Kept
+            {
+                public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
+            }
+            """;
+        var behaviors1 = TestLibraries.Reference("Behaviors", behaviorsV1.Replace("CONSTRAINT", "INotification", StringComparison.Ordinal));
+        var behaviors2 = TestLibraries.Reference("Behaviors", behaviorsV1.Replace("CONSTRAINT", "IUrgent", StringComparison.Ordinal));
+        var contracts = TestLibraries.Reference(
+            "Contracts",
+            """
+            using Keryx;
+
+            [assembly: KeryxContracts]
+
+            namespace Contracts;
+
+            [Behavior(typeof(Behaviors.Tagged))]
+            [Behavior(typeof(Behaviors.Kept))]
+            public sealed record Placed : INotification;
+            """,
+            [behaviors1]
+        );
+
+        var result = await HostBuilder.AddReferences(behaviors2, contracts).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && d.Id != "KRX009")).IsEmpty();
+        var diagnostics = HostDiagnostics(result).ToArray();
+        await Assert.That(diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
+                    .IsEquivalentTo(["Behavior 'Tagged' does not fit 'Placed': 'Placed' does not satisfy the constraint 'T : IUrgent'"]);
+        await AssertOnHostAttributeAsync(diagnostics);
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Behaviors.Kept.Handle<global::Contracts.Placed, ");
+        await Assert.That(mediator).DoesNotContain("Tagged");
+    }
+
+    [Test]
+    public async Task KRX034_For_A_Behavior_On_A_Referenced_Notification_Type_Whose_Assembly_The_Host_Does_Not_Reference(CancellationToken cancellationToken)
+    {
+        // Contracts attaches Behaviors.Tagged, from a third assembly the host does not reference, to Placed. The host cannot resolve the
+        // class, so it is KRX034 naming the assembly to reference, not KRX009; Kept (in Contracts) still runs.
+        var behaviors = TestLibraries.Reference(
+            "Behaviors",
+            """
+            using System.Threading.Tasks;
+            using Keryx;
+
+            namespace Behaviors;
+
+            [NotificationBehavior]
+            public static class Tagged
+            {
+                public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
+            }
+            """
+        );
+        var contracts = TestLibraries.Reference(
+            "Contracts",
+            """
+            using System.Threading.Tasks;
+            using Keryx;
+
+            [assembly: KeryxContracts]
+
+            namespace Contracts;
+
+            [Behavior(typeof(Behaviors.Tagged))]
+            [Behavior(typeof(Kept))]
+            public sealed record Placed : INotification;
+
+            [NotificationBehavior]
+            public static class Kept
+            {
+                public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
+            }
+            """,
+            [behaviors]
+        );
+
+        var result = await HostBuilder.AddReferences(contracts).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
+        await Assert.That(Diagnostics(result))
+                    .IsEquivalentTo(
+                         [
+                             "KRX034: Type 'Behaviors.Tagged', which the Keryx manifest of 'Contracts' needs, cannot be resolved or is not accessible from this host; reference assembly 'Behaviors'",
+                         ]
+                     );
+        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Contracts.Kept.Handle<global::Contracts.Placed, ");
+        await Assert.That(mediator).DoesNotContain("Tagged");
+    }
+
+    [Test]
+    public async Task A_Fitting_Behavior_On_A_Referenced_Notification_Type_Reports_Nothing(CancellationToken cancellationToken)
+    {
+        var library = TestLibraries.Reference(
+            "Lib",
+            """
+            using System.Threading.Tasks;
+            using Keryx;
+
+            namespace Lib;
+
+            [Behavior(typeof(Kept))]
+            public sealed record Placed : INotification;
+
+            [NotificationBehavior]
+            public static class Kept
+            {
+                public static ValueTask Handle<TNext>(Placed notification, TNext next) where TNext : struct, INext => next.InvokeAsync(default);
+            }
+            """
+        );
+
+        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(Diagnostics(result)).IsEmpty();
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("global::Lib.Kept.Handle<");
+    }
+
+    [Test]
+    public async Task A_Referenced_Global_Behavior_Marked_Only_On_Its_Method_Is_Found(CancellationToken cancellationToken)
+    {
+        var library = TestLibraries.Reference(
+            "Lib",
+            """
+            using System.Threading.Tasks;
+            using Keryx;
+
+            namespace Lib;
+
+            public sealed record Ping : IRequest<int>;
+
+            public static partial class PingHandler
+            {
+                private static int Handle(Ping request) => 1;
+            }
+
+            [RequestBehavior]
+            [StreamBehavior]
+            public static class MethodOnly
+            {
+                [GlobalBehavior]
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
+                    next.InvokeAsync(default);
+
+                public static System.Collections.Generic.IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> =>
+                    next.InvokeAsync(default);
+            }
+            """
+        );
+
+        var result = await HostBuilder.AddReferences(library)
+                                      .AddSources(
+                                           Usings
+                                         + """
+                                           [assembly: KeryxHost]
+                                           namespace Sample;
+
+                                           public sealed record Names : IStreamRequest<string>;
+                                           public static partial class NamesHandler { private static IAsyncEnumerable<string> Handle(Names request) => null!; }
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX035: Global behavior 'MethodOnly' from assembly 'Lib' applies in this host"]);
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        // Only its request kind is global: the host's stream request does not get its stream behavior method.
+        await Assert.That(mediator).Contains("global::Lib.MethodOnly.Handle<global::Lib.Ping, int, ");
+        await Assert.That(mediator).DoesNotContain("MethodOnly.HandleAsync");
     }
 
     [Test]
@@ -807,6 +1018,46 @@ public class CrossAssemblyTests : HostTest
             await Assert.That(second.Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
                         .IsEquivalentTo(
                              ["Assembly 'Future' carries a Keryx manifest of format version 7, but the Keryx in this project reads format versions up to 1; upgrade Keryx in this project"]
+                         );
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Test]
+    public async Task A_Projection_Cached_With_An_Older_Data_Version_Is_Recomputed(CancellationToken cancellationToken)
+    {
+        // ProjectionDataVersion changes whenever the projection's shape or derivation does (static behaviors: 2). An entry written with another
+        // data version is ignored and the projection recomputed, so the altered format version on disk is never seen.
+        var image = TestLibraries.Image("Future", FutureLibrary, generate: false);
+        var directory = Path.Combine(Path.GetTempPath(), "keryx-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = new IntermediateOutputOptions(directory + Path.DirectorySeparatorChar);
+            _ = Driver(options).RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken).GetRunResult();
+
+            var file = Path.Combine(directory, "ctp", "Keryx.ctpjson");
+            var text = await File.ReadAllTextAsync(file, cancellationToken);
+            var stale = System.Text.RegularExpressions.Regex.Replace(
+                text.Replace("\"formatVersion\":2", "\"formatVersion\":7", StringComparison.Ordinal),
+                "\"[Vv]ersion\":\\s*" + ReferenceScan.ProjectionDataVersion.ToString(CultureInfo.InvariantCulture) + "\\b",
+                "\"version\":1"
+            );
+            await Assert.That(stale).Contains("\"formatVersion\":7");
+            await Assert.That(stale).Contains("\"version\":1");
+            await File.WriteAllTextAsync(file, stale, cancellationToken);
+
+            var second = Driver(options, new CacheFileText(file))
+                        .RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken)
+                        .GetRunResult();
+            await Assert.That(second.Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
+                        .IsEquivalentTo(
+                             ["Assembly 'Future' carries a Keryx manifest of format version 2, but the Keryx in this project reads format versions up to 1; upgrade Keryx in this project"]
                          );
         }
         finally

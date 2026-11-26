@@ -97,7 +97,7 @@ namespace Sample
         }
 
         /// <summary>
-        ///     Publishes a <c>Sample.Unheard</c>. Nothing runs for it in this host: it has neither handlers nor per-publish behaviors.
+        ///     Publishes a <c>Sample.Unheard</c>. Nothing runs for it in this host: it has neither handlers nor notification behaviors.
         /// </summary>
         /// <param name="notification">The notification.</param>
         /// <param name="cancellationToken">The token passed to every behavior and handler. Cancelling it does not skip handlers.</param>
@@ -154,7 +154,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __notification0) ?? __CreateNotification0();
-            return pipeline.RunHandlers(notification, cancellationToken);
+            return global::Sample.Timed.Handle<global::Sample.Broadcast, __Notification0.Link1>(notification, new __Notification0.Link1(pipeline, notification), pipeline.Behavior1Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -164,7 +164,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask __Publish1(global::Sample.OrderPlaced notification, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __notification1) ?? __CreateNotification1();
-            return pipeline.Behavior1.Handle<__Notification1.Link1>(notification, new(pipeline, notification), cancellationToken);
+            return global::Sample.Guarded.HandleAsync<__Notification1.Link1>(notification, new __Notification1.Link1(pipeline, notification), cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -174,7 +174,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask __Publish2(global::Sample.Shipped notification, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __notification2) ?? __CreateNotification2();
-            return pipeline.Behavior1.Handle<__Notification2.Link1>(notification, new(pipeline, notification), cancellationToken);
+            return global::Sample.Logged.Handle<global::Sample.Shipped, __Notification2.Link1>(notification, new __Notification2.Link1(pipeline, notification), cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -184,14 +184,14 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask __Publish3(global::Sample.Tick notification, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __notification3) ?? __CreateNotification3();
-            return pipeline.Behavior1.Handle<__Notification3.Link1>(notification, new(pipeline, notification), cancellationToken);
+            return global::Sample.Logged.Handle<global::Sample.Tick, __Notification3.Link1>(notification, new __Notification3.Link1(pipeline, notification), cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private __Notification3 __CreateNotification3() =>
             global::System.Threading.Interlocked.CompareExchange(ref __notification3, new __Notification3(__serviceProvider), null) ?? __notification3!;
 
-        /// <summary>Awaits the pending handler pipelines of a parallel publish and throws every failure, in handler order.</summary>
+        /// <summary>Awaits the pending handlers of a parallel publish and throws every failure, in handler order.</summary>
         [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
         private static async global::System.Threading.Tasks.ValueTask __WhenAllHandlers(global::System.Threading.Tasks.Task[] tasks)
         {
@@ -233,25 +233,25 @@ namespace Sample
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType) => new(requestType);
 
-        /// <summary>The publish pipeline context of <c>Sample.Broadcast</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Broadcast</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
             public readonly global::Sample.SecondListener Handler1;
-            public readonly global::Sample.Timed<global::Sample.Broadcast> Handler1Behavior1;
+            public readonly global::Sample.IJournal Behavior1Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
                 Handler1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.SecondListener>(serviceProvider);
-                Handler1Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Timed<global::Sample.Broadcast>>(serviceProvider);
+                Behavior1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
-            /// <summary>Starts every handler pipeline in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>
+            /// <summary>Starts every handler in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>
             public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Threading.Tasks.ValueTask task0;
                 try
                 {
-                    task0 = RunHandler0(notification, cancellationToken);
+                    task0 = global::Sample.FirstListener.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -261,7 +261,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task1;
                 try
                 {
-                    task1 = RunHandler1(notification, cancellationToken);
+                    task1 = Handler1.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -301,55 +301,41 @@ namespace Sample
                 return __WhenAllHandlers(tasks);
             }
 
-            /// <summary>Runs the pipeline of <c>Sample.FirstListener</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken) =>
-                global::Sample.FirstListener.InvokeAsync(notification, cancellationToken);
-
-            /// <summary>Runs the pipeline of <c>Sample.SecondListener</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler1(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken) =>
-                Handler1Behavior1.Handle<Handler1Link1>(notification, new(this, notification), cancellationToken);
-
-            /// <summary>The <c>next</c> of <c>Sample.Timed&lt;Sample.Broadcast&gt;</c>: <c>Sample.SecondListener</c>.</summary>
-            public readonly struct Handler1Link1 : global::Keryx.INext
+            /// <summary>The <c>next</c> of <c>Sample.Timed</c>: the handlers.</summary>
+            public readonly struct Link1 : global::Keryx.INext
             {
                 private readonly __Notification0 _pipeline;
                 private readonly global::Sample.Broadcast _notification;
 
-                public Handler1Link1(__Notification0 pipeline, global::Sample.Broadcast notification)
+                public Link1(__Notification0 pipeline, global::Sample.Broadcast notification)
                 {
                     _pipeline = pipeline;
                     _notification = notification;
                 }
 
                 public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler1.InvokeAsync(_notification, cancellationToken);
+                    _pipeline.RunHandlers(_notification, cancellationToken);
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.OrderPlaced</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.OrderPlaced</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification1
         {
             public readonly global::Sample.AuditDomainEvents Handler0;
-            public readonly global::Sample.Logged<global::Sample.OrderPlaced> Behavior1;
-            public readonly global::Sample.Guarded<global::Sample.OrderPlaced> Handler0Behavior1;
-            public readonly global::Sample.Timed<global::Sample.OrderPlaced> Handler0Behavior2;
 
             public __Notification1(global::System.IServiceProvider serviceProvider)
             {
                 Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
-                Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Logged<global::Sample.OrderPlaced>>(serviceProvider);
-                Handler0Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Guarded<global::Sample.OrderPlaced>>(serviceProvider);
-                Handler0Behavior2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Timed<global::Sample.OrderPlaced>>(serviceProvider);
             }
 
-            /// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>
+            /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
             public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.OrderPlaced notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = RunHandler0(notification, cancellationToken);
+                    task = Handler0.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -365,7 +351,7 @@ namespace Sample
                 task.GetAwaiter().GetResult();
                 try
                 {
-                    task = RunHandler1(notification, cancellationToken);
+                    task = global::Sample.OnOrderPlaced.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -383,7 +369,7 @@ namespace Sample
                 return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
             }
 
-            /// <summary>Awaits the handler pipeline at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
+            /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
             private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.OrderPlaced notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
@@ -400,7 +386,7 @@ namespace Sample
                 {
                     try
                     {
-                        await RunHandler1(notification, cancellationToken).ConfigureAwait(false);
+                        await global::Sample.OnOrderPlaced.InvokeAsync(notification, cancellationToken).ConfigureAwait(false);
                     }
                     catch (global::System.Exception exception)
                     {
@@ -414,15 +400,7 @@ namespace Sample
                 }
             }
 
-            /// <summary>Runs the pipeline of <c>Sample.AuditDomainEvents</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.OrderPlaced notification, global::System.Threading.CancellationToken cancellationToken) =>
-                Handler0Behavior1.Handle<Handler0Link1>(notification, new(this, notification), cancellationToken);
-
-            /// <summary>Runs the pipeline of <c>Sample.OnOrderPlaced</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler1(global::Sample.OrderPlaced notification, global::System.Threading.CancellationToken cancellationToken) =>
-                global::Sample.OnOrderPlaced.InvokeAsync(notification, cancellationToken);
-
-            /// <summary>The <c>next</c> of <c>Sample.Logged&lt;Sample.OrderPlaced&gt;</c>: the handlers.</summary>
+            /// <summary>The <c>next</c> of <c>Sample.Guarded</c>: <c>Sample.Logged</c>.</summary>
             public readonly struct Link1 : global::Keryx.INext
             {
                 private readonly __Notification1 _pipeline;
@@ -435,66 +413,44 @@ namespace Sample
                 }
 
                 public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
+                    global::Sample.Logged.Handle<global::Sample.OrderPlaced, Link2>(_notification, new Link2(_pipeline, _notification), cancellationToken);
+            }
+
+            /// <summary>The <c>next</c> of <c>Sample.Logged</c>: the handlers.</summary>
+            public readonly struct Link2 : global::Keryx.INext
+            {
+                private readonly __Notification1 _pipeline;
+                private readonly global::Sample.OrderPlaced _notification;
+
+                public Link2(__Notification1 pipeline, global::Sample.OrderPlaced notification)
+                {
+                    _pipeline = pipeline;
+                    _notification = notification;
+                }
+
+                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
                     _pipeline.RunHandlers(_notification, cancellationToken);
-            }
-
-            /// <summary>The <c>next</c> of <c>Sample.Guarded&lt;Sample.OrderPlaced&gt;</c>: <c>Sample.Timed&lt;Sample.OrderPlaced&gt;</c>.</summary>
-            public readonly struct Handler0Link1 : global::Keryx.INext
-            {
-                private readonly __Notification1 _pipeline;
-                private readonly global::Sample.OrderPlaced _notification;
-
-                public Handler0Link1(__Notification1 pipeline, global::Sample.OrderPlaced notification)
-                {
-                    _pipeline = pipeline;
-                    _notification = notification;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0Behavior2.Handle<Handler0Link2>(_notification, new(_pipeline, _notification), cancellationToken);
-            }
-
-            /// <summary>The <c>next</c> of <c>Sample.Timed&lt;Sample.OrderPlaced&gt;</c>: <c>Sample.AuditDomainEvents</c>.</summary>
-            public readonly struct Handler0Link2 : global::Keryx.INext
-            {
-                private readonly __Notification1 _pipeline;
-                private readonly global::Sample.OrderPlaced _notification;
-
-                public Handler0Link2(__Notification1 pipeline, global::Sample.OrderPlaced notification)
-                {
-                    _pipeline = pipeline;
-                    _notification = notification;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0.InvokeAsync(_notification, cancellationToken);
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Shipped</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Shipped</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification2
         {
             public readonly global::Sample.AuditDomainEvents Handler0;
-            public readonly global::Sample.Logged<global::Sample.Shipped> Behavior1;
-            public readonly global::Sample.Guarded<global::Sample.Shipped> Handler0Behavior1;
-            public readonly global::Sample.Timed<global::Sample.Shipped> Handler0Behavior2;
 
             public __Notification2(global::System.IServiceProvider serviceProvider)
             {
                 Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
-                Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Logged<global::Sample.Shipped>>(serviceProvider);
-                Handler0Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Guarded<global::Sample.Shipped>>(serviceProvider);
-                Handler0Behavior2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Timed<global::Sample.Shipped>>(serviceProvider);
             }
 
-            /// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>
+            /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
             public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.Shipped notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = RunHandler0(notification, cancellationToken);
+                    task = Handler0.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -512,7 +468,7 @@ namespace Sample
                 return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
             }
 
-            /// <summary>Awaits the handler pipeline at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
+            /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
             private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.Shipped notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
@@ -531,11 +487,7 @@ namespace Sample
                 }
             }
 
-            /// <summary>Runs the pipeline of <c>Sample.AuditDomainEvents</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.Shipped notification, global::System.Threading.CancellationToken cancellationToken) =>
-                Handler0Behavior1.Handle<Handler0Link1>(notification, new(this, notification), cancellationToken);
-
-            /// <summary>The <c>next</c> of <c>Sample.Logged&lt;Sample.Shipped&gt;</c>: the handlers.</summary>
+            /// <summary>The <c>next</c> of <c>Sample.Logged</c>: the handlers.</summary>
             public readonly struct Link1 : global::Keryx.INext
             {
                 private readonly __Notification2 _pipeline;
@@ -550,57 +502,19 @@ namespace Sample
                 public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
                     _pipeline.RunHandlers(_notification, cancellationToken);
             }
-
-            /// <summary>The <c>next</c> of <c>Sample.Guarded&lt;Sample.Shipped&gt;</c>: <c>Sample.Timed&lt;Sample.Shipped&gt;</c>.</summary>
-            public readonly struct Handler0Link1 : global::Keryx.INext
-            {
-                private readonly __Notification2 _pipeline;
-                private readonly global::Sample.Shipped _notification;
-
-                public Handler0Link1(__Notification2 pipeline, global::Sample.Shipped notification)
-                {
-                    _pipeline = pipeline;
-                    _notification = notification;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0Behavior2.Handle<Handler0Link2>(_notification, new(_pipeline, _notification), cancellationToken);
-            }
-
-            /// <summary>The <c>next</c> of <c>Sample.Timed&lt;Sample.Shipped&gt;</c>: <c>Sample.AuditDomainEvents</c>.</summary>
-            public readonly struct Handler0Link2 : global::Keryx.INext
-            {
-                private readonly __Notification2 _pipeline;
-                private readonly global::Sample.Shipped _notification;
-
-                public Handler0Link2(__Notification2 pipeline, global::Sample.Shipped notification)
-                {
-                    _pipeline = pipeline;
-                    _notification = notification;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0.InvokeAsync(_notification, cancellationToken);
-            }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Tick</c>: its handlers and behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Tick</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification3
         {
             public readonly global::Sample.AuditDomainEvents Handler0;
-            public readonly global::Sample.Logged<global::Sample.Tick> Behavior1;
-            public readonly global::Sample.Guarded<global::Sample.Tick> Handler0Behavior1;
-            public readonly global::Sample.Timed<global::Sample.Tick> Handler0Behavior2;
 
             public __Notification3(global::System.IServiceProvider serviceProvider)
             {
                 Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
-                Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Logged<global::Sample.Tick>>(serviceProvider);
-                Handler0Behavior1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Guarded<global::Sample.Tick>>(serviceProvider);
-                Handler0Behavior2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Timed<global::Sample.Tick>>(serviceProvider);
             }
 
-            /// <summary>Runs every handler pipeline in handler order (sequential), then reports every failure in one AggregateException.</summary>
+            /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
             public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.Tick notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::Keryx.INotification boxed = notification;
@@ -608,7 +522,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = RunHandler0(notification, boxed, cancellationToken);
+                    task = Handler0.InvokeAsync(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.IDomainEvent>(boxed), cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -624,7 +538,7 @@ namespace Sample
                 task.GetAwaiter().GetResult();
                 try
                 {
-                    task = RunHandler1(notification, cancellationToken);
+                    task = global::Sample.OnTick.InvokeAsync(notification, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -642,7 +556,7 @@ namespace Sample
                 return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
             }
 
-            /// <summary>Awaits the handler pipeline at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
+            /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
             private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.Tick notification, global::Keryx.INotification boxed, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
@@ -659,7 +573,7 @@ namespace Sample
                 {
                     try
                     {
-                        await RunHandler1(notification, cancellationToken).ConfigureAwait(false);
+                        await global::Sample.OnTick.InvokeAsync(notification, cancellationToken).ConfigureAwait(false);
                     }
                     catch (global::System.Exception exception)
                     {
@@ -673,15 +587,7 @@ namespace Sample
                 }
             }
 
-            /// <summary>Runs the pipeline of <c>Sample.AuditDomainEvents</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler0(global::Sample.Tick notification, global::Keryx.INotification boxed, global::System.Threading.CancellationToken cancellationToken) =>
-                Handler0Behavior1.Handle<Handler0Link1>(notification, new(this, notification, boxed), cancellationToken);
-
-            /// <summary>Runs the pipeline of <c>Sample.OnTick</c>.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandler1(global::Sample.Tick notification, global::System.Threading.CancellationToken cancellationToken) =>
-                global::Sample.OnTick.InvokeAsync(notification, cancellationToken);
-
-            /// <summary>The <c>next</c> of <c>Sample.Logged&lt;Sample.Tick&gt;</c>: the handlers.</summary>
+            /// <summary>The <c>next</c> of <c>Sample.Logged</c>: the handlers.</summary>
             public readonly struct Link1 : global::Keryx.INext
             {
                 private readonly __Notification3 _pipeline;
@@ -695,40 +601,6 @@ namespace Sample
 
                 public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
                     _pipeline.RunHandlers(_notification, cancellationToken);
-            }
-
-            /// <summary>The <c>next</c> of <c>Sample.Guarded&lt;Sample.Tick&gt;</c>: <c>Sample.Timed&lt;Sample.Tick&gt;</c>.</summary>
-            public readonly struct Handler0Link1 : global::Keryx.INext
-            {
-                private readonly __Notification3 _pipeline;
-                private readonly global::Sample.Tick _notification;
-                private readonly global::Keryx.INotification _boxed;
-
-                public Handler0Link1(__Notification3 pipeline, global::Sample.Tick notification, global::Keryx.INotification boxed)
-                {
-                    _pipeline = pipeline;
-                    _notification = notification;
-                    _boxed = boxed;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0Behavior2.Handle<Handler0Link2>(_notification, new(_pipeline, _notification, _boxed), cancellationToken);
-            }
-
-            /// <summary>The <c>next</c> of <c>Sample.Timed&lt;Sample.Tick&gt;</c>: <c>Sample.AuditDomainEvents</c>.</summary>
-            public readonly struct Handler0Link2 : global::Keryx.INext
-            {
-                private readonly __Notification3 _pipeline;
-                private readonly global::Keryx.INotification _boxed;
-
-                public Handler0Link2(__Notification3 pipeline, global::Sample.Tick notification, global::Keryx.INotification boxed)
-                {
-                    _pipeline = pipeline;
-                    _boxed = boxed;
-                }
-
-                public global::System.Threading.Tasks.ValueTask InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    _pipeline.Handler0.InvokeAsync(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.IDomainEvent>(_boxed), cancellationToken);
             }
         }
     }
@@ -747,8 +619,8 @@ namespace Sample
     {
         /// <summary>
         ///     Registers the scoped <see cref="KeryxMediator" />, as itself and as <see cref="global::Keryx.IMediator" />,
-        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), every handler
-        ///     class that has injected parameters and every closed behavior a pipeline uses, all scoped and with generated factories.
+        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), and every
+        ///     handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -762,16 +634,6 @@ namespace Sample
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.IPublisher>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.AuditDomainEvents(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.SecondListener(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Guarded<global::Sample.OrderPlaced>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Guarded<global::Sample.Shipped>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Guarded<global::Sample.Tick>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Logged<global::Sample.OrderPlaced>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Logged<global::Sample.Shipped>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Logged<global::Sample.Tick>());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Timed<global::Sample.Broadcast>(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Timed<global::Sample.OrderPlaced>(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Timed<global::Sample.Shipped>(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Timed<global::Sample.Tick>(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
             return services;
         }
     }

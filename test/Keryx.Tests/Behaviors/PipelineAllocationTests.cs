@@ -8,8 +8,8 @@ namespace Keryx.Tests.Behaviors;
 /// <summary>
 ///     The Performance contract with behaviors (ADR 0001, Performance contract; the Phase 4 brief): after one warm-up call in the same scope,
 ///     a synchronous <c>Send</c> allocates 0 bytes at depths 1, 3 and 8, on the typed overload and the generic entry point, for value-type and
-///     reference-type responses, with behaviors that pass <c>next</c>'s task on and with <c>async</c> behaviors that complete synchronously
-///     (compiled with optimizations, as a Release build ships them).
+///     reference-type responses, with static behaviors that take an injected service and pass <c>next</c>'s task on and with <c>async</c>
+///     behaviors that complete synchronously (compiled with optimizations, as a Release build ships them).
 /// </summary>
 /// <remarks>Measured like <see cref="HostAllocationTests" />: inside the compiled host, smallest of several regions, not in parallel.</remarks>
 [Timeout(ModuleInitializer.TestTimeout)]
@@ -37,8 +37,8 @@ public class PipelineAllocationTests : HostTest
     }
 
     /// <summary>
-    ///     A host with <paramref name="depth" /> behaviors on each request: pass-through behaviors for <c>Ping</c> (reference response, injected
-    ///     handler), <c>Add</c> (value response, static handler) and the struct <c>Tick</c>; <c>async</c> behaviors that complete synchronously
+    ///     A host with <paramref name="depth" /> behaviors on each request: pass-through behaviors that inject a service for <c>Ping</c>
+    ///     (reference response, injected handler), <c>Add</c> (value response, static handler) and the struct <c>Tick</c>; <c>async</c> behaviors that complete synchronously
     ///     for <c>Echo</c>; and <c>Touch</c> (<c>IRequest</c>, void handler).
     /// </summary>
     private static string Source(int depth)
@@ -49,22 +49,26 @@ public class PipelineAllocationTests : HostTest
             builder.Append(
                 CultureInfo.InvariantCulture,
                 $$"""
+                  [RequestBehavior]
                   [BehaviorOrder(Phase.Default, Order = {{k}})]
-                  public sealed class Pass{{k}}<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+                  public static class Pass{{k}}
                   {
-                      public int Calls;
-
-                      public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+                      public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, object service, CancellationToken cancellationToken)
+                          where TRequest : IRequest<TResponse>
+                          where TNext : struct, INext<TResponse>
                       {
-                          Calls++;
+                          GC.KeepAlive(service);
                           return next.InvokeAsync(cancellationToken);
                       }
                   }
 
+                  [RequestBehavior]
                   [BehaviorOrder(Phase.Default, Order = {{k}})]
-                  public sealed class Await{{k}}<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+                  public static class Await{{k}}
                   {
-                      public async ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+                      public static async ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                          where TRequest : IRequest<TResponse>
+                          where TNext : struct, INext<TResponse>
                       {
                           var response = await next.InvokeAsync(cancellationToken);
                           return response;
@@ -81,7 +85,7 @@ public class PipelineAllocationTests : HostTest
             var attributes = new StringBuilder();
             for (var k = 1; k <= depth; k++)
             {
-                attributes.Append(CultureInfo.InvariantCulture, $"    [Behavior(typeof({prefix}{k}<,>))]\n");
+                attributes.Append(CultureInfo.InvariantCulture, $"    [Behavior(typeof({prefix}{k}))]\n");
             }
 
             return attributes.ToString();

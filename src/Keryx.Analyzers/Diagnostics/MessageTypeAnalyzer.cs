@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -8,7 +9,8 @@ namespace Keryx.Analyzers.Diagnostics;
 /// <summary>
 ///     The rules on request, stream request and notification types: KRX011, KRX012 (types), KRX016 (the type and its response outside a
 ///     host) and KRX041. Also KRX016 for the behaviors a host's pipelines take from this assembly outside a host: <c>[Behavior]</c> on a
-///     notification type (per-publish behaviors), <c>[assembly: Behavior]</c> and classes marked <c>[GlobalBehavior]</c>.
+///     notification type (notification behaviors), <c>[assembly: Behavior]</c> and <c>[GlobalBehavior]</c>s; their classes and behavior
+///     methods must be public.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
@@ -48,7 +50,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                 }
 
                 // Assembly attributes have no symbol action; each one is reported from the syntax tree that declares it.
-                var assemblyBehaviors = NonPublicBehaviors(startContext.Compilation.Assembly.GetAttributes(), symbols)
+                var assemblyBehaviors = NonPublicBehaviors(startContext.Compilation.Assembly.GetAttributes(), null, symbols)
                                        .Where(static b => b.Location?.SourceTree is not null)
                                        .ToImmutableArray();
                 if (!assemblyBehaviors.IsEmpty)
@@ -73,40 +75,70 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    ///     The <c>[Behavior(typeof(X))]</c> attributes among <paramref name="attributes" /> whose behavior type is not effectively public, with
-    ///     the attribute's location and the behavior's name.
+    ///     The <c>[Behavior(typeof(X))]</c> attributes among <paramref name="attributes" /> whose behavior class, or its behavior method of
+    ///     <paramref name="kind" /> (of any kind when <see langword="null" />), is not effectively public, with the attribute's location and
+    ///     what is too narrow.
     /// </summary>
-    private static IEnumerable<(Location? Location, string BehaviorName)> NonPublicBehaviors(ImmutableArray<AttributeData> attributes, KeryxSymbols symbols)
+    private static IEnumerable<(Location? Location, string BehaviorName)> NonPublicBehaviors(ImmutableArray<AttributeData> attributes, BehaviorKind? kind, KeryxSymbols symbols)
     {
         foreach (var attribute in attributes)
         {
             if (KeryxSymbols.IsAttribute(attribute, symbols.BehaviorAttribute)
-             && attribute.ConstructorArguments is [{ Value: ITypeSymbol behaviorType }]
-             && TypeAccessibility.Of(behaviorType) != AccessLevel.Public)
+             && attribute.ConstructorArguments is [{ Value: INamedTypeSymbol behaviorType }]
+             && behaviorType.TypeKind != TypeKind.Error
+             && BehaviorShapes.IsBehaviorClass(behaviorType, symbols)
+             && NarrowerThanPublic(behaviorType, kind, symbols) is { } narrow)
             {
-                yield return (HandlerAnalysis.AttributeLocation(attribute), behaviorType.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat));
+                yield return (HandlerAnalysis.AttributeLocation(attribute), narrow);
             }
         }
+    }
+
+    /// <summary>What of a behavior class is not public: the class, or its behavior method of <paramref name="kind" /> (or of any kind).</summary>
+    private static string? NarrowerThanPublic(INamedTypeSymbol type, BehaviorKind? kind, KeryxSymbols symbols)
+    {
+        if (BehaviorShapes.NarrowerThan(type, null, AccessLevel.Public) is { } narrowClass)
+        {
+            return narrowClass;
+        }
+
+        foreach (var method in BehaviorShapes.Candidates(type))
+        {
+            if (BehaviorShapes.BehaviorMethodKind(method, symbols) is { } methodKind
+             && ( kind is null || kind == methodKind )
+             && BehaviorShapes.NarrowerThan(type, method, AccessLevel.Public) is { } narrowMethod)
+            {
+                return narrowMethod;
+            }
+        }
+
+        return null;
     }
 
     private static void AnalyzeGlobalBehavior(SymbolAnalysisContext context, KeryxSymbols symbols)
     {
         var type = (INamedTypeSymbol)context.Symbol;
-        if (TypeAccessibility.OfDeclaration(type) == AccessLevel.Public
-         || type.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, symbols.GlobalBehaviorAttribute)) is not { } globalBehavior)
+        if (Hosts.GlobalBehavior.Of(type, symbols) is not { } global)
         {
             return;
         }
 
-        context.ReportDiagnostic(
-            Diagnostic.Create(
-                Descriptors.NotEffectivelyPublic,
-                HandlerAnalysis.AttributeLocation(globalBehavior) ?? type.Locations.FirstOrDefault(),
-                type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                Descriptors.Public,
-                "it is a global behavior, every host that references this assembly applies it, and this assembly is not a host"
-            )
-        );
+        foreach (var kind in global.Kinds)
+        {
+            if (NarrowerThanPublic(type, kind, symbols) is { } narrow)
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Descriptors.NotEffectivelyPublic,
+                        HandlerAnalysis.AttributeLocation(global.Attribute) ?? type.Locations.FirstOrDefault(),
+                        narrow,
+                        Descriptors.Public,
+                        "it is a global behavior, every host that references this assembly applies it, and this assembly is not a host"
+                    )
+                );
+                return;
+            }
+        }
     }
 
     private static void Analyze(SymbolAnalysisContext context, KeryxSymbols symbols, bool isHost)
@@ -165,8 +197,8 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
 
         if (messageType.IsNotificationOnly)
         {
-            // Per-publish behaviors: the host builds the publish pipeline around the notification type.
-            foreach (var (behaviorLocation, behaviorName) in NonPublicBehaviors(type.GetAttributes(), symbols))
+            // Notification behaviors: the host builds the publish pipeline around the notification type.
+            foreach (var (behaviorLocation, behaviorName) in NonPublicBehaviors(type.GetAttributes(), BehaviorKind.Notification, symbols))
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(

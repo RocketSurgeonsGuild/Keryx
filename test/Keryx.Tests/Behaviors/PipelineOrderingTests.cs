@@ -7,10 +7,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Keryx.Tests.Behaviors;
 
 /// <summary>
-///     Every sort rule of ADR 0001, Ordering, observed at run time, with each <c>RunsAfter</c>/<c>RunsBefore</c> written in the <c>typeof</c>
-///     form, the generic form, and both forms mixed on one class: phase ascending (including a value between phases), order inside a phase,
-///     edges inside a (phase, order) bucket, the ordinal type name tie-break, edges that agree with phase as no-ops, edges to behaviors absent
-///     from a pipeline, an open <c>typeof(X&lt;,&gt;)</c> matching every closing and a closed edge matching only its closing.
+///     Every sort rule of ADR 0001, Ordering, observed at run time with static behaviors: phase ascending (including a value between phases),
+///     order inside a phase, <c>typeof</c> edges inside a (phase, order) bucket, the ordinal class name tie-break, edges that agree with phase
+///     as no-ops, edges to behaviors absent from a pipeline, an edge to an open behavior method's class in every pipeline it is part of, and a
+///     behavior method's <c>[BehaviorOrder]</c> and <c>[RunsAfter]</c> overriding its class's.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class PipelineOrderingTests : HostTest
@@ -26,17 +26,14 @@ public class PipelineOrderingTests : HostTest
         ("R6", ["AbsentA", "AbsentB"]),
         ("R7a", ["Wrap", "Inner"]),
         ("R7b", ["Wrap", "Inner"]),
-        ("R8a", ["WrapC", "InnerC"]),
-        ("R8b", ["InnerC", "WrapC"]),
+        ("R8", ["MethodPhase", "Plain"]),
+        ("R9", ["OverB", "OverA", "OverC"]),
     ];
 
     [Test]
-    [Arguments(OrderingForm.TypeOf)]
-    [Arguments(OrderingForm.Generic)]
-    [Arguments(OrderingForm.Mixed)]
-    public async Task Pipelines_Run_In_Sort_Order(OrderingForm form, CancellationToken cancellationToken)
+    public async Task Pipelines_Run_In_Sort_Order(CancellationToken cancellationToken)
     {
-        var host = await CompileHostAsync(OrderingForms.Expand(Source, form), cancellationToken);
+        var host = await CompileHostAsync(Source, cancellationToken);
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
         var sender = scope.ServiceProvider.GetRequiredService<ISender>();
@@ -52,28 +49,12 @@ public class PipelineOrderingTests : HostTest
     }
 
     [Test]
-    public async Task Every_Form_Generates_The_Same_Mediator(CancellationToken cancellationToken)
+    public async Task The_Sorted_Pipelines_Compile_Without_Warnings(CancellationToken cancellationToken)
     {
-        var sources = new List<string>();
-        foreach (var form in (OrderingForm[])[OrderingForm.TypeOf, OrderingForm.Generic, OrderingForm.Mixed])
-        {
-            var result = await HostBuilder.WithProjectName("Forms" + form).AddSources(Usings + OrderingForms.Expand(Source, form)).Build().GenerateAsync(cancellationToken);
-            await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-            sources.Add(PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName));
-        }
+        var result = await HostBuilder.AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
 
-        await Assert.That(sources[1]).IsEqualTo(sources[0]);
-        await Assert.That(sources[2]).IsEqualTo(sources[0]);
-    }
-
-    [Test]
-    public async Task The_Forms_Expand_As_Expected(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        const string source = "{{After:A}}{{Before:B<C, D>}}{{After:E}}";
-        await Assert.That(OrderingForms.Expand(source, OrderingForm.TypeOf)).IsEqualTo("[RunsAfter(typeof(A))][RunsBefore(typeof(B<C, D>))][RunsAfter(typeof(E))]");
-        await Assert.That(OrderingForms.Expand(source, OrderingForm.Generic)).IsEqualTo("[RunsAfter<A>][RunsBefore<B<C, D>>][RunsAfter<E>]");
-        await Assert.That(OrderingForms.Expand(source, OrderingForm.Mixed)).IsEqualTo("[RunsAfter(typeof(A))][RunsBefore<B<C, D>>][RunsAfter(typeof(E))]");
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        await Assert.That(PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName)).Contains("global::Sample.Wrap.Handle<global::Sample.R7a, string, ");
     }
 
     private static readonly string Source = BuildSource();
@@ -111,46 +92,54 @@ public class PipelineOrderingTests : HostTest
         builder.Append(Handler("R2", "OrderTwo", "OrderOne", "OrderMinus"));
 
         // R3: edges inside one bucket override name order (A, B, C); EdgeA carries two edges (one per form when mixed).
-        builder.Append(Closed("EdgeA", "R3", "{{After:EdgeC}}\n{{After:EdgeB}}"));
-        builder.Append(Closed("EdgeB", "R3", "{{Before:EdgeC}}"));
+        builder.Append(Closed("EdgeA", "R3", "[RunsAfter(typeof(EdgeC))]\n[RunsAfter(typeof(EdgeB))]"));
+        builder.Append(Closed("EdgeB", "R3", "[RunsBefore(typeof(EdgeC))]"));
         builder.Append(Closed("EdgeC", "R3"));
         builder.Append(Handler("R3", "EdgeA", "EdgeC", "EdgeB"));
 
-        // R4: no position and no edges: ordinal type name.
+        // R4: no position and no edges: ordinal class name.
         builder.Append(Closed("TieB", "R4"));
         builder.Append(Closed("TieA", "R4"));
         builder.Append(Handler("R4", "TieB", "TieA"));
 
         // R5: edges that agree with phase change nothing (name order alone would put AgreeInner first).
-        builder.Append(Closed("AgreeInner", "R5", "[BehaviorOrder(Phase.Transaction)]\n{{After:AgreeOuter}}"));
-        builder.Append(Closed("AgreeOuter", "R5", "[BehaviorOrder(Phase.Observability)]\n{{Before:AgreeInner}}"));
+        builder.Append(Closed("AgreeInner", "R5", "[BehaviorOrder(Phase.Transaction)]\n[RunsAfter(typeof(AgreeOuter))]"));
+        builder.Append(Closed("AgreeOuter", "R5", "[BehaviorOrder(Phase.Observability)]\n[RunsBefore(typeof(AgreeInner))]"));
         builder.Append(Handler("R5", "AgreeInner", "AgreeOuter"));
 
         // R6: an edge to a behavior that is not in this pipeline (TieA is R4's) is ignored.
-        builder.Append(Closed("AbsentB", "R6", "{{Before:TieA}}"));
-        builder.Append(Closed("AbsentA", "R6", "{{After:TieB}}"));
+        builder.Append(Closed("AbsentB", "R6", "[RunsBefore(typeof(TieA))]"));
+        builder.Append(Closed("AbsentA", "R6", "[RunsAfter(typeof(TieB))]"));
         builder.Append(Handler("R6", "AbsentB", "AbsentA"));
 
-        // R7: an open typeof(X<,>) edge matches every closing (only the typeof form can name an open behavior).
+        // R7: typeof names the class, so an edge to a class with an open behavior method holds in every pipeline it is part of.
         builder.Append(Open("Wrap"));
-        builder.Append(Open("Inner", "[RunsAfter(typeof(Wrap<,>))]"));
-        builder.Append(Handler("R7a", "Inner<,>", "Wrap<,>"));
-        builder.Append(Handler("R7b", "Inner<,>", "Wrap<,>"));
+        builder.Append(Open("Inner", "[RunsAfter(typeof(Wrap))]"));
+        builder.Append(Handler("R7a", "Inner", "Wrap"));
+        builder.Append(Handler("R7b", "Inner", "Wrap"));
 
-        // R8: a closed edge matches only that closing, in either form.
-        builder.Append(Open("WrapC"));
-        builder.Append(Open("InnerC", "{{After:WrapC<R8a, string>}}"));
-        builder.Append(Handler("R8a", "InnerC<,>", "WrapC<,>"));
-        builder.Append(Handler("R8b", "InnerC<,>", "WrapC<,>"));
+        // R8: a behavior method's [BehaviorOrder] overrides its class's for that kind.
+        builder.Append(Closed("MethodPhase", "R8", "[BehaviorOrder(Phase.Transaction)]", "[BehaviorOrder(Phase.Observability)]"));
+        builder.Append(Closed("Plain", "R8"));
+        builder.Append(Handler("R8", "Plain", "MethodPhase"));
+
+        // R9: a behavior method's [RunsAfter] list replaces its class's. Only the method's edge (OverB outside OverA) applies, so OverC,
+        // after OverA by name, stays innermost; the class's edge alone, or both edges, would put OverC before OverA (OverB, OverC, OverA).
+        builder.Append(Closed("OverA", "R9", "[RunsAfter(typeof(OverC))]", "[RunsAfter(typeof(OverB))]"));
+        builder.Append(Closed("OverB", "R9"));
+        builder.Append(Closed("OverC", "R9"));
+        builder.Append(Handler("R9", "OverA", "OverB", "OverC"));
         return builder.ToString();
     }
 
-    private static string Closed(string name, string request, string attributes = "") =>
+    private static string Closed(string name, string request, string attributes = "", string methodAttributes = "") =>
         $$"""
+          [RequestBehavior]
           {{attributes}}
-          public sealed class {{name}} : IRequestPipelineBehavior<{{request}}, string>
+          public static class {{name}}
           {
-              public ValueTask<string> Handle<TNext>({{request}} request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string>
+              {{methodAttributes}}
+              public static ValueTask<string> Handle<TNext>({{request}} request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<string>
               {
                   Log.Write("{{name}}");
                   return next.InvokeAsync(cancellationToken);
@@ -162,10 +151,13 @@ public class PipelineOrderingTests : HostTest
 
     private static string Open(string name, string attributes = "") =>
         $$"""
+          [RequestBehavior]
           {{attributes}}
-          public sealed class {{name}}<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>
+          public static class {{name}}
           {
-              public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse>
+              public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                  where TRequest : IRequest<TResponse>
+                  where TNext : struct, INext<TResponse>
               {
                   Log.Write("{{name}}");
                   return next.InvokeAsync(cancellationToken);

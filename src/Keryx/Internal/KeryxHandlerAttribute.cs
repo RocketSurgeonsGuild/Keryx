@@ -23,7 +23,8 @@ public sealed class KeryxHandlerAttribute(Type targetType, HandlerKind kind) : A
     public HandlerKind Kind { get; } = kind;
 
     /// <summary>
-    ///     The behaviors attached to the handler method, in declared order.
+    ///     The behavior classes attached to a request or stream request handler method, in declared order. Empty for a notification handler,
+    ///     which has no behaviors of its own.
     /// </summary>
     [SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "Attribute arguments are arrays.")]
     public Type[] Behaviors { get; init; } = [];

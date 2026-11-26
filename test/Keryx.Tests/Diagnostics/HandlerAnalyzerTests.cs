@@ -467,7 +467,9 @@ public class HandlerAnalyzerTests : AnalyzerTest
     public async Task KRX016_Attached_Behavior_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
-            Ping + "internal sealed class Hidden { } public static partial class H { [Behavior(typeof(Hidden))] private static string Handle(Ping request) => \"\"; }",
+            Ping
+          + "[RequestBehavior] internal static class Hidden { public static ValueTask<string> Handle<TNext>(Ping r, TNext n) where TNext : struct, INext<string> => n.InvokeAsync(default); }"
+          + " public static partial class H { [Behavior(typeof(Hidden))] private static string Handle(Ping request) => \"\"; }",
             cancellationToken
         );
 

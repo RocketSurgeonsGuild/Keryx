@@ -29,7 +29,9 @@ internal sealed record KeryxReferenceModel(EquatableArray<ReferencedAssemblyMode
 ///     (OQ-16), so the host composition does not read it.
 /// </param>
 /// <param name="Handlers">The public handler classes, ordered by metadata name.</param>
-/// <param name="GlobalBehaviors">The public <c>[GlobalBehavior]</c> classes (unbound when generic), ordered by metadata name.</param>
+/// <param name="GlobalBehaviors">
+///     The public behavior classes with <c>[GlobalBehavior]</c> on the class or on a behavior method, ordered by metadata name.
+/// </param>
 /// <param name="Messages">The public, concrete, non-generic request, stream request and notification types, ordered by metadata name.</param>
 /// <param name="AssemblyBehaviors">Its <c>[assembly: Behavior(typeof(X))]</c> types, in declaration order (OQ-3).</param>
 internal sealed record ReferencedAssemblyModel(
@@ -51,7 +53,9 @@ internal sealed record ReferencedAssemblyModel(
 ///     attribute has none.
 /// </param>
 /// <param name="Kind"><c>KeryxHandler.Kind</c>.</param>
-/// <param name="Behaviors"><c>KeryxHandler.Behaviors</c>: the behaviors attached to the handler method, in declared order.</param>
+/// <param name="Behaviors">
+///     <c>KeryxHandler.Behaviors</c>: the behavior classes attached to a request or stream handler method, in declared order.
+/// </param>
 /// <param name="Order"><c>KeryxHandler.Order</c>: the <c>[HandlerOrder]</c> of a notification handler.</param>
 /// <param name="StaticInvoker"><c>KeryxHandler.StaticInvoker</c>: the handler has no injected parameters.</param>
 internal sealed record ReferencedHandlerModel(

@@ -6,6 +6,7 @@ Keryx itself, so the handler generator runs there and the library carries its ma
 
 - `Keryx.Samples.Contracts` (`netstandard2.0`): requests (`PlaceOrder`, `GetOrder`, `CancelOrder`), a stream request (`ListOrders`) and
   notifications (`IOrderEvent`, `OrderPlaced`, `OrderCancelled`). `[assembly: KeryxContracts]` turns off KRX001 there.
-- `Keryx.Samples.Orders` (`net10.0`): the handlers of those contracts, a `[GlobalBehavior]` (`LoggingBehavior<,>`, applied in every host
-  that references the library), a behavior attached to one handler (`ValidateQuantity`), and notification handlers, one of them
-  polymorphic (`AuditOrderEvents`, typed with `IOrderEvent`).
+- `Keryx.Samples.Orders` (`net10.0`): the handlers of those contracts, two static request behaviors (`Logging`, an open behavior method
+  marked `[GlobalBehavior]` and applied in every host that references the library, which injects `IActivityLog`; and `ValidateQuantity`,
+  a closed behavior method attached to one handler), and notification handlers, one of them polymorphic (`AuditOrderEvents`, typed with
+  `IOrderEvent`).

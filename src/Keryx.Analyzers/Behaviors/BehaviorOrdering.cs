@@ -5,29 +5,32 @@ using Microsoft.CodeAnalysis;
 namespace Keryx.Analyzers.Behaviors;
 
 /// <summary>
-///     One <c>RunsAfter</c>/<c>RunsBefore</c> edge declared on a behavior class, whichever form declared it (ADR 0001, Ordering).
+///     One <c>RunsAfter</c>/<c>RunsBefore</c> edge of a behavior (ADR 0001, Ordering).
 /// </summary>
 /// <param name="RunsAfter"><see langword="true" /> for <c>RunsAfter</c> (the declaring behavior is inside the target), <see langword="false" /> for <c>RunsBefore</c>.</param>
-/// <param name="Target">The behavior the edge names: an unbound generic (<c>typeof(X&lt;,&gt;)</c>) matches every closing, any other type only itself.</param>
+/// <param name="Target">The behavior class the edge names.</param>
 /// <param name="Attribute">The attribute that declared it, for locations.</param>
-internal readonly record struct BehaviorEdge(bool RunsAfter, ITypeSymbol Target, AttributeData Attribute)
-{
-    /// <summary>Whether the edge names an open behavior, matching every closing of it.</summary>
-    public bool TargetIsOpen => Target is INamedTypeSymbol { IsUnboundGenericType: true };
-}
+internal readonly record struct BehaviorEdge(bool RunsAfter, INamedTypeSymbol Target, AttributeData Attribute);
 
 /// <summary>
-///     Reads behavior positions (<c>[BehaviorOrder]</c>, <c>[RunsAfter]</c>, <c>[RunsBefore]</c>) and sorts pipelines (ADR 0001, Ordering).
+///     Reads behavior positions (<c>[BehaviorOrder]</c>, <c>[RunsAfter]</c>, <c>[RunsBefore]</c>) and sorts pipelines (ADR 0001, Ordering). The
+///     attributes go on the behavior class and apply to every behavior method it declares; the same attribute on a behavior method overrides
+///     the class's for that method's kind.
 /// </summary>
 internal static class BehaviorOrdering
 {
     /// <summary>The phase of a behavior without <c>[BehaviorOrder]</c>: <c>Phase.Default</c>.</summary>
     public const int DefaultPhase = 400;
 
-    /// <summary>The <c>[BehaviorOrder]</c> position of a behavior class: phase, then order; (<see cref="DefaultPhase" />, 0) without one.</summary>
-    public static (int Phase, int Order) ReadPosition(INamedTypeSymbol behavior, KeryxSymbols symbols)
+    /// <summary>
+    ///     The <c>[BehaviorOrder]</c> position of a behavior method: its own, else its class's; (<see cref="DefaultPhase" />, 0) without one.
+    /// </summary>
+    public static (int Phase, int Order) ReadPosition(IMethodSymbol method, KeryxSymbols symbols) =>
+        ReadPosition(method.GetAttributes(), symbols) ?? ReadPosition(method.ContainingType.GetAttributes(), symbols) ?? (DefaultPhase, 0);
+
+    private static (int Phase, int Order)? ReadPosition(ImmutableArray<AttributeData> attributes, KeryxSymbols symbols)
     {
-        foreach (var attribute in behavior.OriginalDefinition.GetAttributes())
+        foreach (var attribute in attributes)
         {
             if (!KeryxSymbols.IsAttribute(attribute, symbols.BehaviorOrderAttribute))
             {
@@ -47,73 +50,55 @@ internal static class BehaviorOrdering
             return (phase, order);
         }
 
-        return (DefaultPhase, 0);
+        return null;
     }
 
     /// <summary>
-    ///     The <c>RunsAfter</c>/<c>RunsBefore</c> edges a behavior class declares, in both forms, in declaration order. This is the one place
-    ///     that reads them: the <c>typeof</c> form's constructor argument and the generic form's type argument give the same
-    ///     <see cref="BehaviorEdge" />, so nothing after this sees which form was written.
+    ///     The <c>RunsAfter</c>/<c>RunsBefore</c> edges of a behavior method: its own <c>[RunsAfter]</c> list when it has one, else its class's,
+    ///     and likewise for <c>[RunsBefore]</c>; the method's edges first, then the class's, each in declaration order.
     /// </summary>
-    public static ImmutableArray<BehaviorEdge> ReadEdges(INamedTypeSymbol behavior, KeryxSymbols symbols)
+    public static ImmutableArray<BehaviorEdge> ReadEdges(IMethodSymbol method, KeryxSymbols symbols)
     {
+        var afterOnMethod = Declares(method, runsAfter: true, symbols);
+        var beforeOnMethod = Declares(method, runsAfter: false, symbols);
         var edges = ImmutableArray.CreateBuilder<BehaviorEdge>();
-        foreach (var attribute in behavior.OriginalDefinition.GetAttributes())
-        {
-            if (attribute.AttributeClass is not { } attributeClass)
-            {
-                continue;
-            }
-
-            var definition = attributeClass.OriginalDefinition;
-            bool runsAfter;
-            if (Is(definition, symbols.RunsAfterAttribute) || Is(definition, symbols.RunsAfterAttributeOfT))
-            {
-                runsAfter = true;
-            }
-            else if (Is(definition, symbols.RunsBeforeAttribute) || Is(definition, symbols.RunsBeforeAttributeOfT))
-            {
-                runsAfter = false;
-            }
-            else
-            {
-                continue;
-            }
-
-            // Generic form: [RunsAfter<X>] carries X as the attribute class's type argument. typeof form: [RunsAfter(typeof(X))] carries it
-            // as the constructor argument.
-            var target = attributeClass.IsGenericType
-                ? attributeClass.TypeArguments[0]
-                : attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: ITypeSymbol type }]
-                    ? type
-                    : null;
-            if (target is null or { TypeKind: TypeKind.Error })
-            {
-                continue;
-            }
-
-            edges.Add(new(runsAfter, target, attribute));
-        }
-
+        AddEdges(edges, method.GetAttributes(), afterOnMethod, beforeOnMethod, symbols);
+        AddEdges(edges, method.ContainingType.GetAttributes(), !afterOnMethod, !beforeOnMethod, symbols);
         return edges.ToImmutable();
-
-        static bool Is(INamedTypeSymbol definition, INamedTypeSymbol? expected) =>
-            expected is not null && SymbolEqualityComparer.Default.Equals(definition, expected);
     }
 
     /// <summary>
-    ///     The <c>typeof</c> operand an edge or exclusion compares against: the open form (<c>X&lt;,&gt;</c>) for an unbound generic, else the
-    ///     closed type.
+    ///     Whether a behavior method declares any ordering attribute of its own, so its ordering may differ from its class's (KRX008 is then
+    ///     checked for its kind on its own).
     /// </summary>
-    public static string Operand(ITypeSymbol type) => CSharpText.TypeOf(type);
+    public static bool OverridesOrdering(IMethodSymbol method, KeryxSymbols symbols) =>
+        method.GetAttributes()
+              .Any(a => KeryxSymbols.IsAttribute(a, symbols.BehaviorOrderAttribute)
+                     || KeryxSymbols.IsAttribute(a, symbols.RunsAfterAttribute)
+                     || KeryxSymbols.IsAttribute(a, symbols.RunsBeforeAttribute));
 
-    /// <summary>The <c>typeof</c> operand of a behavior class's definition: <c>X&lt;,&gt;</c> for a generic one, the type itself otherwise.</summary>
-    public static string DefinitionOperand(INamedTypeSymbol behavior) =>
-        behavior.IsGenericType ? CSharpText.TypeOf(behavior.ConstructUnboundGenericType()) : CSharpText.TypeOf(behavior);
+    private static bool Declares(IMethodSymbol method, bool runsAfter, KeryxSymbols symbols) =>
+        method.GetAttributes().Any(a => KeryxSymbols.IsAttribute(a, runsAfter ? symbols.RunsAfterAttribute : symbols.RunsBeforeAttribute));
+
+    private static void AddEdges(ImmutableArray<BehaviorEdge>.Builder edges, ImmutableArray<AttributeData> attributes, bool after, bool before, KeryxSymbols symbols)
+    {
+        foreach (var attribute in attributes)
+        {
+            var runsAfter = KeryxSymbols.IsAttribute(attribute, symbols.RunsAfterAttribute);
+            if (( runsAfter ? after : before && KeryxSymbols.IsAttribute(attribute, symbols.RunsBeforeAttribute) )
+             && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: INamedTypeSymbol { TypeKind: not TypeKind.Error } target }])
+            {
+                edges.Add(new(runsAfter, target, attribute));
+            }
+        }
+    }
+
+    /// <summary>The <c>typeof</c> operand a behavior class, an edge target or an exclusion compares by.</summary>
+    public static string Operand(ITypeSymbol type) => CSharpText.TypeOf(type);
 
     /// <summary>
     ///     Sorts one pipeline's behaviors (ADR 0001, Ordering, Sort rules): phase ascending, then order ascending, then the
-    ///     <c>RunsAfter</c>/<c>RunsBefore</c> edges inside each (phase, order) bucket topologically, then the ordinal fully qualified type
+    ///     <c>RunsAfter</c>/<c>RunsBefore</c> edges inside each (phase, order) bucket topologically, then the ordinal fully qualified class
     ///     name. Edges across buckets do not move anything (they agree with phase and order, or are KRX008). Behaviors left unplaced by a
     ///     cycle keep name order; each cycle (a strongly connected component of two or more of them, in name order) is added to
     ///     <paramref name="cycles" />.
@@ -285,23 +270,17 @@ internal static class BehaviorOrdering
 }
 
 /// <summary>What the sort needs from one behavior in a pipeline.</summary>
-/// <param name="Identity">The closed behavior's <c>typeof</c> operand, which is also its ordinal sort name.</param>
-/// <param name="Definition">The <c>typeof</c> operand of its definition (<c>X&lt;,&gt;</c> for an open behavior).</param>
+/// <param name="Identity">The behavior class's <c>typeof</c> operand, which is also its ordinal sort name.</param>
 /// <param name="Phase">Its phase.</param>
 /// <param name="Order">Its order inside the phase.</param>
 /// <param name="Edges">Its <c>RunsAfter</c>/<c>RunsBefore</c> edges.</param>
-internal readonly record struct OrderingKey(string Identity, string Definition, int Phase, int Order, IReadOnlyList<OrderingEdge> Edges);
+internal readonly record struct OrderingKey(string Identity, int Phase, int Order, IReadOnlyList<OrderingEdge> Edges);
 
 /// <summary>An edge as the sort compares it.</summary>
 /// <param name="RunsAfter">The edge's direction.</param>
-/// <param name="Target">The target's <c>typeof</c> operand.</param>
-/// <param name="TargetIsOpen">Whether the target is open, matching every closing (compared with <see cref="OrderingKey.Definition" />).</param>
-internal readonly record struct OrderingEdge(bool RunsAfter, string Target, bool TargetIsOpen)
+/// <param name="Target">The target class's <c>typeof</c> operand.</param>
+internal readonly record struct OrderingEdge(bool RunsAfter, string Target)
 {
-    /// <summary>
-    ///     Whether the edge names this behavior: an open <c>typeof(X&lt;,&gt;)</c> matches every closing of <c>X</c>; a closed one, in either
-    ///     form, matches only that closing.
-    /// </summary>
-    public bool Matches(OrderingKey behavior) =>
-        TargetIsOpen ? string.Equals(Target, behavior.Definition, StringComparison.Ordinal) : string.Equals(Target, behavior.Identity, StringComparison.Ordinal);
+    /// <summary>Whether the edge names this behavior's class.</summary>
+    public bool Matches(OrderingKey behavior) => string.Equals(Target, behavior.Identity, StringComparison.Ordinal);
 }

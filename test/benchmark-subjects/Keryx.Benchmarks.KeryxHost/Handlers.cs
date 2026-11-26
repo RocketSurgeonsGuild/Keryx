@@ -15,7 +15,7 @@ public static partial class Ping0Handler
 
 public static partial class Ping1Handler
 {
-    [Behavior(typeof(Pass1<,>))]
+    [Behavior(typeof(Pass1))]
     private static ValueTask<int> Handle(Ping1 request)
     {
         Probe.Hit();
@@ -25,9 +25,9 @@ public static partial class Ping1Handler
 
 public static partial class Ping3Handler
 {
-    [Behavior(typeof(Pass1<,>))]
-    [Behavior(typeof(Pass2<,>))]
-    [Behavior(typeof(Pass3<,>))]
+    [Behavior(typeof(Pass1))]
+    [Behavior(typeof(Pass2))]
+    [Behavior(typeof(Pass3))]
     private static ValueTask<int> Handle(Ping3 request)
     {
         Probe.Hit();
@@ -37,14 +37,14 @@ public static partial class Ping3Handler
 
 public static partial class Ping8Handler
 {
-    [Behavior(typeof(Pass1<,>))]
-    [Behavior(typeof(Pass2<,>))]
-    [Behavior(typeof(Pass3<,>))]
-    [Behavior(typeof(Pass4<,>))]
-    [Behavior(typeof(Pass5<,>))]
-    [Behavior(typeof(Pass6<,>))]
-    [Behavior(typeof(Pass7<,>))]
-    [Behavior(typeof(Pass8<,>))]
+    [Behavior(typeof(Pass1))]
+    [Behavior(typeof(Pass2))]
+    [Behavior(typeof(Pass3))]
+    [Behavior(typeof(Pass4))]
+    [Behavior(typeof(Pass5))]
+    [Behavior(typeof(Pass6))]
+    [Behavior(typeof(Pass7))]
+    [Behavior(typeof(Pass8))]
     private static ValueTask<int> Handle(Ping8 request)
     {
         Probe.Hit();
@@ -64,7 +64,7 @@ public static partial class YieldPing0Handler
 
 public static partial class YieldPing1Handler
 {
-    [Behavior(typeof(Pass1<,>))]
+    [Behavior(typeof(Pass1))]
     private static async ValueTask<int> Handle(YieldPing1 request)
     {
         await Task.Yield();
@@ -75,9 +75,9 @@ public static partial class YieldPing1Handler
 
 public static partial class YieldPing3Handler
 {
-    [Behavior(typeof(Pass1<,>))]
-    [Behavior(typeof(Pass2<,>))]
-    [Behavior(typeof(Pass3<,>))]
+    [Behavior(typeof(Pass1))]
+    [Behavior(typeof(Pass2))]
+    [Behavior(typeof(Pass3))]
     private static async ValueTask<int> Handle(YieldPing3 request)
     {
         await Task.Yield();
@@ -88,14 +88,14 @@ public static partial class YieldPing3Handler
 
 public static partial class YieldPing8Handler
 {
-    [Behavior(typeof(Pass1<,>))]
-    [Behavior(typeof(Pass2<,>))]
-    [Behavior(typeof(Pass3<,>))]
-    [Behavior(typeof(Pass4<,>))]
-    [Behavior(typeof(Pass5<,>))]
-    [Behavior(typeof(Pass6<,>))]
-    [Behavior(typeof(Pass7<,>))]
-    [Behavior(typeof(Pass8<,>))]
+    [Behavior(typeof(Pass1))]
+    [Behavior(typeof(Pass2))]
+    [Behavior(typeof(Pass3))]
+    [Behavior(typeof(Pass4))]
+    [Behavior(typeof(Pass5))]
+    [Behavior(typeof(Pass6))]
+    [Behavior(typeof(Pass7))]
+    [Behavior(typeof(Pass8))]
     private static async ValueTask<int> Handle(YieldPing8 request)
     {
         await Task.Yield();
@@ -115,22 +115,10 @@ public static partial class Count0Handler
 
 public static partial class Count3Handler
 {
-    [Behavior(typeof(StreamPass1<,>))]
-    [Behavior(typeof(StreamPass2<,>))]
-    [Behavior(typeof(StreamPass3<,>))]
+    [Behavior(typeof(StreamPass1))]
+    [Behavior(typeof(StreamPass2))]
+    [Behavior(typeof(StreamPass3))]
     private static IAsyncEnumerable<int> Handle(Count3 request)
-    {
-        Probe.Hit();
-        return Numbers.Range(request.Count);
-    }
-}
-
-public static partial class CountHooks3Handler
-{
-    [Behavior(typeof(StreamHook1<,>))]
-    [Behavior(typeof(StreamHook2<,>))]
-    [Behavior(typeof(StreamHook3<,>))]
-    private static IAsyncEnumerable<int> Handle(CountHooks3 request)
     {
         Probe.Hit();
         return Numbers.Range(request.Count);

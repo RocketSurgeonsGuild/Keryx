@@ -7,8 +7,53 @@ using Microsoft.CodeAnalysis;
 namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
+///     A <c>[GlobalBehavior]</c> the host sees: the behavior class, the kinds the attribute makes global (every kind when it is on the class,
+///     the method's kind when it is on a behavior method), and the attribute KRX035 points at.
+/// </summary>
+/// <param name="Type">The behavior class.</param>
+/// <param name="Kinds">The kinds that are global.</param>
+/// <param name="Attribute">The first <c>[GlobalBehavior]</c> (the class's, else a method's).</param>
+internal sealed record GlobalBehavior(INamedTypeSymbol Type, ImmutableArray<BehaviorKind> Kinds, AttributeData Attribute)
+{
+    /// <summary>The global behavior of a class, or <see langword="null" /> when no <c>[GlobalBehavior]</c> applies to any of its kinds.</summary>
+    public static GlobalBehavior? Of(INamedTypeSymbol type, KeryxSymbols symbols)
+    {
+        if (symbols.GlobalBehaviorAttribute is not { } globalAttribute)
+        {
+            return null;
+        }
+
+        var carried = BehaviorShapes.Kinds(type, symbols);
+        if (carried.IsEmpty)
+        {
+            return null;
+        }
+
+        if (type.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, globalAttribute)) is { } classAttribute)
+        {
+            return new(type, [.. carried.Select(static k => k.Kind)], classAttribute);
+        }
+
+        AttributeData? first = null;
+        var kinds = ImmutableArray.CreateBuilder<BehaviorKind>();
+        foreach (var method in BehaviorShapes.Candidates(type))
+        {
+            if (method.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, globalAttribute)) is { } methodAttribute
+             && BehaviorShapes.BehaviorMethodKind(method, symbols) is { } kind
+             && !kinds.Contains(kind))
+            {
+                first ??= methodAttribute;
+                kinds.Add(kind);
+            }
+        }
+
+        return first is null ? null : new(type, kinds.ToImmutable(), first);
+    }
+}
+
+/// <summary>
 ///     The behaviors and notification types a host composes its pipelines from, beyond those attached to a handler: <c>[assembly: Behavior]</c>
-///     entries, <c>[GlobalBehavior]</c> classes (from the host's source and from its references), the host's <c>[assembly: ExcludeBehavior]</c>
+///     entries, <c>[GlobalBehavior]</c>s (from the host's source and from its references), the host's <c>[assembly: ExcludeBehavior]</c>
 ///     entries, and every concrete notification type the host knows. Built once per composition and shared by every handler. Holds symbols,
 ///     so it never reaches an incremental model.
 /// </summary>
@@ -20,7 +65,9 @@ internal sealed class BehaviorCatalog
     private readonly ConcurrentDictionary<INamedTypeSymbol, BehaviorShape?> _shapes = new(SymbolEqualityComparer.Default);
     private readonly ConcurrentDictionary<INamedTypeSymbol, HostNotificationModel?> _notifications = new(SymbolEqualityComparer.Default);
     private readonly ConcurrentDictionary<IAssemblySymbol, ImmutableArray<ITypeSymbol>> _assemblyBehaviors = new(SymbolEqualityComparer.Default);
-    private readonly ConcurrentDictionary<INamedTypeSymbol, ITypeSymbol?> _constructorErrors = new(SymbolEqualityComparer.Default);
+    private readonly ConcurrentDictionary<INamedTypeSymbol, ITypeSymbol?> _serviceErrors = new(SymbolEqualityComparer.Default);
+    private readonly ConcurrentQueue<(INamedTypeSymbol Notification, ITypeSymbol Behavior, string Reason)> _unfitNotificationBehaviors = new();
+    private readonly ConcurrentQueue<(ITypeSymbol Error, string Assembly)> _unresolvedNotificationBehaviors = new();
 
     private readonly IReadOnlyDictionary<string, ImmutableArray<ITypeSymbol>> _referencedAssemblyBehaviors;
 
@@ -56,18 +103,13 @@ internal sealed class BehaviorCatalog
         AssemblyBehaviors = assemblyBehaviors.ToImmutable();
         Exclusions = exclusions.ToImmutable();
 
-        var globals = ImmutableArray.CreateBuilder<(INamedTypeSymbol, AttributeData)>();
-        if (symbols.GlobalBehaviorAttribute is { } globalBehaviorAttribute)
+        var globals = ImmutableArray.CreateBuilder<GlobalBehavior>();
+        CollectGlobals(compilation.Assembly.GlobalNamespace, symbols, globals);
+        foreach (var reference in referencedGlobals)
         {
-            CollectGlobals(compilation.Assembly.GlobalNamespace, globalBehaviorAttribute, globals);
-            foreach (var reference in referencedGlobals)
+            if (GlobalBehavior.Of(reference, symbols) is { } global)
             {
-                // The scan names a generic global behavior unbound; the catalog holds definitions, as for the ones in source.
-                var type = reference.OriginalDefinition;
-                if (type.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, globalBehaviorAttribute)) is { } attribute)
-                {
-                    globals.Add((type, attribute));
-                }
+                globals.Add(global);
             }
         }
 
@@ -81,10 +123,10 @@ internal sealed class BehaviorCatalog
     public ImmutableArray<ITypeSymbol> AssemblyBehaviors { get; }
 
     /// <summary>
-    ///     The <c>[GlobalBehavior]</c> classes: those declared in this compilation (in namespace and declaration order), then the referenced
-    ///     ones (in assembly and metadata name order), each with its attribute.
+    ///     The global behaviors: those declared in this compilation (in namespace and declaration order), then the referenced ones (in assembly
+    ///     and metadata name order).
     /// </summary>
-    public ImmutableArray<(INamedTypeSymbol Type, AttributeData Attribute)> GlobalBehaviors { get; }
+    public ImmutableArray<GlobalBehavior> GlobalBehaviors { get; }
 
     /// <summary>The <c>[assembly: ExcludeBehavior(typeof(X))]</c> entries.</summary>
     public ImmutableArray<(ITypeSymbol Type, AttributeData Attribute)> Exclusions { get; }
@@ -96,10 +138,23 @@ internal sealed class BehaviorCatalog
     /// </summary>
     public ImmutableArray<INamedTypeSymbol> KnownNotifications { get; private set; } = ImmutableArray<INamedTypeSymbol>.Empty;
 
+    /// <summary>
+    ///     The <c>[Behavior]</c>s on referenced notification types that do not fit the type as the host resolves it (OQ-55), for KRX009, in
+    ///     the order they were found.
+    /// </summary>
+    public IEnumerable<(INamedTypeSymbol Notification, ITypeSymbol Behavior, string Reason)> UnfitNotificationBehaviors => _unfitNotificationBehaviors;
+
+    /// <summary>
+    ///     The <c>[Behavior]</c>s on referenced notification types whose behavior class does not resolve in the host (its assembly is not
+    ///     referenced), for KRX034: the first type that does not resolve and the assembly that declares the notification type, in the order
+    ///     they were found. Each one is skipped, and the rest of the publish pipeline kept.
+    /// </summary>
+    public IEnumerable<(ITypeSymbol Error, string Assembly)> UnresolvedNotificationBehaviors => _unresolvedNotificationBehaviors;
+
     /// <summary>A catalog for one composition of a host.</summary>
     /// <param name="compilation">The host's compilation.</param>
     /// <param name="symbols">Its Keryx symbols.</param>
-    /// <param name="referencedGlobals">The <c>[GlobalBehavior]</c> classes of its references (unbound when generic).</param>
+    /// <param name="referencedGlobals">The behavior classes of its references that carry <c>[GlobalBehavior]</c> on the class or a method.</param>
     /// <param name="referencedAssemblyBehaviors">
     ///     The <c>[assembly: Behavior]</c> types of its references, by assembly name, from their projections; an assembly not listed is read
     ///     from metadata.
@@ -134,7 +189,7 @@ internal sealed class BehaviorCatalog
                 : _assemblyBehaviors.GetOrAdd(assembly, a => [.. ReadAssemblyBehaviors(a, Symbols)]);
 
     /// <summary>
-    ///     The host's model of a concrete notification type (ADR 0001, Notifications): its publish strategy and its per-publish behaviors, or
+    ///     The host's model of a concrete notification type (ADR 0001, Notifications): its publish strategy and its notification behaviors, or
     ///     <see langword="null" /> when the host cannot know the type (see <see cref="IsKnowable" />). Built once per type.
     /// </summary>
     public HostNotificationModel? Notification(INamedTypeSymbol type) => _notifications.GetOrAdd(type, CreateNotification);
@@ -174,6 +229,10 @@ internal sealed class BehaviorCatalog
             return null;
         }
 
+        // The analyzer reports KRX009 for a [Behavior] on a notification type in the host's own source; the host reports it for a referenced
+        // type, whose behavior may no longer fit the type as the host resolves it (OQ-55). A behavior class of a referenced type that does
+        // not resolve (its assembly is not referenced) is KRX034, like any type the host derives from a reference, and is skipped.
+        var inSource = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, Compilation.Assembly);
         var parallel = false;
         var attached = ImmutableArray.CreateBuilder<ITypeSymbol>();
         foreach (var attribute in type.GetAttributes())
@@ -183,8 +242,18 @@ internal sealed class BehaviorCatalog
                 parallel = strategy == ParallelStrategy;
             }
             else if (KeryxSymbols.IsAttribute(attribute, Symbols.BehaviorAttribute)
-                  && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: ITypeSymbol behavior }])
+                  && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type or TypedConstantKind.Error, Value: ITypeSymbol behavior }])
             {
+                if (HostComposer.FirstError(behavior) is { } error)
+                {
+                    if (!inSource)
+                    {
+                        _unresolvedNotificationBehaviors.Enqueue((error, type.ContainingAssembly?.Name ?? ""));
+                    }
+
+                    continue;
+                }
+
                 attached.Add(behavior);
             }
         }
@@ -192,8 +261,9 @@ internal sealed class BehaviorCatalog
         var (behaviors, usedExclusions) = PipelineBehaviors.Compose(
             attached,
             AssemblyBehaviorsOf(type.ContainingAssembly),
-            new(BehaviorTargetKind.Notification, [type]),
-            this
+            new(BehaviorKind.Notification, type, null),
+            this,
+            inSource ? null : (behavior, reason) => _unfitNotificationBehaviors.Enqueue((type, behavior, reason))
         );
 
         return new(
@@ -221,52 +291,51 @@ internal sealed class BehaviorCatalog
     }
 
     /// <summary>
-    ///     Whether generated code can construct a behavior (its definition): <see langword="false" /> for a behavior from another assembly with
-    ///     a public constructor parameter type the host cannot resolve (OQ-47). Those are listed in <see cref="UnresolvedConstructors" />.
+    ///     Whether generated code can call a behavior class's methods: <see langword="false" /> for a behavior from another assembly whose
+    ///     behavior methods inject a type the host cannot resolve (OQ-47). Those are listed in <see cref="UnresolvedServices" />.
     /// </summary>
-    public bool CanConstruct(INamedTypeSymbol definition) =>
-        SymbolEqualityComparer.Default.Equals(definition.ContainingAssembly, Compilation.Assembly)
-     || _constructorErrors.GetOrAdd(definition, static d => HostComposer.ConstructorError(d)) is null;
+    public bool CanCall(INamedTypeSymbol type) =>
+        SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, Compilation.Assembly)
+     || _serviceErrors.GetOrAdd(type, d => HostComposer.ServiceError(d, Symbols)) is null;
 
     /// <summary>
-    ///     The behaviors <see cref="CanConstruct" /> rejected so far, each with the first type that does not resolve, in name order, for
-    ///     KRX034.
+    ///     The behaviors <see cref="CanCall" /> rejected so far, each with the first type that does not resolve, in name order, for KRX034.
     /// </summary>
-    public IEnumerable<(INamedTypeSymbol Behavior, ITypeSymbol Error)> UnresolvedConstructors =>
-        _constructorErrors
+    public IEnumerable<(INamedTypeSymbol Behavior, ITypeSymbol Error)> UnresolvedServices =>
+        _serviceErrors
            .Where(static pair => pair.Value is not null)
            .Select(static pair => (pair.Key, pair.Value!))
            .OrderBy(static pair => pair.Key.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), StringComparer.Ordinal);
 
-    /// <summary>The shape of a behavior class (its definition), or <see langword="null" /> when the behavior rules reject it.</summary>
+    /// <summary>The shape of a behavior class, or <see langword="null" /> when the behavior rules reject it or it is not one.</summary>
     public BehaviorShape? Shape(INamedTypeSymbol type) =>
-        _shapes.GetOrAdd(type.OriginalDefinition, definition => BehaviorShapes.Analyze(definition, Symbols, new IssueCollector()));
+        _shapes.GetOrAdd(type, definition => BehaviorShapes.Analyze(definition, Symbols, new IssueCollector()));
 
-    private static void CollectGlobals(INamespaceSymbol @namespace, INamedTypeSymbol attributeType, ImmutableArray<(INamedTypeSymbol, AttributeData)>.Builder globals)
+    private static void CollectGlobals(INamespaceSymbol @namespace, KeryxSymbols symbols, ImmutableArray<GlobalBehavior>.Builder globals)
     {
         foreach (var member in @namespace.GetMembers())
         {
             if (member is INamespaceSymbol nested)
             {
-                CollectGlobals(nested, attributeType, globals);
+                CollectGlobals(nested, symbols, globals);
             }
             else if (member is INamedTypeSymbol type)
             {
-                CollectGlobals(type, attributeType, globals);
+                CollectGlobals(type, symbols, globals);
             }
         }
     }
 
-    private static void CollectGlobals(INamedTypeSymbol type, INamedTypeSymbol attributeType, ImmutableArray<(INamedTypeSymbol, AttributeData)>.Builder globals)
+    private static void CollectGlobals(INamedTypeSymbol type, KeryxSymbols symbols, ImmutableArray<GlobalBehavior>.Builder globals)
     {
-        if (type.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, attributeType)) is { } attribute)
+        if (GlobalBehavior.Of(type, symbols) is { } global)
         {
-            globals.Add((type, attribute));
+            globals.Add(global);
         }
 
         foreach (var nested in type.GetTypeMembers())
         {
-            CollectGlobals(nested, attributeType, globals);
+            CollectGlobals(nested, symbols, globals);
         }
     }
 }
@@ -278,12 +347,12 @@ internal sealed class BehaviorCatalog
 internal static class PipelineBehaviors
 {
     /// <summary>
-    ///     The closed behaviors that apply to a handler: the behaviors attached to the handler method (read from its <c>[Behavior]</c>s for one
-    ///     of the host's own handlers, from <c>KeryxHandler.Behaviors</c> for a referenced one), then its assembly's, then the global ones,
-    ///     each closed over the target and kept when it fits; de-duplicated by closed type; minus the host's exclusions. A behavior that does
-    ///     not fit is skipped (KRX009 for one attached to the method: the analyzer reports it for the host's own handlers, the host for
-    ///     referenced ones), as is one the behavior rules reject (KRX019, KRX020), one generated code cannot reach (narrower than
-    ///     <c>internal</c>) or one whose constructor names a type the host cannot resolve (KRX034).
+    ///     The behaviors that apply to a request or stream handler: the behavior classes attached to the handler method (read from its
+    ///     <c>[Behavior]</c>s for one of the host's own handlers, from <c>KeryxHandler.Behaviors</c> for a referenced one), then its assembly's,
+    ///     then the global ones, each kept when its behavior method of the target's kind fits; de-duplicated by behavior class; minus the
+    ///     host's exclusions. A behavior that does not fit is skipped (KRX009 for one attached to the method: the analyzer reports it for the
+    ///     host's own handlers, the host for referenced ones), as is one the behavior rules reject (KRX019), one generated code cannot reach
+    ///     (narrower than <c>internal</c>, or not accessible from the host) or one that injects a type the host cannot resolve (KRX034).
     /// </summary>
     public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<string> UsedExclusions) For(
         ImmutableArray<ITypeSymbol> attached,
@@ -291,18 +360,20 @@ internal static class PipelineBehaviors
         BehaviorTarget target,
         BehaviorCatalog catalog
     ) =>
-        Compose(attached, catalog.AssemblyBehaviorsOf(handlerAssembly), target, catalog);
+        Compose(attached, catalog.AssemblyBehaviorsOf(handlerAssembly), target, catalog, null);
 
     /// <summary>
-    ///     The closed behaviors that apply to one target: <paramref name="attached" /> (per target), then <paramref name="assembly" /> (per
-    ///     assembly), then the global ones, each closed over the target and kept when it fits; de-duplicated by closed type; minus the host's
-    ///     exclusions.
+    ///     The behaviors that apply to one target: <paramref name="attached" /> (per target), then <paramref name="assembly" /> (per
+    ///     assembly), then the global ones whose <c>[GlobalBehavior]</c> covers the target's kind, each kept when it fits; de-duplicated by
+    ///     behavior class; minus the host's exclusions. <paramref name="unfitAttached" /> receives each attached behavior that does not fit,
+    ///     with the reason (a class the behavior rules reject is its own KRX019 and is not passed).
     /// </summary>
     public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<string> UsedExclusions) Compose(
         IEnumerable<ITypeSymbol> attached,
         IEnumerable<ITypeSymbol> assembly,
         BehaviorTarget target,
-        BehaviorCatalog catalog
+        BehaviorCatalog catalog,
+        Action<ITypeSymbol, string>? unfitAttached
     )
     {
         var behaviors = new SortedDictionary<string, PipelineBehaviorModel>(StringComparer.Ordinal);
@@ -310,38 +381,54 @@ internal static class PipelineBehaviors
 
         foreach (var type in attached)
         {
-            Apply(type);
+            Apply(type, unfitAttached);
         }
 
         foreach (var type in assembly)
         {
-            Apply(type);
+            Apply(type, null);
         }
 
-        foreach (var (type, _) in catalog.GlobalBehaviors)
+        foreach (var global in catalog.GlobalBehaviors)
         {
-            Apply(type.IsGenericType ? type.ConstructUnboundGenericType() : type);
+            if (global.Kinds.Contains(target.Kind))
+            {
+                Apply(global.Type, null);
+            }
         }
 
         return ([.. behaviors.Values], [.. usedExclusions]);
 
-        void Apply(ITypeSymbol type)
+        void Apply(ITypeSymbol type, Action<ITypeSymbol, string>? unfit)
         {
-            if (type is not INamedTypeSymbol named
-             || catalog.Shape(named) is not { } shape
-             || !catalog.CanConstruct(shape.Type)
-             || !BehaviorMatching.TryClose(named, shape, target, catalog.Compilation, out var closed, out _)
-             || TypeAccessibility.Of(closed) == AccessLevel.Restricted)
+            if (type is not INamedTypeSymbol named || !BehaviorShapes.IsBehaviorClass(named, catalog.Symbols))
+            {
+                unfit?.Invoke(type, "it is not a behavior class (a static class with [RequestBehavior], [StreamBehavior] or [NotificationBehavior])");
+                return;
+            }
+
+            if (catalog.Shape(named) is not { } shape || !catalog.CanCall(named))
             {
                 return;
             }
 
-            var identity = CSharpText.TypeOf(closed);
-            var definition = BehaviorOrdering.DefinitionOperand(shape.Type);
+            if (!BehaviorMatching.TryMatch(shape, target, catalog.Compilation, out var match, out var reason))
+            {
+                unfit?.Invoke(type, reason);
+                return;
+            }
+
+            if (BehaviorShapes.Access(named, match.Method.Method) == AccessLevel.Restricted
+             || !catalog.Compilation.IsSymbolAccessibleWithin(match.Method.Method, catalog.Compilation.Assembly))
+            {
+                return;
+            }
+
+            var identity = BehaviorOrdering.Operand(named);
             foreach (var (excluded, _) in catalog.Exclusions)
             {
                 var operand = BehaviorOrdering.Operand(excluded);
-                if (string.Equals(operand, excluded is INamedTypeSymbol { IsUnboundGenericType: true } ? definition : identity, StringComparison.Ordinal))
+                if (string.Equals(operand, identity, StringComparison.Ordinal))
                 {
                     usedExclusions.Add(operand);
                     return;
@@ -350,53 +437,63 @@ internal static class PipelineBehaviors
 
             if (!behaviors.ContainsKey(identity))
             {
-                behaviors.Add(identity, Model(closed, shape, catalog));
+                behaviors.Add(identity, Model(named, match, catalog));
             }
         }
     }
 
     /// <summary>
-    ///     The target of a request or stream request handler, or <see langword="null" /> for a notification handler, whose per-handler
-    ///     behaviors are closed over each concrete type it receives (see <c>HostModelFactory.Deliveries</c>).
+    ///     The target of a request or stream request handler, or <see langword="null" /> for a notification handler, which has no behaviors of
+    ///     its own (ADR 0001, Notifications).
     /// </summary>
     public static BehaviorTarget? Target(HandlerKind kind, ITypeSymbol message, ITypeSymbol? response) =>
         (kind, response) switch
         {
-            (HandlerKind.Request, { } responseType) => new BehaviorTarget(BehaviorTargetKind.Request, [message, responseType]),
-            (HandlerKind.Stream, { } item) => new BehaviorTarget(BehaviorTargetKind.Stream, [message, item]),
+            (HandlerKind.Request, { } responseType) => new BehaviorTarget(BehaviorKind.Request, message, responseType),
+            (HandlerKind.Stream, { } item) => new BehaviorTarget(BehaviorKind.Stream, message, item),
             _ => null,
         };
 
-    private static PipelineBehaviorModel Model(INamedTypeSymbol closed, BehaviorShape shape, BehaviorCatalog catalog)
+    private static PipelineBehaviorModel Model(INamedTypeSymbol type, BehaviorMatch match, BehaviorCatalog catalog)
     {
         var symbols = catalog.Symbols;
-        var (phase, order) = BehaviorOrdering.ReadPosition(shape.Type, symbols);
+        var method = match.Method.Method;
+        var (phase, order) = BehaviorOrdering.ReadPosition(method, symbols);
         var edges = BehaviorOrdering
-                   .ReadEdges(shape.Type, symbols)
+                   .ReadEdges(method, symbols)
                    .Select(static e => new BehaviorEdgeModel(
-                               new(e.RunsAfter, BehaviorOrdering.Operand(e.Target), e.TargetIsOpen),
+                               new(e.RunsAfter, BehaviorOrdering.Operand(e.Target)),
                                LocationInfo.From(HandlerAnalysis.AttributeLocation(e.Attribute))
                            )
                     )
                    .ToImmutableArray();
 
-        // The closed type's constructor has its parameter types substituted (ILogger<TRequest> becomes ILogger<Ping>).
-        var constructor = closed.InstanceConstructors.First(static c => c.DeclaredAccessibility == Accessibility.Public);
-        var services = constructor
-                      .Parameters.Select(static p => HostModelFactory.Service(p.Type, HandlerModelFactory.ServiceKey(p), CSharpText.DefaultValue(p)))
-                      .ToImmutableArray();
+        // The injected parameters, with the target's types substituted (ILogger<TRequest> becomes ILogger<Ping>).
+        var services = ImmutableArray.CreateBuilder<ServiceParameterModel>(match.Services.Length);
+        var next = 0;
+        for (var i = 0; i < match.Method.Roles.Length; i++)
+        {
+            if (match.Method.Roles[i] == BehaviorParameterRole.Service)
+            {
+                var parameter = method.Parameters[i];
+                services.Add(HostModelFactory.Service(match.Services[next++], HandlerModelFactory.ServiceKey(parameter), CSharpText.DefaultValue(parameter)));
+            }
+        }
 
         return new(
-            CSharpText.Type(closed),
-            CSharpText.TypeOf(closed),
-            BehaviorOrdering.DefinitionOperand(shape.Type),
-            shape.Kind,
+            CSharpText.Type(type),
+            BehaviorOrdering.Operand(type),
+            match.Method.Kind,
+            method.Name,
+            match.TypeArguments.Select(static t => t is null ? "" : CSharpText.Type(t)).ToImmutableArray(),
+            match.Method.Roles,
             phase,
             order,
+            BehaviorOrdering.OverridesOrdering(method, symbols),
             edges,
-            services,
-            shape.Type.ContainingAssembly?.Name ?? "",
-            SymbolEqualityComparer.Default.Equals(shape.Type.ContainingAssembly, catalog.Compilation.Assembly)
+            services.MoveToImmutable(),
+            type.ContainingAssembly?.Name ?? "",
+            SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, catalog.Compilation.Assembly)
         );
     }
 }

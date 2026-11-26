@@ -9,8 +9,8 @@ namespace Keryx.Tests.Behaviors;
 ///     Constraint evaluation (ADR 0001, Matching), one case per constraint kind: <c>class</c> and <c>class?</c>, <c>struct</c>,
 ///     <c>unmanaged</c>, <c>new()</c> (including <c>required</c> members), <c>notnull</c>, interface and base-class type constraints (identity, implicit reference and boxing
 ///     conversions count; user-defined conversions, nullable value types and annotated reference types against a non-annotated constraint do
-///     not), constraint types nested in generic types, a constraint that mentions another type parameter, and
-///     closed behaviors, which must be closed over exactly the target's types.
+///     not), constraint types nested in generic types, a constraint that mentions another type parameter, all checked on the type parameters
+///     of an open behavior method; and closed behavior methods, which must be closed over exactly the target's types.
 /// </summary>
 public class BehaviorMatchingTests
 {
@@ -65,27 +65,25 @@ public class BehaviorMatchingTests
         public sealed record KeyedRequest : IRequest<string>, IHasKey<string>;
         public sealed record WrongKey : IRequest<string>, IHasKey<int>;
 
-        public abstract class Base<TRequest, TResponse> where TRequest : IRequest<TResponse>
-        {
-            public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken) where TNext : struct, INext<TResponse> =>
-                next.InvokeAsync(cancellationToken);
-        }
-
-        public sealed class ClassB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : class;
-        public sealed class NullableClassB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : class?;
-        public sealed class StructB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : struct;
-        public sealed class UnmanagedB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : unmanaged;
-        public sealed class NewB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : new();
-        public sealed class NotNullB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : notnull;
-        public sealed class InterfaceB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : IThing;
-        public sealed class BaseB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : BaseThing;
-        public sealed class KeyedB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>, IHasKey<TResponse>;
-        public sealed class ComparableB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : IComparable;
-        public sealed class EquatableB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse> where TResponse : IEquatable<TResponse>;
-        public sealed class NestedB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>, Outer<TResponse>.IMarker;
-        public sealed class NestedGenericB<TRequest, TResponse> : Base<TRequest, TResponse>, IRequestPipelineBehavior<TRequest, TResponse> where TRequest : IRequest<TResponse>, Outer<TResponse>.IInner<TRequest>;
-        public sealed class ClosedB : Base<RString, string>, IRequestPipelineBehavior<RString, string>;
-        public sealed class ClosedNonNullable : Base<RNullableString, string>, IRequestPipelineBehavior<RNullableString, string>;
+        [RequestBehavior] public static class ClassB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : class where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class NullableClassB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : class? where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class StructB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : struct where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class UnmanagedB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : unmanaged where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class NewB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : new() where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class NotNullB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : notnull where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class InterfaceB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : IThing where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class BaseB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : BaseThing where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class KeyedB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse>, IHasKey<TResponse> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class ComparableB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : IComparable where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class EquatableB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TResponse : IEquatable<TResponse> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class NestedB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse>, Outer<TResponse>.IMarker where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class NestedGenericB { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse>, Outer<TResponse>.IInner<TRequest> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class ClosedB { public static ValueTask<string> Handle<TNext>(RString r, TNext n, CancellationToken c) where TNext : struct, INext<string> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class ClosedNonNullable { public static ValueTask<string> Handle<TNext>(RNullableString r, TNext n, CancellationToken c) where TNext : struct, INext<string> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class AnnotatedConstraint { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class AnnotatedNext { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }
+        [StreamBehavior] public static class AnnotatedStreamNext { public static System.Collections.Generic.IAsyncEnumerable<TItem?> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem> where TNext : struct, IStreamNext<TItem?> => n.InvokeAsync(c); }
+        [StreamBehavior] public static class StreamOnly { public static System.Collections.Generic.IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem> where TNext : struct, IStreamNext<TItem> => n.InvokeAsync(c); }
         """;
 
     [Test]
@@ -132,12 +130,14 @@ public class BehaviorMatchingTests
     [Arguments("ComparableB", "RNullableInt", false)]
     public async Task Open_Behavior_Constraints(string behavior, string request, bool fits)
     {
-        var (fitted, reason, closed) = Match(behavior + "`2", request, open: true);
+        var (fitted, reason, typeArguments) = Match(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits).Because(reason);
         if (fits)
         {
-            await Assert.That(closed).StartsWith($"global::Sample.{behavior}<global::Sample.{request}, ");
+            // TRequest, TResponse and, in place of TNext, nothing: the generated link.
+            await Assert.That(typeArguments).StartsWith($"global::Sample.{request}, ");
+            await Assert.That(typeArguments).EndsWith(", ");
         }
         else
         {
@@ -147,14 +147,45 @@ public class BehaviorMatchingTests
 
     [Test]
     [Arguments("ClosedB", "RString", true, "")]
-    [Arguments("ClosedB", "RInt", false, "it is closed over 'IRequestPipelineBehavior<RString, string>', but the target needs exactly 'IRequestPipelineBehavior<RInt, int>'")]
-    [Arguments("ClosedNonNullable", "RNullableString", false, "it is closed over 'IRequestPipelineBehavior<RNullableString, string>', but the target needs exactly 'IRequestPipelineBehavior<RNullableString, string?>'")]
+    [Arguments("ClosedB", "RInt", false, "its request behavior method is closed over 'RString' and 'string', but the target needs exactly 'RInt' and 'int'")]
     public async Task Closed_Behaviors_Need_The_Exact_Types(string behavior, string request, bool fits, string expected)
     {
-        var (fitted, reason, _) = Match(behavior, request, open: false);
+        var (fitted, reason, typeArguments) = Match(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits);
         await Assert.That(reason).IsEqualTo(expected);
+        if (fits)
+        {
+            await Assert.That(typeArguments).IsEqualTo("");
+        }
+    }
+
+    [Test]
+    public async Task A_Closed_Method_Whose_Next_Drops_The_Nullable_Annotation_Is_Rejected()
+    {
+        // INext<string> for a request that responds with string? would be a nullability error in generated code (KRX019).
+        var compilation = DirectCompilation.Create(Source);
+        var symbols = KeryxSymbols.Create(compilation)!;
+        var issues = new IssueCollector();
+
+        await Assert.That(BehaviorShapes.Analyze(compilation.GetTypeByMetadataName("Sample.ClosedNonNullable")!, symbols, issues)).IsNull();
+        await Assert.That(issues.Issues.Select(static i => i.Descriptor.Id)).IsEquivalentTo(["KRX019"]);
+    }
+
+    [Test]
+    [Arguments("AnnotatedConstraint")]
+    [Arguments("AnnotatedNext")]
+    [Arguments("AnnotatedStreamNext")]
+    public async Task An_Open_Method_That_Annotates_Its_Response_Type_Parameter_Is_Rejected(string behaviorName)
+    {
+        // IRequest<TResponse?> or INext<TResponse?> (IStreamNext<TItem?>) for a request that responds with string would be a nullability error
+        // in generated code (IRequest<> and INext<> are invariant), so the shape is KRX019 and never matches.
+        var compilation = DirectCompilation.Create(Source);
+        var symbols = KeryxSymbols.Create(compilation)!;
+        var issues = new IssueCollector();
+
+        await Assert.That(BehaviorShapes.Analyze(compilation.GetTypeByMetadataName("Sample." + behaviorName)!, symbols, issues)).IsNull();
+        await Assert.That(issues.Issues.Select(static i => i.Descriptor.Id)).IsEquivalentTo(["KRX019"]);
     }
 
     [Test]
@@ -162,19 +193,20 @@ public class BehaviorMatchingTests
     {
         var compilation = DirectCompilation.Create(Source);
         var symbols = KeryxSymbols.Create(compilation)!;
-        var behavior = compilation.GetTypeByMetadataName("Sample.ClassB`2")!;
-        var shape = BehaviorShapes.Analyze(behavior, symbols, new IssueCollector())!;
         var request = compilation.GetTypeByMetadataName("Sample.RString")!;
-        var target = new BehaviorTarget(BehaviorTargetKind.Stream, [request, compilation.GetSpecialType(SpecialType.System_String)]);
+        var stream = new BehaviorTarget(BehaviorKind.Stream, request, compilation.GetSpecialType(SpecialType.System_String));
+        var notification = new BehaviorTarget(BehaviorKind.Notification, request, null);
 
-        var fitted = BehaviorMatching.TryClose(behavior.ConstructUnboundGenericType(), shape, target, compilation, out _, out var reason);
+        var requestShape = BehaviorShapes.Analyze(compilation.GetTypeByMetadataName("Sample.ClassB")!, symbols, new IssueCollector())!;
+        var streamShape = BehaviorShapes.Analyze(compilation.GetTypeByMetadataName("Sample.StreamOnly")!, symbols, new IssueCollector())!;
 
-        await Assert.That(fitted).IsFalse();
-        await Assert.That(reason)
-                    .IsEqualTo("it is a request behavior (IRequestPipelineBehavior), but the target needs IStreamPipelineBehavior<TRequest, TItem> or IStreamHookBehavior<TRequest, TItem>");
+        await Assert.That(BehaviorMatching.TryMatch(requestShape, stream, compilation, out _, out var reason)).IsFalse();
+        await Assert.That(reason).IsEqualTo("it has no stream behavior method (the class does not carry [StreamBehavior])");
+        await Assert.That(BehaviorMatching.TryMatch(streamShape, notification, compilation, out _, out reason)).IsFalse();
+        await Assert.That(reason).IsEqualTo("it has no notification behavior method (the class does not carry [NotificationBehavior])");
     }
 
-    private static (bool Fits, string Reason, string Closed) Match(string behaviorName, string requestName, bool open)
+    private static (bool Fits, string Reason, string TypeArguments) Match(string behaviorName, string requestName)
     {
         var compilation = DirectCompilation.Create(Source);
         var errors = compilation.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Error).ToArray();
@@ -188,9 +220,8 @@ public class BehaviorMatchingTests
         var shape = BehaviorShapes.Analyze(behavior, symbols, new IssueCollector()) ?? throw new InvalidOperationException(behaviorName + " is not a valid behavior");
         var request = compilation.GetTypeByMetadataName("Sample." + requestName)!;
         var response = MessageType.Classify(request, symbols).ResponseType!;
-        var target = new BehaviorTarget(BehaviorTargetKind.Request, [request, response]);
 
-        var fits = BehaviorMatching.TryClose(open ? behavior.ConstructUnboundGenericType() : behavior, shape, target, compilation, out var closed, out var reason);
-        return (fits, reason, CSharpText.Type(closed));
+        var fits = BehaviorMatching.TryMatch(shape, new(BehaviorKind.Request, request, response), compilation, out var match, out var reason);
+        return (fits, reason, fits ? string.Concat(match.TypeArguments.Select(static t => t is null ? "" : CSharpText.Type(t) + ", ")) : "");
     }
 }

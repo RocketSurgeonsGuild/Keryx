@@ -113,8 +113,8 @@ namespace Sample
     {
         /// <summary>
         ///     Registers the scoped <see cref="KeryxMediator" />, as itself and as <see cref="global::Keryx.IMediator" />,
-        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), every handler
-        ///     class that has injected parameters and every closed behavior a pipeline uses, all scoped and with generated factories.
+        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), and every
+        ///     handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>

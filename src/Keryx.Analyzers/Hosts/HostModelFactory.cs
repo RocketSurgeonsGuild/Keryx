@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Text;
-using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -228,15 +227,14 @@ internal static class HostModelFactory
             return null;
         }
 
-        var attached = AttachedBehaviors(method, symbols);
         var classified = MessageType.Classify(messageType, symbols);
         var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
         var (behaviors, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
-            ? PipelineBehaviors.For(attached, method.ContainingAssembly, target, catalog)
+            ? PipelineBehaviors.For(AttachedBehaviors(method, symbols), method.ContainingAssembly, target, catalog)
             : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
         var deliveries = model.Kind == HandlerKind.Notification
-            ? Deliveries(attached, method.ContainingAssembly, messageType, catalog)
-            : ImmutableArray<NotificationDeliveryModel>.Empty;
+            ? Deliveries(messageType, catalog)
+            : ImmutableArray<HostNotificationModel>.Empty;
 
         return new(
             model.HandlerClass,
@@ -303,8 +301,8 @@ internal static class HostModelFactory
             ? PipelineBehaviors.For(attached, handlerClass.ContainingAssembly, pipelineTarget, catalog)
             : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
         var deliveries = kind == HandlerKind.Notification
-            ? Deliveries(attached, handlerClass.ContainingAssembly, target, catalog)
-            : ImmutableArray<NotificationDeliveryModel>.Empty;
+            ? Deliveries(target, catalog)
+            : ImmutableArray<HostNotificationModel>.Empty;
 
         problem = null;
         return new(
@@ -324,12 +322,10 @@ internal static class HostModelFactory
     }
 
     /// <summary>
-    ///     KRX009 as the host checks it for a referenced handler (ADR 0001, Diagnostics: KRX009 for pairs involving referenced behaviors): each
-    ///     behavior its manifest attaches (<c>KeryxHandler.Behaviors</c>) that does not fit the target as the host resolves it, with the
-    ///     reason, as the analyzer checks the host's own handlers: not a Keryx behavior, the wrong behavior kind, or (for a request, a stream
-    ///     request or a concrete notification) constraints that do not hold. A polymorphic notification handler's behaviors are checked for
-    ///     their kind only; the host skips them per concrete type they do not fit (OQ-40). A behavior class the behavior rules reject is the
-    ///     library's KRX019/KRX020 and is not reported again.
+    ///     KRX009 as the host checks it for a referenced handler (ADR 0001, Diagnostics: KRX009 for behaviors a referenced handler's manifest
+    ///     attaches): each behavior its manifest attaches (<c>KeryxHandler.Behaviors</c>; a notification handler attaches none) that does not
+    ///     fit the request or stream request as the host resolves it, with the analyzer's reasons. A behavior class the behavior rules reject
+    ///     is the library's KRX019 and is not reported again.
     /// </summary>
     public static IEnumerable<(ITypeSymbol Behavior, string Reason)> UnfitAttachedBehaviors(
         ImmutableArray<ITypeSymbol> attached,
@@ -338,47 +334,15 @@ internal static class HostModelFactory
         BehaviorCatalog catalog
     )
     {
-        var symbols = catalog.Symbols;
-        var classified = MessageType.Classify(target, symbols);
-        (BehaviorTarget Target, bool CheckConstraints)? fit = kind switch
+        var classified = MessageType.Classify(target, catalog.Symbols);
+        if (PipelineBehaviors.Target(kind, target, kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType) is not { } pipelineTarget)
         {
-            HandlerKind.Request when classified.ResponseType is { } response => (new(BehaviorTargetKind.Request, [target, response]), true),
-            HandlerKind.Stream when classified.ItemType is { } item => (new(BehaviorTargetKind.Stream, [target, item]), true),
-            HandlerKind.Notification => (new(BehaviorTargetKind.NotificationHandler, [target]), classified.IsConcrete),
-            _ => null,
-        };
-        if (fit is not { } checkedTarget)
-        {
-            yield break;
+            return [];
         }
 
-        foreach (var behavior in attached)
-        {
-            if (behavior is not INamedTypeSymbol named || BehaviorShapes.Interfaces(named.OriginalDefinition, symbols).IsEmpty)
-            {
-                yield return (behavior, "it is not a Keryx behavior");
-                continue;
-            }
-
-            if (catalog.Shape(named) is not { } shape)
-            {
-                continue;
-            }
-
-            var fits = checkedTarget.CheckConstraints
-                ? BehaviorMatching.TryClose(named, shape, checkedTarget.Target, catalog.Compilation, out _, out var reason)
-                : FitsKind(shape, checkedTarget.Target, out reason);
-            if (!fits)
-            {
-                yield return (behavior, reason);
-            }
-        }
-
-        static bool FitsKind(BehaviorShape shape, BehaviorTarget target, out string reason)
-        {
-            reason = $"it does not implement {target.ExpectedInterfaces}";
-            return target.Accepts(shape.Kind);
-        }
+        var unfit = new List<(ITypeSymbol, string)>();
+        _ = PipelineBehaviors.Compose(attached, [], pipelineTarget, catalog, (behavior, reason) => unfit.Add((behavior, reason)));
+        return unfit;
     }
 
     private static string KindText(HandlerKind kind) =>
@@ -386,8 +350,8 @@ internal static class HostModelFactory
         {
             HandlerKind.Request => "a request handler",
             HandlerKind.Stream => "a stream request handler",
-            HandlerKind.Notification => throw new NotImplementedException(),
-            _ => "a notification handler",
+            HandlerKind.Notification => "a notification handler",
+            _ => "a handler",
         };
 
     private static string MessageText(HandlerKind kind) =>
@@ -395,8 +359,8 @@ internal static class HostModelFactory
         {
             HandlerKind.Request => "a request",
             HandlerKind.Stream => "a stream request",
-            HandlerKind.Notification => throw new NotImplementedException(),
-            _ => "a notification",
+            HandlerKind.Notification => "a notification",
+            _ => "a message",
         };
 
     /// <summary>The behaviors attached to a handler method with <c>[Behavior]</c>, in declaration order.</summary>
@@ -419,34 +383,25 @@ internal static class HostModelFactory
     ///     The concrete notification types a notification handler receives (ADR 0001, Polymorphic handlers): every notification type the host
     ///     knows (<see cref="BehaviorCatalog.KnownNotifications" />: declared in its source, taken by its own or its referenced handlers, or
     ///     declared in its references; OQ-42) that converts to the handler's parameter type (identity, implicit reference or boxing
-    ///     conversion), each with the per-handler behaviors closed over it. An attached behavior whose constraints do not hold for one concrete
-    ///     type is skipped for that type (OQ-40).
+    ///     conversion).
     /// </summary>
-    private static ImmutableArray<NotificationDeliveryModel> Deliveries(
-        ImmutableArray<ITypeSymbol> attached,
-        IAssemblySymbol? handlerAssembly,
-        ITypeSymbol parameterType,
-        BehaviorCatalog catalog
-    )
+    private static ImmutableArray<HostNotificationModel> Deliveries(ITypeSymbol parameterType, BehaviorCatalog catalog)
     {
-        var deliveries = new SortedDictionary<string, NotificationDeliveryModel>(StringComparer.Ordinal);
+        var deliveries = new SortedDictionary<string, HostNotificationModel>(StringComparer.Ordinal);
         foreach (var notification in catalog.KnownNotifications)
         {
-            if (catalog.Notification(notification) is not { } model
-             || deliveries.ContainsKey(model.Type)
-             || !BehaviorCatalog.Converts(notification, parameterType, catalog.Compilation))
+            if (catalog.Notification(notification) is { } model
+             && !deliveries.ContainsKey(model.Type)
+             && BehaviorCatalog.Converts(notification, parameterType, catalog.Compilation))
             {
-                continue;
+                deliveries.Add(model.Type, model);
             }
-
-            var (behaviors, usedExclusions) = PipelineBehaviors.For(attached, handlerAssembly, new(BehaviorTargetKind.NotificationHandler, [notification]), catalog);
-            deliveries.Add(model.Type, new(model, behaviors, usedExclusions));
         }
 
         return [.. deliveries.Values];
     }
 
-    /// <summary>One injected parameter of a handler or behavior constructor, as a generated factory resolves it.</summary>
+    /// <summary>One injected parameter of a handler constructor or a behavior method, as generated code resolves it.</summary>
     internal static ServiceParameterModel Service(ITypeSymbol type, string? serviceKey, string? defaultValue)
     {
         var serviceType = type.IsReferenceType ? type.WithNullableAnnotation(NullableAnnotation.NotAnnotated) : type;
