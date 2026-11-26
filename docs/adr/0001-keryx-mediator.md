@@ -355,7 +355,10 @@ The host reports KRX009 for referenced handlers too: each behavior that a refere
 (`KeryxHandler.Behaviors`; a notification handler attaches none) and that does not fit the target as the host resolves it is KRX009 (the
 analyzer's descriptor, not a compilation-end diagnostic), with the analyzer's reasons, on `[assembly: KeryxHost]`, naming the target
 `HandlerClass.Handle` (the method is private, so its signature is not visible). The behavior is skipped and the handler kept. A behavior
-class that the behavior rules reject is the library's KRX019 and is not reported again.
+class that the behavior rules reject is the library's KRX019 and is not reported again. The same holds for a `[Behavior]` on a
+referenced notification type (open-questions OQ-55): when the behavior does not fit the notification type as the host resolves it, the
+host reports KRX009 on `[assembly: KeryxHost]`, naming the notification type and the behavior, skips the behavior and keeps the rest of
+the publish pipeline.
 
 Every ID has a help link. IDs are grouped: KRX001–KRX029 per-assembly rules (KRX005, KRX008 and KRX009 are also checked by the host across
 assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placement rules.

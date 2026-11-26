@@ -29,8 +29,7 @@ brief has the full list):
 
 ## Decisions
 
-One question is open: **OQ-55** (what the host does when a `[Behavior]` on a referenced notification type no longer fits the type as the
-host resolves it; until it is decided the behavior is skipped silently). Every other question in
+Nothing is open. Every question in
 [open-questions.md](adr/open-questions.md) was decided on 2026-11-26 and folded into the ADR:
 OQ-8, OQ-9, OQ-10, OQ-15, OQ-16, OQ-17, OQ-36 and OQ-41 by an explicit choice, OQ-11 by the static-behavior design, OQ-21, OQ-38
 and OQ-39 as moot (hook behaviors removed), OQ-22 as moot until the gate is re-run, OQ-37 rewritten for static behaviors, and every
@@ -43,6 +42,7 @@ The owner's second round of decisions the same day settled the rest:
 - an open behavior method must constrain its message type parameter to the kind's message interface (KRX019);
 - **OQ-52:** the floor rises to C# 14 (KRX022 below it); `netstandard2.0` targets stay supported;
 - **OQ-54:** KRX043 warns about `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` in an assembly that is not a host.
+- **OQ-55:** the host reports KRX009 for a `[Behavior]` on a referenced notification type that no longer fits it.
 
 ## Gates and checks
 

@@ -268,7 +268,7 @@ draft until Phase 9._
 
 Rework the behaviors built in Phases 4 to 6 into the static-behavior design the ADR now describes (open-questions "Static behaviors",
 "Stream hook behaviors removed", "One notification behavior kind" and "Message constraint on open behavior methods", 2026-11-26), and
-fold in the other decisions of that day (OQ-8 to OQ-54; OQ-55 is open, so implement its interim). Read the ADR's Behaviors,
+fold in the other decisions of that day (OQ-8 to OQ-55). Read the ADR's Behaviors,
 Ordering, Streaming, Notifications, Host control and Performance contract sections first; they are written for this design.
 
 - **Public API.** Remove `IRequestPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamHookBehavior`, `INotificationPipelineBehavior`,
@@ -314,7 +314,8 @@ Ordering, Streaming, Notifications, Host control and Performance contract sectio
   (OQ-54). KRX030 no longer skips request types declared in a referenced host (OQ-16). The scan also finds behavior classes whose
   `[GlobalBehavior]` is on a method only, and KRX035 is reported for them too. KRX034 covers the injected parameter types of a
   referenced behavior method instead of behavior constructor parameters (OQ-47). A `[Behavior]` on a referenced notification type that
-  does not fit the type as the host resolves it follows OQ-55's interim (skipped silently) until OQ-55 is decided. Bump
+  does not fit the type as the host resolves it is KRX009 on `[assembly: KeryxHost]`, naming the notification type and the behavior; the behavior is skipped and the rest of
+  the publish pipeline kept (OQ-55). Bump
   `ProjectionDataVersion` for the changed projection.
 - **Language floor.** Raise the minimum to C# 14 (OQ-52): `KeryxSymbols.MinimumLanguageVersion` becomes `LanguageVersion.CSharp14`,
   the KRX022 descriptor and message say 14, the comment in `src/Keryx/build/Keryx.props` drops the generic-attribute reason, and the
@@ -360,6 +361,8 @@ Ordering, Streaming, Notifications, Host control and Performance contract sectio
   tests against static behaviors, and `[assembly: Behavior(typeof(X))]` naming a non-behavior reports nothing;
 - KRX022 is reported at C# 13 and not at C# 14 or `latest`, in a `netstandard2.0` project as well; both generators emit nothing at
   C# 13; every test compilation that pinned C# 11 or 12 is moved to C# 14 or later;
+- host KRX009 is reported for a `[Behavior]` on a referenced notification type whose behavior no longer fits the type as the host
+  resolves it (OQ-55), the behavior is skipped and the other publish behaviors still run; a fitting one reports nothing;
 - KRX043 is reported for each of `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in
   a library and in a contracts assembly, and not in a host;
 - snapshot tests of request, stream and publish pipelines at depths 0, 1, 3 and 8 show static calls with explicit type arguments,

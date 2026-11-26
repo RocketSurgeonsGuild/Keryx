@@ -11,24 +11,11 @@ Entries that were Open with Interim and Proposal text keep it as a record and en
 decision directly. Where the two disagree, the Decision line and the ADR win. Entries decided on 2026-11-26 after the review of the
 whole design follow the "Static behaviors" and "Stream hook behaviors removed" entries; the owner's second round of decisions the same
 day added "One notification behavior kind" and "Message constraint on open behavior methods" after those two, and decided OQ-52 to
-OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round.
+OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end).
 
 ## Open
 
-### OQ-55: An attached behavior on a referenced notification type that does not fit (2026-11-26)
-
-The host reports KRX009 for a behavior that a referenced request or stream handler's manifest attaches and that no longer fits the target
-as the host resolves it (ADR, Diagnostics and code fixes). Since per-handler notification behaviors were removed ("One notification
-behavior kind", below), the only per-target attachment for a notification is `[Behavior]` on the notification type, which the host reads
-from the type rather than a manifest. The library's analyzer checks it against the types that library compiled against; when the
-behavior class lives in a third assembly that changed since (version skew), the ADR does not say what the host does if the behavior no
-longer fits the notification type as the host resolves it. KRX034 covers only types that do not resolve or are not accessible.
-
-- **Interim:** the host skips the behavior for that notification type silently and keeps the rest of its publish pipeline (what the
-  code does today: the host composes a notification type's behaviors with the same skip rule as assembly and global behaviors).
-- **Proposal:** treat it like a referenced handler's attached behavior: KRX009 (the analyzer's descriptor), with the analyzer's reasons,
-  on `[assembly: KeryxHost]`, naming the notification type; the behavior is skipped and the rest of the publish pipeline is kept. A
-  behavior class the behavior rules reject is the library's KRX019 and is not reported again.
+None.
 
 ## Decided
 
@@ -1075,3 +1062,21 @@ did not say what happens when a library or contracts assembly carries it; the KR
 - **Decision:** Accepted as proposed. KRX043 (warning, analyzer) is reported on `[assembly: ExternallyHandled]`,
   `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`. Folded into the ADR
   (Host control, Diagnostics, Attribute reference, Alternatives considered); implemented in Phase 9.
+
+### OQ-55: An attached behavior on a referenced notification type that does not fit (2026-11-26)
+
+The host reports KRX009 for a behavior that a referenced request or stream handler's manifest attaches and that no longer fits the target
+as the host resolves it (ADR, Diagnostics and code fixes). Since per-handler notification behaviors were removed ("One notification
+behavior kind", below), the only per-target attachment for a notification is `[Behavior]` on the notification type, which the host reads
+from the type rather than a manifest. The library's analyzer checks it against the types that library compiled against; when the
+behavior class lives in a third assembly that changed since (version skew), the ADR does not say what the host does if the behavior no
+longer fits the notification type as the host resolves it. KRX034 covers only types that do not resolve or are not accessible.
+
+- **Interim:** the host skips the behavior for that notification type silently and keeps the rest of its publish pipeline (what the
+  code does today: the host composes a notification type's behaviors with the same skip rule as assembly and global behaviors).
+- **Proposal:** treat it like a referenced handler's attached behavior: KRX009 (the analyzer's descriptor), with the analyzer's reasons,
+  on `[assembly: KeryxHost]`, naming the notification type; the behavior is skipped and the rest of the publish pipeline is kept. A
+  behavior class the behavior rules reject is the library's KRX019 and is not reported again.
+- **Decision:** Accepted as proposed: KRX009 in the host, on `[assembly: KeryxHost]`, naming the notification type and the behavior,
+  with the analyzer's reasons; the behavior is skipped and the rest of the publish pipeline is kept. Folded into the ADR (Diagnostics
+  and code fixes). Implemented in Phase 9.
