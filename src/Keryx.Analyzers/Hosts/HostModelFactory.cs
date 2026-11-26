@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -29,14 +30,61 @@ internal static class HostModelFactory
         var hostAttribute = compilation.Assembly.GetAttributes().FirstOrDefault(a => KeryxSymbols.IsAttribute(a, symbols.KeryxHostAttribute));
         var runtime = compilation.ReferencedAssemblyNames.FirstOrDefault(static identity => identity.Name == SystemRuntime)
          ?? compilation.ObjectType.ContainingAssembly?.Identity;
+        var catalog = BehaviorCatalog.For(compilation, symbols);
         return new(
             true,
             compilation.AssemblyName ?? "",
             hostAttribute is null ? null : LocationInfo.From(HandlerAnalysis.AttributeLocation(hostAttribute)),
             runtime?.Name,
-            runtime?.Version
+            runtime?.Version,
+            GlobalBehaviors(catalog),
+            Exclusions(catalog)
         );
     }
+
+    /// <summary>
+    ///     The global behaviors the host applies, for KRX035: every <c>[GlobalBehavior]</c> the behavior rules accept that no
+    ///     <c>ExcludeBehavior</c> removes entirely (an exclusion of one closing of an open global behavior leaves the others). Phase 7 adds the
+    ///     referenced ones.
+    /// </summary>
+    private static ImmutableArray<GlobalBehaviorModel> GlobalBehaviors(BehaviorCatalog catalog)
+    {
+        var excluded = new HashSet<string>(catalog.Exclusions.Select(static e => BehaviorOrdering.Operand(e.Type)), StringComparer.Ordinal);
+        var globals = ImmutableArray.CreateBuilder<GlobalBehaviorModel>();
+        foreach (var (type, attribute) in catalog.GlobalBehaviors)
+        {
+            if (catalog.Shape(type) is null || excluded.Contains(BehaviorOrdering.DefinitionOperand(type)))
+            {
+                continue;
+            }
+
+            globals.Add(
+                new(
+                    type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    type.ContainingAssembly?.Name ?? "",
+                    LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute) ?? type.Locations.FirstOrDefault())
+                )
+            );
+        }
+
+        return globals.ToImmutable();
+    }
+
+    /// <summary>
+    ///     The host's <c>ExcludeBehavior</c> entries, for KRX036. One that names a notification behavior is not checked yet: notification
+    ///     pipelines are composed from Phase 6.
+    /// </summary>
+    private static ImmutableArray<ExclusionModel> Exclusions(BehaviorCatalog catalog) =>
+    [
+        .. catalog.Exclusions.Select(e => new ExclusionModel(
+                                         BehaviorOrdering.Operand(e.Type),
+                                         e.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                                         e.Type is not INamedTypeSymbol named
+                                      || catalog.Shape(named) is not { Kind: BehaviorKind.Notification or BehaviorKind.NotificationHandler },
+                                         LocationInfo.From(HandlerAnalysis.AttributeLocation(e.Attribute))
+                                     )
+                    ),
+    ];
 
     public static HostBuildProperties ReadBuildProperties(AnalyzerConfigOptionsProvider options) =>
         new(
@@ -52,7 +100,9 @@ internal static class HostModelFactory
                 Namespace(properties.RootNamespace, compilation.AssemblyName),
                 compilation.AssemblyName,
                 compilation.HostAttribute,
-                UnsupportedTargetFramework(properties, compilation)
+                UnsupportedTargetFramework(properties, compilation),
+                compilation.GlobalBehaviors,
+                compilation.Exclusions
             )
             : HostSettings.Disabled;
 
@@ -181,7 +231,7 @@ internal static class HostModelFactory
                     messageType = parameter.Type;
                     break;
                 case ParameterRole.Injected:
-                    services.Add(Service(parameter.Type, model.Parameters[i]));
+                    services.Add(Service(parameter.Type, model.Parameters[i].ServiceKey, model.Parameters[i].DefaultValue));
                     break;
                 case ParameterRole.CancellationToken or ParameterRole.Invalid:
                     break;
@@ -190,31 +240,42 @@ internal static class HostModelFactory
             }
         }
 
-        return messageType is null
-            ? null
-            : new(
-                model.HandlerClass,
-                model.Kind,
-                CSharpText.TypeOf(messageType),
-                messageType.IsValueType,
-                messageType.IsValueType || messageType.IsSealed,
-                model.ResponseType,
-                model.StaticInvoker,
-                services.ToImmutable(),
-                model.Behaviors,
-                model.Order
-            );
+        if (messageType is null)
+        {
+            return null;
+        }
+
+        var classified = MessageType.Classify(messageType, symbols);
+        var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
+        var (behaviors, usedExclusions) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
+            ? PipelineBehaviors.For(method, target, BehaviorCatalog.For(symbols.Compilation, symbols))
+            : (ImmutableArray<PipelineBehaviorModel>.Empty, ImmutableArray<string>.Empty);
+
+        return new(
+            model.HandlerClass,
+            model.Kind,
+            CSharpText.TypeOf(messageType),
+            messageType.IsValueType,
+            messageType.IsValueType || messageType.IsSealed,
+            model.ResponseType,
+            model.StaticInvoker,
+            services.ToImmutable(),
+            behaviors,
+            usedExclusions,
+            model.Order
+        );
     }
 
-    private static ServiceParameterModel Service(ITypeSymbol type, ParameterModel parameter)
+    /// <summary>One injected parameter of a handler or behavior constructor, as a generated factory resolves it.</summary>
+    internal static ServiceParameterModel Service(ITypeSymbol type, string? serviceKey, string? defaultValue)
     {
         var serviceType = type.IsReferenceType ? type.WithNullableAnnotation(NullableAnnotation.NotAnnotated) : type;
         var underlying = type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable ? nullable.TypeArguments[0] : null;
         return new(
-            parameter.Type,
+            CSharpText.Type(type),
             CSharpText.Type(serviceType),
-            parameter.ServiceKey,
-            parameter.DefaultValue,
+            serviceKey,
+            defaultValue,
             type.IsValueType,
             underlying is null ? null : CSharpText.Type(underlying),
             type is INamedTypeSymbol { Name: "IServiceProvider", Arity: 0, ContainingType: null, ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }

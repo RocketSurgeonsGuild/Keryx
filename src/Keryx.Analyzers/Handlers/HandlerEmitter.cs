@@ -74,7 +74,20 @@ internal static class HandlerEmitter
             var isHandlerClass = i == model.Types.Count - 1;
             if (isHandlerClass && inManifest)
             {
+                // A typeof operand cannot carry a top-level nullable annotation, and dropping a nested one (Tag<Ping, string> for a request
+                // that responds with string?) breaks a nullable constraint (CS8631). Attribute metadata keeps no annotations anyway.
+                var behaviors = model.Behaviors.Count > 0;
+                if (behaviors)
+                {
+                    writer.Line("#nullable disable");
+                }
+
                 writer.Line(HandlerAttribute(model));
+                if (behaviors)
+                {
+                    // Not "restore": that returns to the project default, which is disabled for generated code.
+                    writer.Line("#nullable enable");
+                }
             }
 
             writer.Line($"{( type.Modifiers.Length > 0 ? type.Modifiers + " " : "" )}partial {type.Keyword} {type.Name}");

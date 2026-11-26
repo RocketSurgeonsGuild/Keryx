@@ -137,6 +137,41 @@ public class HostGeneratorIncrementalTests
                     .Contains("Send(global::Sample.Pong request");
     }
 
+    [Test]
+    public async Task Adding_A_Global_Behavior_Modifies_The_Host_Sources(CancellationToken cancellationToken)
+    {
+        var compilation = Compile(Host);
+        var driver = Run(compilation, cancellationToken);
+
+        // A global behavior in another file changes every pipeline although no handler's syntax changed.
+        driver = driver.RunGenerators(
+            compilation.AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    """
+                    namespace Sample;
+
+                    [Keryx.GlobalBehavior]
+                    public sealed class Audit<TRequest, TResponse> : Keryx.IRequestPipelineBehavior<TRequest, TResponse> where TRequest : Keryx.IRequest<TResponse>
+                    {
+                        public System.Threading.Tasks.ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+                            where TNext : struct, Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
+                    }
+                    """,
+                    ParseOptions,
+                    "Audit.cs",
+                    cancellationToken: cancellationToken
+                )
+            ),
+            cancellationToken
+        );
+        var result = driver.GetRunResult().Results.Single();
+
+        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
+                    .Contains("global::Sample.Audit<global::Sample.CreateOrder.Command, global::System.Guid> Behavior1;");
+    }
+
     /// <summary>The runs of the output that adds the host sources (fed by <see cref="TrackingNames.HostSources" />).</summary>
     private static IEnumerable<IncrementalGeneratorRunStep> SourceOutputSteps(GeneratorRunResult result) =>
         result.TrackedOutputSteps.SelectMany(static s => s.Value).Where(static s => s.Inputs.Any(static i => i.Source.Name == TrackingNames.HostSources));

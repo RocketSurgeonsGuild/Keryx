@@ -365,6 +365,95 @@ compiler applies only global options to it: `dotnet_diagnostic.KRX030.severity` 
 - **Proposal:** amend the Diagnostics section: "turned back into a `Location` on the compilation's syntax tree when reporting (in an output
   that combines the cached diagnostics with the compilation)".
 
+### OQ-36: Phase 4 gate disassembly where `DisassemblyDiagnoser` is not available
+
+The Phase 4 gate's second criterion reads "`DisassemblyDiagnoser` output shows the behavior `Handle` called directly ... and
+`next.InvokeAsync` called directly". BenchmarkDotNet 0.15.8 supports `DisassemblyDiagnoser` only on Windows and Linux; on macOS its
+validation rejects the run ("Only Windows and Linux are supported in DisassemblyDiagnoser without Mono").
+
+- **Interim:** `PipelinePrototypeBenchmarks` adds the diagnoser through a config only on Windows and Linux. Elsewhere the same pipelines are
+  run to Tier 1 by `Keryx.Benchmarks --prototype-disasm` (an unoptimized delegate loop, so the benchmark methods tier up on their own as under
+  BenchmarkDotNet) with `DOTNET_JitDisasm` set, and the gate is judged from that listing. The gate **passed** on all three criteria
+  (re-run 2026-11-26 after a review found the first baseline handicapped; BenchmarkDotNet 0.15.8 default job, .NET 10.0.15 Arm64 RyuJIT,
+  Apple M4 Max, macOS 27.2, Dynamic PGO on; `test/Keryx.Benchmarks/Prototype`, `--filter *PipelinePrototype*`):
+
+    | Depth | Nested-call baseline | Struct pipeline | Ratio | Allocated (both) |
+    | ----- | -------------------- | --------------- | ----- | ---------------- |
+    | 1     | 0.52 ns              | 0.67 ns         | 1.28  | 0 B              |
+    | 3     | 1.65 ns              | 1.09 ns         | 0.66  | 0 B              |
+    | 8     | 2.09 ns              | 2.09 ns         | 1.00  | 0 B              |
+
+    Baseline and measurement: each depth has its own nested-call chain (`NestedCallDepth1`, `NestedCallDepth3`, `NestedCallDepth8`) of
+    sealed, non-generic classes, each behavior holding the next one (or the handler) in a readonly field and calling it directly, with no
+    runtime depth check and no extra arguments. Every benchmark runs 1,000 sends per invocation (`OperationsPerInvoke = 1000`), so the
+    depth-1 times are above BenchmarkDotNet's resolution; the first run's 0.00 ns at depth 1 measured nothing.
+
+    Disassembly (Tier 1, Dynamic PGO): `SendDepth3` and `SendDepth8` inline every behavior's `Handle<TLink>` and every
+    `Link_k.InvokeAsync` down to the handler's invoker; the only call left is the cold `CreateDepthN()` that builds the pipeline context. No
+    generic-virtual-method lookup and no runtime generic dictionary lookup appears, although each behavior is closed over a reference-type
+    request and so runs as shared canonical code (`Behavior1<__Canon, int>.Handle<Link1>`): the struct link type argument is exact. The
+    baselines inline completely too, so neither side makes a call per send. The remaining difference is the shape of the loads: the struct
+    pipeline reads every behavior from the pipeline context (independent loads), while a nested-call chain reaches each behavior through the
+    previous one (a dependent load per level), the likely reason the struct pipeline is faster at depth 3. At depth 1 the struct pipeline pays the
+    lazy pipeline-context read (a `Volatile.Read` and a null check) that the baseline does not have; depth 1 is not a gate criterion.
+    Criterion 1 (0 B at depths 1, 3 and 8) also holds for the generated pipelines (`PipelineAllocationTests`), so OQ-22 does not apply.
+
+- **Proposal:** accept a `DOTNET_JitDisasm` listing as equivalent evidence for criterion 2, and when the gate is re-run in CI, run it on a
+  Linux runner so `DisassemblyDiagnoser` output is available too.
+
+### OQ-37: Behavior edge cases
+
+The ADR's behavior rules leave some shapes open. Phase 4 implements these, each on the side that reports or skips rather than generating
+code that does not compile:
+
+- **Struct behaviors** implementing a behavior interface are KRX019: a behavior is resolved as a scoped service and held by the pipeline
+  context, so it is a class.
+- **An explicit interface implementation** of `Handle` (or a hook method) is KRX019: generated code calls the method on the concrete type,
+  where an explicit implementation is not accessible. A method inherited from a non-virtual base class implementation is fine.
+- **An abstract behavior class** reports KRX019 only, not also KRX020 for its protected constructors.
+- **Behavior constructor parameters** follow the handler parameter rules where they can break the generated factory: a `ref`/`in`/`out`,
+  `params`, pointer or ref struct parameter is KRX020 ("has a constructor parameter 'x' that ..."), and a `[FromKeyedServices]` key that is not
+  a constant (or the parameterless form) is KRX018. The host skips such a behavior.
+- **Behaviors in a host narrower than `internal`** (a `private` nested behavior attached to a method, or a `private` nested
+  `[GlobalBehavior]`) are KRX016 ("must be at least internal"), like OQ-24 for handlers, and the host skips them.
+- **Nullable value types and interface constraints:** a constraint type that is an interface never holds for `Nullable<T>` (CS0313),
+  although `ClassifyConversion` reports a boxing conversion from `T?` to `T`'s interfaces.
+- **Annotated reference types and type constraints:** a type constraint that is not annotated (`where TResponse : IEquatable<TResponse>`)
+  does not hold for an annotated argument (`string?`), because the compiler reports CS8631, an error in generated code, although
+  `ClassifyConversion` ignores nullability. An oblivious constraint accepts anything; a constraint that is a type parameter takes its
+  argument's annotation.
+- **`new()` and `required` members:** a type with `required` members (declared on it or a base type) does not satisfy `new()` (CS9040)
+  unless its parameterless constructor carries `[SetsRequiredMembers]`.
+- **Constraint types nested in generic types** (`Outer<TResponse>.IMarker`, `Outer<TResponse>.Inner<TRequest>`) are substituted through
+  their containing type.
+- **The handler manifest attribute** (`[KeryxHandler(..., Behaviors = ...)]`) is written under `#nullable disable`: a `typeof` operand drops
+  nullable annotations, so a closed behavior over `string?` would be named over `string` and break a nullable constraint (CS8631).
+  Attribute metadata keeps no annotations either way.
+- **Closed behaviors and nullability:** "identical" type arguments include nullable annotations when both sides are annotated
+  (`IRequestPipelineBehavior<Find, string>` does not fit a request that responds with `string?`), because the link implements
+  `INext<string?>` and the mismatch would be a nullability warning, and so an error, in generated code. Oblivious annotations match
+  anything.
+- **KRX008 in the analyzer** compares behavior classes: an edge to one closing of a generic in-source behavior counts as an edge to the
+  class for contradictions and cycles. The host still sorts per pipeline, where a closed edge matches only its closing (ADR, Ordering).
+  The host reports a contradiction once per pair of behavior classes, whichever side declares it, and a cycle once per set of behavior
+  classes; a cycle is a strongly connected component of the edges left unsorted, so a behavior that only waits on a cycle is not named
+  in it, and a cycle of in-source behaviors stays the analyzer's even when a referenced behavior waits on it.
+- **KRX009 for a polymorphic notification handler** (parameter typed as a base type or interface) checks only the behavior kind; the
+  constraints are checked against each concrete published type when Phase 6 composes notification pipelines.
+- **`[assembly: Behavior(typeof(X))]` naming a type that is not a behavior** reports nothing (it matches no target, like any assembly
+  behavior that does not fit).
+- **KRX035** lists every `[GlobalBehavior]` the behavior rules accept and no `ExcludeBehavior` removes entirely, whether or not it matches a
+  target (an exclusion of one closing of an open global leaves it listed). It is reported on the `[GlobalBehavior]` attribute.
+- **KRX036 for `ExcludeBehavior`** is not reported for an exclusion that names a notification behavior until Phase 6 composes
+  notification pipelines. Stream pipelines are composed already (their behaviors count as used), although the host dispatches streams
+  only from Phase 5.
+- **Allocation tests of `async` behaviors** compile the test host with optimizations on: a Debug build compiles an `async` method's state
+  machine to a class, allocated on every call even when it completes synchronously. That allocation is the behavior's own (ADR, Performance
+  contract: "provided the behaviors' own work completes synchronously"); Keryx's generated pipeline allocates nothing in either build.
+
+- **Interim:** as listed.
+- **Proposal:** confirm and fold into the ADR's Behaviors and Ordering sections and the KRX016, KRX019, KRX020, KRX035 and KRX036 rows.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

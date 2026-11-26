@@ -5,7 +5,9 @@
 
 namespace Sample
 {
+    #nullable disable
     [global::Keryx.Internal.KeryxHandler(typeof(global::Sample.Ping), global::Keryx.Internal.HandlerKind.Request, Behaviors = new global::System.Type[] { typeof(global::Sample.AuditBehavior<,>), typeof(global::Sample.PingBehavior) }, StaticInvoker = true)]
+    #nullable enable
     public static partial class PingHandler
     {
         /// <summary>Runs the handler only. No behaviors run.</summary>

@@ -1,13 +1,14 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 
 namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Writes the host's generated types (ADR 0001, Generated host): the scoped <c>KeryxMediator</c> with its typed overloads, generic
-///     exact-type dispatch and lazy pipeline contexts, and <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory
-///     registrations.
+///     exact-type dispatch, lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
+///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers and closed behaviors.
 /// </summary>
 internal static class HostEmitter
 {
@@ -51,6 +52,7 @@ internal static class HostEmitter
 
         writer.Line($"private readonly {ServiceProvider} __serviceProvider;");
         var requests = composition.Requests;
+        var handlers = requests.Select(static p => p.Handler).ToImmutableArray();
         for (var i = 0; i < requests.Length; i++)
         {
             if (NeedsContext(requests[i]))
@@ -71,11 +73,11 @@ internal static class HostEmitter
         for (var i = 0; i < requests.Length; i++)
         {
             writer.Line();
-            WriteTypedSend(writer, requests[i], i);
+            WriteTypedSend(writer, requests[i].Handler, i);
         }
 
         writer.Line();
-        WriteGenericSend(writer, requests);
+        WriteGenericSend(writer, handlers);
         writer.Line();
         WriteStream(writer);
         writer.Line();
@@ -114,9 +116,9 @@ internal static class HostEmitter
         writer.Open();
         writer.Line("/// <summary>");
         writer.Line("///     Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,");
-        writer.Line("///     <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), and every handler");
-        writer.Line("///     class that has injected parameters, all scoped and with generated factories. Registrations that already exist are kept, so a");
-        writer.Line("///     second call does nothing.");
+        writer.Line("///     <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), every handler");
+        writer.Line("///     class that has injected parameters and every closed behavior a pipeline uses, all scoped and with generated factories.");
+        writer.Line("///     Registrations that already exist are kept, so a second call does nothing.");
         writer.Line("/// </summary>");
         writer.Line("/// <param name=\"services\">The service collection.</param>");
         writer.Line("/// <returns>The same service collection.</returns>");
@@ -133,7 +135,12 @@ internal static class HostEmitter
 
         foreach (var handler in composition.ConstructedHandlers)
         {
-            WriteFactory(writer, handler);
+            WriteFactory(writer, handler.HandlerClass, handler.Services);
+        }
+
+        foreach (var behavior in composition.Behaviors)
+        {
+            WriteFactory(writer, behavior.Type, behavior.Services);
         }
 
         writer.Line("return services;");
@@ -306,13 +313,31 @@ internal static class HostEmitter
         writer.Close();
     }
 
-    /// <summary>The pipeline of one request, without checks: the typed overload and generic dispatch both call it.</summary>
-    private static void WriteCore(CodeWriter writer, HostHandlerModel request, int index)
+    /// <summary>
+    ///     The pipeline of one request, without checks: the typed overload and generic dispatch both call it. Without behaviors it calls the
+    ///     handler's invoker; with behaviors it calls the outermost behavior's <c>Handle</c> on its concrete type, with the first link.
+    /// </summary>
+    private static void WriteCore(CodeWriter writer, HostPipeline pipeline, int index)
     {
-        var target = NeedsContext(request) ? $"(global::System.Threading.Volatile.Read(ref {ContextField(index)}) ?? {CreateContextName(index)}()).Handler" : request.HandlerClass;
-        writer.Line($"private {ValueTask}<{request.ResponseType}> {CoreName(index)}({request.MessageType} request, {CancellationToken} cancellationToken) =>");
-        writer.Line($"    {target}.{HandlerAnalysis.InvokerName}(request, cancellationToken);");
-        if (!NeedsContext(request))
+        var request = pipeline.Handler;
+        var context = $"global::System.Threading.Volatile.Read(ref {ContextField(index)}) ?? {CreateContextName(index)}()";
+        var signature = $"private {ValueTask}<{request.ResponseType}> {CoreName(index)}({request.MessageType} request, {CancellationToken} cancellationToken)";
+        if (pipeline.Behaviors.IsEmpty)
+        {
+            var target = NeedsContext(pipeline) ? $"({context}).Handler" : request.HandlerClass;
+            writer.Line(signature + " =>");
+            writer.Line($"    {target}.{HandlerAnalysis.InvokerName}(request, cancellationToken);");
+        }
+        else
+        {
+            writer.Line(signature);
+            writer.Open();
+            writer.Line($"var pipeline = {context};");
+            writer.Line($"return pipeline.{BehaviorField(0)}.Handle<{ContextName(index)}.{LinkName(0)}>(request, new(pipeline, request), cancellationToken);");
+            writer.Close();
+        }
+
+        if (!NeedsContext(pipeline))
         {
             return;
         }
@@ -326,34 +351,115 @@ internal static class HostEmitter
         );
     }
 
-    private static void WriteContext(CodeWriter writer, HostHandlerModel request, int index)
+    /// <summary>
+    ///     The pipeline context of one request: its handler (unless the invoker is static) and its behaviors, resolved once per scope, and one
+    ///     flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the <c>next</c> of behavior <c>k</c>: it calls
+    ///     behavior <c>k + 1</c> on its concrete type with <c>Link{k + 1}</c>, and the last link calls the handler's invoker. Each link holds the
+    ///     context and the request, whatever the depth; the token is an argument, never stored.
+    /// </summary>
+    private static void WriteContext(CodeWriter writer, HostPipeline pipeline, int index)
     {
-        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: its handler, resolved once per scope.</summary>");
+        var request = pipeline.Handler;
+        var behaviors = pipeline.Behaviors;
+        var holds = request.StaticInvoker ? "its behaviors" : behaviors.IsEmpty ? "its handler" : "its handler and behaviors";
+        writer.Line($"/// <summary>The pipeline context of <c>{Display(request.MessageType)}</c>: {holds}, resolved once per scope.</summary>");
         writer.Line($"private sealed class {ContextName(index)}");
         writer.Open();
-        writer.Line($"public readonly {request.HandlerClass} Handler;");
+        if (!request.StaticInvoker)
+        {
+            writer.Line($"public readonly {request.HandlerClass} Handler;");
+        }
+
+        for (var k = 0; k < behaviors.Length; k++)
+        {
+            writer.Line($"public readonly {behaviors[k].Type} {BehaviorField(k)};");
+        }
+
         writer.Line();
         writer.Line($"public {ContextName(index)}({ServiceProvider} {ServiceProviderName})");
         writer.Open();
-        writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
+        if (!request.StaticInvoker)
+        {
+            writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
+        }
+
+        for (var k = 0; k < behaviors.Length; k++)
+        {
+            writer.Line($"{BehaviorField(k)} = {ServiceProviderExtensions}.GetRequiredService<{behaviors[k].Type}>({ServiceProviderName});");
+        }
+
         writer.Close();
+
+        for (var k = 0; k < behaviors.Length; k++)
+        {
+            writer.Line();
+            WriteLink(writer, pipeline, index, k);
+        }
+
         writer.Close();
     }
 
-    private static void WriteFactory(CodeWriter writer, HostHandlerModel handler)
+    private static void WriteLink(CodeWriter writer, HostPipeline pipeline, int index, int position)
     {
-        var services = handler.Services;
-        if (services.Count == 1)
+        var request = pipeline.Handler;
+        var context = ContextName(index);
+        var link = LinkName(position);
+        var isLast = position == pipeline.Behaviors.Length - 1;
+        writer.Line(
+            isLast
+                ? $"/// <summary>The <c>next</c> of <c>{Display(pipeline.Behaviors[position].Identity)}</c>: the handler.</summary>"
+                : $"/// <summary>The <c>next</c> of <c>{Display(pipeline.Behaviors[position].Identity)}</c>: <c>{Display(pipeline.Behaviors[position + 1].Identity)}</c>.</summary>"
+        );
+        // The last link of a pipeline whose handler has a static invoker needs only the request.
+        var holdsContext = !isLast || !request.StaticInvoker;
+        writer.Line($"public readonly struct {link} : global::Keryx.INext<{request.ResponseType}>");
+        writer.Open();
+        if (holdsContext)
         {
-            writer.Line(
-                $"{DescriptorExtensions}.TryAddScoped(services, static {ServiceProviderName} => new {handler.HandlerClass}({Resolve(services[0], 0)}));"
-            );
+            writer.Line($"private readonly {context} _pipeline;");
+        }
+
+        writer.Line($"private readonly {request.MessageType} _request;");
+        writer.Line();
+        writer.Line($"public {link}({context} pipeline, {request.MessageType} request)");
+        writer.Open();
+        if (holdsContext)
+        {
+            writer.Line("_pipeline = pipeline;");
+        }
+
+        writer.Line("_request = request;");
+        writer.Close();
+        writer.Line();
+        writer.Line($"public {ValueTask}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
+        if (!isLast)
+        {
+            writer.Line($"    _pipeline.{BehaviorField(position + 1)}.Handle<{LinkName(position + 1)}>(_request, new(_pipeline, _request), cancellationToken);");
+        }
+        else if (request.StaticInvoker)
+        {
+            writer.Line($"    {request.HandlerClass}.{HandlerAnalysis.InvokerName}(_request, cancellationToken);");
+        }
+        else
+        {
+            writer.Line($"    _pipeline.Handler.{HandlerAnalysis.InvokerName}(_request, cancellationToken);");
+        }
+
+        writer.Close();
+    }
+
+    private static void WriteFactory(CodeWriter writer, string type, Specular.Scanning.EquatableArray<ServiceParameterModel> services)
+    {
+        if (services.Count <= 1)
+        {
+            var arguments = services.Count == 1 ? Resolve(services[0], 0) : "";
+            writer.Line($"{DescriptorExtensions}.TryAddScoped(services, static {ServiceProviderName} => new {type}({arguments}));");
             return;
         }
 
         writer.Line($"{DescriptorExtensions}.TryAddScoped(");
         writer.Line("    services,");
-        writer.Line($"    static {ServiceProviderName} => new {handler.HandlerClass}(");
+        writer.Line($"    static {ServiceProviderName} => new {type}(");
         for (var i = 0; i < services.Count; i++)
         {
             writer.Line($"        {Resolve(services[i], i)}{( i < services.Count - 1 ? "," : "" )}");
@@ -409,7 +515,11 @@ internal static class HostEmitter
             : $"{lookup} is {parameter.Type} {variable} ? {variable} : {defaultValue}";
     }
 
-    private static bool NeedsContext(HostHandlerModel request) => !request.StaticInvoker;
+    private static bool NeedsContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || !pipeline.Behaviors.IsEmpty;
+
+    private static string BehaviorField(int position) => "Behavior" + Number(position + 1);
+
+    private static string LinkName(int position) => "Link" + Number(position + 1);
 
     private static string ContextName(int index) => "__Pipeline" + Number(index);
 
@@ -423,16 +533,30 @@ internal static class HostEmitter
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>A type name for documentation text: without <c>global::</c>.</summary>
-    private static string Display(string type) => type.Replace("global::", "");
+    /// <summary>A type name for documentation text: without <c>global::</c>, with the angle brackets of type arguments escaped for XML.</summary>
+    private static string Display(string type) => type.Replace("global::", "").Replace("<", "&lt;").Replace(">", "&gt;");
 }
+
+/// <summary>
+///     One request pipeline: the handler and its behaviors, sorted outermost first (ADR 0001, Ordering).
+/// </summary>
+/// <param name="Handler">The request handler.</param>
+/// <param name="Behaviors">The behaviors, outermost first.</param>
+internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<PipelineBehaviorModel> Behaviors);
 
 /// <summary>
 ///     What the host dispatches and registers, composed from the handler models (ADR 0001, How the host reads it).
 /// </summary>
-/// <param name="Requests">The request handlers, one per request type, ordered by request type.</param>
+/// <param name="Requests">The request pipelines, one per request type, ordered by request type.</param>
 /// <param name="ConstructedHandlers">The handler classes with injected parameters, ordered by class, each once.</param>
-internal sealed record HostComposition(ImmutableArray<HostHandlerModel> Requests, ImmutableArray<HostHandlerModel> ConstructedHandlers)
+/// <param name="Behaviors">Every closed behavior a request pipeline uses, ordered by closed type, each once.</param>
+/// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
+internal sealed record HostComposition(
+    ImmutableArray<HostPipeline> Requests,
+    ImmutableArray<HostHandlerModel> ConstructedHandlers,
+    ImmutableArray<PipelineBehaviorModel> Behaviors,
+    ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
+)
 {
     public static HostComposition Create(IEnumerable<HostHandlerModel> handlers)
     {
@@ -440,12 +564,14 @@ internal sealed record HostComposition(ImmutableArray<HostHandlerModel> Requests
 
         // A request with more than one handler is KRX005 (the analyzer reports it in this assembly); the host dispatches neither, so the
         // error is not joined by duplicate members in generated code.
+        var cycles = new List<ImmutableArray<PipelineBehaviorModel>>();
         var requests = all
                       .Where(static h => h.Kind == HandlerKind.Request)
                       .GroupBy(static h => h.MessageType, StringComparer.Ordinal)
                       .Where(static g => g.Count() == 1)
                       .Select(static g => g.Single())
                       .OrderBy(static h => h.MessageType, StringComparer.Ordinal)
+                      .Select(h => new HostPipeline(h, BehaviorOrdering.Sort(h.Behaviors, static b => b.Key, cycles)))
                       .ToImmutableArray();
 
         var constructed = all
@@ -455,6 +581,13 @@ internal sealed record HostComposition(ImmutableArray<HostHandlerModel> Requests
                          .OrderBy(static h => h.HandlerClass, StringComparer.Ordinal)
                          .ToImmutableArray();
 
-        return new(requests, constructed);
+        var behaviors = requests
+                       .SelectMany(static p => p.Behaviors)
+                       .GroupBy(static b => b.Identity, StringComparer.Ordinal)
+                       .Select(static g => g.First())
+                       .OrderBy(static b => b.Identity, StringComparer.Ordinal)
+                       .ToImmutableArray();
+
+        return new(requests, constructed, behaviors, [.. cycles]);
     }
 }

@@ -104,6 +104,29 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx007"
     );
 
+    public static readonly DiagnosticDescriptor InvalidBehaviorOrdering = new(
+        "KRX008",
+        "Behavior ordering has a cycle, or RunsAfter/RunsBefore contradicts phase or order",
+        "'{0}' {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Behaviors are ordered by phase, then order, then RunsAfter/RunsBefore inside one (phase, order). An edge between behaviors whose phase or order already puts them the other way round contradicts them, and edges that form a cycle cannot be satisfied. Each behavior pair is checked once: by the analyzer when both behaviors are in source, by the host when one is referenced.",
+        helpLinkUri: HelpLinkBase + "krx008",
+        customTags: WellKnownDiagnosticTags.CompilationEnd
+    );
+
+    public static readonly DiagnosticDescriptor BehaviorDoesNotFit = new(
+        "KRX009",
+        "Attached behavior does not fit its target",
+        "Behavior '{0}' does not fit '{1}': {2}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A behavior attached with [Behavior] to a handler method or a notification type must be the behavior kind the target needs, and an open behavior's constraints must hold for the target's types; a closed behavior must be closed over exactly the target's types. Assembly and global behaviors that do not fit are skipped silently.",
+        helpLinkUri: HelpLinkBase + "krx009"
+    );
+
     public static readonly DiagnosticDescriptor ConflictingMessageInterfaces = new(
         "KRX011",
         "Type implements conflicting request or notification interfaces",
@@ -198,6 +221,28 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx018"
     );
 
+    public static readonly DiagnosticDescriptor InvalidBehaviorShape = new(
+        "KRX019",
+        "Behavior class has an unsupported shape",
+        "Behavior '{0}' {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A behavior is a non-abstract class that implements exactly one Keryx behavior interface closing, either open with the interface's type parameters in order or closed and non-generic, and implements the interface's methods as public, non-virtual methods: generated code calls them directly on the concrete type.",
+        helpLinkUri: HelpLinkBase + "krx019"
+    );
+
+    public static readonly DiagnosticDescriptor InvalidBehaviorConstructor = new(
+        "KRX020",
+        "Behavior class does not have exactly one public constructor",
+        "Behavior '{0}' {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The host registers each behavior with a generated factory that calls its one public constructor, resolving each parameter like a handler's injected parameter.",
+        helpLinkUri: HelpLinkBase + "krx020"
+    );
+
     public static readonly DiagnosticDescriptor BoxedStructRequest = new(
         "KRX021",
         "Struct request is boxed when sent through ISender",
@@ -243,6 +288,28 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx031"
     );
 
+    public static readonly DiagnosticDescriptor GlobalBehaviorApplied = new(
+        "KRX035",
+        "Global behavior applies in this host",
+        "Global behavior '{0}' from assembly '{1}' applies in this host",
+        Category,
+        DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "Every [GlobalBehavior] the host sees applies to every matching target. Remove one with [assembly: ExcludeBehavior(typeof(...))].",
+        helpLinkUri: HelpLinkBase + "krx035"
+    );
+
+    public static readonly DiagnosticDescriptor UnusedExclusion = new(
+        "KRX036",
+        "ExcludeHandler or ExcludeBehavior names a type that is not part of any pipeline",
+        "[assembly: {0}(typeof({1}))] has no effect, because '{1}' is not part of any pipeline in this host",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "An exclusion removes a handler or behavior the host would otherwise use. One that names nothing the host uses is probably a mistake.",
+        helpLinkUri: HelpLinkBase + "krx036"
+    );
+
     public static readonly DiagnosticDescriptor MisplacedHandlerOrder = new(
         "KRX040",
         "[HandlerOrder] on a method that is not a notification handler",
@@ -263,5 +330,16 @@ internal static class Descriptors
         isEnabledByDefault: true,
         description: "[PublishStrategy] chooses how a notification's handlers run. On any other type it does nothing.",
         helpLinkUri: HelpLinkBase + "krx041"
+    );
+
+    public static readonly DiagnosticDescriptor MisplacedBehaviorAttribute = new(
+        "KRX042",
+        "[Behavior] or [GlobalBehavior] where it has no effect",
+        "{0}",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "[Behavior] attaches a behavior to a handler method, a notification type or the assembly; on any other class, struct or method it does nothing. [GlobalBehavior] marks a class that implements exactly one Keryx behavior interface closing.",
+        helpLinkUri: HelpLinkBase + "krx042"
     );
 }

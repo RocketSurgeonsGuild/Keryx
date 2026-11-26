@@ -94,8 +94,10 @@ public sealed class HostGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline), then KRX031. A
-    ///     request whose handler candidate breaks a rule counts as handled: the analyzers report the handler.
+    ///     The host diagnostics: KRX030 for the host's own request and stream request types (from its syntax pipeline), then KRX031, then
+    ///     KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks in-source pairs), KRX035 for each global
+    ///     behavior and KRX036 for each <c>ExcludeBehavior</c> that removed nothing. A request whose handler candidate breaks a rule counts as
+    ///     handled: the analyzers report the handler.
     /// </summary>
     private static EquatableArray<HostDiagnosticModel> CreateDiagnostics(
         HostSettings settings,
@@ -122,6 +124,24 @@ public sealed class HostGenerator : IIncrementalGenerator
         if (settings.UnsupportedTargetFramework is { } framework)
         {
             diagnostics.Add(new(Descriptors.HostTargetFrameworkTooOld, settings.HostAttribute, ImmutableArray.Create(settings.AssemblyName, framework)));
+        }
+
+        var models = handlers.Select(static entry => entry.Handler).OfType<HostHandlerModel>().ToArray();
+        diagnostics.AddRange(HostBehaviorDiagnostics.Ordering(settings, HostComposition.Create(models)));
+
+        foreach (var global in settings.GlobalBehaviors)
+        {
+            diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(global.Name, global.Assembly)));
+        }
+
+        // Stream pipelines are composed already (their behaviors count as used), although the host dispatches them only from Phase 5.
+        var used = new HashSet<string>(models.SelectMany(static m => m.UsedExclusions), StringComparer.Ordinal);
+        foreach (var exclusion in settings.Exclusions)
+        {
+            if (exclusion.Checked && !used.Contains(exclusion.Operand))
+            {
+                diagnostics.Add(new(Descriptors.UnusedExclusion, exclusion.Location ?? settings.HostAttribute, ImmutableArray.Create("ExcludeBehavior", exclusion.Display)));
+            }
         }
 
         return diagnostics.ToImmutable();

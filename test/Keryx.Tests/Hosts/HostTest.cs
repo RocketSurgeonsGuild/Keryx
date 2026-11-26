@@ -40,6 +40,29 @@ public abstract class HostTest : GeneratorTest
     }
 
     /// <summary>
+    ///     Compiles a host from the sources (after <see cref="Usings" />) with optimizations on, as a Release build would, and loads it into a
+    ///     load context of its own. Allocation tests of user-written <c>async</c> behaviors need it: a Debug build compiles an async state
+    ///     machine to a class, allocated on every call even when the method completes synchronously.
+    /// </summary>
+    protected async Task<Assembly> CompileReleaseHostAsync(string source, CancellationToken cancellationToken)
+    {
+        var result = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful();
+        var compilation = result.FinalCompilation.WithOptions(result.FinalCompilation.Options.WithOptimizationLevel(Microsoft.CodeAnalysis.OptimizationLevel.Release));
+        using var image = new MemoryStream();
+        var emit = compilation.Emit(image, cancellationToken: cancellationToken);
+        if (!emit.Success)
+        {
+            throw new InvalidOperationException(string.Join(Environment.NewLine, emit.Diagnostics.Select(static d => d.ToString())));
+        }
+
+        var context = new CollectibleTestAssemblyLoadContext();
+        Disposables.Add(context);
+        image.Position = 0;
+        return context.LoadFromStream(image);
+    }
+
+    /// <summary>
     ///     A root provider with <c>AddKeryx()</c> applied (twice, which must change nothing) plus the test's own registrations. Scopes are
     ///     validated, so resolving the scoped mediator from the root fails.
     /// </summary>

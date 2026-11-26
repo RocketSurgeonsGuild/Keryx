@@ -126,7 +126,8 @@ internal static class HandlerModelFactory
         return new(string.Join(" ", modifiers), keyword, CSharpText.Identifier(type.Name));
     }
 
-    private static string? ServiceKey(IParameterSymbol parameter)
+    /// <summary>The <c>[FromKeyedServices(key)]</c> key of a parameter as a C# expression, or <see langword="null" />.</summary>
+    internal static string? ServiceKey(IParameterSymbol parameter)
     {
         foreach (var attribute in parameter.GetAttributes())
         {

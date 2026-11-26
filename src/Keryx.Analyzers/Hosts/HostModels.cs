@@ -1,3 +1,4 @@
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Specular.Scanning;
 
@@ -20,7 +21,12 @@ namespace Keryx.Analyzers.Hosts;
 /// <param name="ResponseType">The request's <c>TResponse</c> or the stream request's <c>TItem</c>; <see langword="null" /> for a notification.</param>
 /// <param name="StaticInvoker">Whether <c>InvokeAsync</c> is static: the handler has no injected parameters and is never constructed.</param>
 /// <param name="Services">The generated constructor's parameters (the handler's injected parameters), in order.</param>
-/// <param name="Behaviors">The behaviors attached to the handler method, as <c>typeof</c> operands, in declared order (Phase 4).</param>
+/// <param name="Behaviors">
+///     The closed behaviors that apply to the handler's pipeline: the union of the three scopes (per target, per assembly, global),
+///     de-duplicated by closed type, minus the host's <c>ExcludeBehavior</c> entries, in no particular order (ordinal by identity). The
+///     emitter sorts them (ADR 0001, Ordering).
+/// </param>
+/// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from this pipeline (for KRX036).</param>
 /// <param name="Order">The <c>[HandlerOrder]</c> of a notification handler (Phase 6).</param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
@@ -31,9 +37,64 @@ internal sealed record HostHandlerModel(
     string? ResponseType,
     bool StaticInvoker,
     EquatableArray<ServiceParameterModel> Services,
-    EquatableArray<string> Behaviors,
+    EquatableArray<PipelineBehaviorModel> Behaviors,
+    EquatableArray<string> UsedExclusions,
     int Order
 );
+
+/// <summary>
+///     One closed behavior in a pipeline: what the emitter needs to hold, call and register it, and what the sort and KRX008 need to place
+///     it (ADR 0001, Registration and invocation, Ordering).
+/// </summary>
+/// <param name="Type">The closed behavior type for generated code, fully qualified, with nullable annotations.</param>
+/// <param name="Identity">The closed type's <c>typeof</c> operand: de-duplication, registration and the ordinal sort name.</param>
+/// <param name="Definition">The <c>typeof</c> operand of its definition (<c>X&lt;,&gt;</c> when generic), which open edges match.</param>
+/// <param name="Kind">Its behavior interface.</param>
+/// <param name="Phase">Its <c>[BehaviorOrder]</c> phase.</param>
+/// <param name="Order">Its <c>[BehaviorOrder]</c> order.</param>
+/// <param name="Edges">Its <c>RunsAfter</c>/<c>RunsBefore</c> edges, in declaration order, whichever form declared them.</param>
+/// <param name="Services">Its public constructor's parameters, resolved like a handler's injected parameters.</param>
+/// <param name="Assembly">The assembly that declares it.</param>
+/// <param name="InSource">Whether it is declared in the host's own source (KRX008 for in-source pairs is the analyzer's).</param>
+internal sealed record PipelineBehaviorModel(
+    string Type,
+    string Identity,
+    string Definition,
+    BehaviorKind Kind,
+    int Phase,
+    int Order,
+    EquatableArray<BehaviorEdgeModel> Edges,
+    EquatableArray<ServiceParameterModel> Services,
+    string Assembly,
+    bool InSource
+)
+{
+    /// <summary>What the sort compares.</summary>
+    public OrderingKey Key => new(Identity, Definition, Phase, Order, [.. Edges.Select(static e => e.Edge)]);
+}
+
+/// <summary>
+///     A <c>RunsAfter</c>/<c>RunsBefore</c> edge in a model, with where it was declared for KRX008.
+/// </summary>
+/// <param name="Edge">The edge.</param>
+/// <param name="Location">The attribute that declared it, when it is in source.</param>
+internal sealed record BehaviorEdgeModel(OrderingEdge Edge, LocationInfo? Location);
+
+/// <summary>A <c>[GlobalBehavior]</c> the host applies, for KRX035.</summary>
+/// <param name="Name">The behavior's display name.</param>
+/// <param name="Assembly">The assembly that declares it.</param>
+/// <param name="Location">The <c>[GlobalBehavior]</c> attribute, when it is in source.</param>
+internal sealed record GlobalBehaviorModel(string Name, string Assembly, LocationInfo? Location);
+
+/// <summary>An <c>[assembly: ExcludeBehavior(typeof(X))]</c> entry of the host, for KRX036.</summary>
+/// <param name="Operand">The excluded type's <c>typeof</c> operand, as <see cref="HostHandlerModel.UsedExclusions" /> lists it.</param>
+/// <param name="Display">The excluded type's display name.</param>
+/// <param name="Checked">
+///     Whether KRX036 is checked for it: notification behaviors are composed only from Phase 6, so an exclusion that names one is not
+///     reported yet.
+/// </param>
+/// <param name="Location">The attribute.</param>
+internal sealed record ExclusionModel(string Operand, string Display, bool Checked, LocationInfo? Location);
 
 /// <summary>
 ///     One parameter of a generated constructor (a handler's, later a behavior's), resolved by a generated factory (ADR 0001, Injected
@@ -102,7 +163,17 @@ internal sealed record HostDiagnosticModel(Microsoft.CodeAnalysis.DiagnosticDesc
 /// <param name="UnsupportedTargetFramework">
 ///     The target framework KRX031 reports when it is older than <c>net10.0</c>, or <see langword="null" /> when it is supported.
 /// </param>
-internal sealed record HostSettings(bool Enabled, string Namespace, string AssemblyName, LocationInfo? HostAttribute, string? UnsupportedTargetFramework)
+/// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), for KRX035.</param>
+/// <param name="Exclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
+internal sealed record HostSettings(
+    bool Enabled,
+    string Namespace,
+    string AssemblyName,
+    LocationInfo? HostAttribute,
+    string? UnsupportedTargetFramework,
+    EquatableArray<GlobalBehaviorModel> GlobalBehaviors = default,
+    EquatableArray<ExclusionModel> Exclusions = default
+)
 {
     public static HostSettings Disabled { get; } = new(false, "", "", null, null);
 }
@@ -115,12 +186,16 @@ internal sealed record HostSettings(bool Enabled, string Namespace, string Assem
 /// <param name="HostAttribute">Where <c>[assembly: KeryxHost]</c> is.</param>
 /// <param name="RuntimeAssemblyName">The name of the referenced runtime assembly used when the target framework properties are absent.</param>
 /// <param name="RuntimeAssemblyVersion">Its version, or <see langword="null" /> when no runtime assembly is referenced.</param>
+/// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), for KRX035.</param>
+/// <param name="Exclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
 internal sealed record HostCompilationInfo(
     bool IsHost,
     string AssemblyName,
     LocationInfo? HostAttribute,
     string? RuntimeAssemblyName,
-    Version? RuntimeAssemblyVersion
+    Version? RuntimeAssemblyVersion,
+    EquatableArray<GlobalBehaviorModel> GlobalBehaviors = default,
+    EquatableArray<ExclusionModel> Exclusions = default
 );
 
 /// <summary>

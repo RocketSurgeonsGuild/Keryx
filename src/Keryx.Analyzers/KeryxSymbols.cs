@@ -29,6 +29,17 @@ internal sealed class KeryxSymbols
         KeryxHostAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHostAttribute);
         KeryxContractsAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxContractsAttribute);
         KeryxManifestAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxManifestAttribute);
+        BehaviorOrderAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.BehaviorOrderAttribute);
+        RunsAfterAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttribute);
+        RunsAfterAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsAfterAttributeOfT);
+        RunsBeforeAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttribute);
+        RunsBeforeAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttributeOfT);
+        ExcludeBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeBehaviorAttribute);
+        RequestPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IRequestPipelineBehavior);
+        StreamPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamPipelineBehavior);
+        StreamHookBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamHookBehavior);
+        NotificationPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.INotificationPipelineBehavior);
+        NotificationHandlerPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.INotificationHandlerPipelineBehavior);
         CancellationToken = compilation.GetTypeByMetadataName(WellKnownTypeNames.CancellationToken);
         Task = compilation.GetTypeByMetadataName(WellKnownTypeNames.Task);
         TaskOfT = compilation.GetTypeByMetadataName(WellKnownTypeNames.TaskOfT);
@@ -50,6 +61,17 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? KeryxHostAttribute { get; }
     public INamedTypeSymbol? KeryxContractsAttribute { get; }
     public INamedTypeSymbol? KeryxManifestAttribute { get; }
+    public INamedTypeSymbol? BehaviorOrderAttribute { get; }
+    public INamedTypeSymbol? RunsAfterAttribute { get; }
+    public INamedTypeSymbol? RunsAfterAttributeOfT { get; }
+    public INamedTypeSymbol? RunsBeforeAttribute { get; }
+    public INamedTypeSymbol? RunsBeforeAttributeOfT { get; }
+    public INamedTypeSymbol? ExcludeBehaviorAttribute { get; }
+    public INamedTypeSymbol? RequestPipelineBehavior { get; }
+    public INamedTypeSymbol? StreamPipelineBehavior { get; }
+    public INamedTypeSymbol? StreamHookBehavior { get; }
+    public INamedTypeSymbol? NotificationPipelineBehavior { get; }
+    public INamedTypeSymbol? NotificationHandlerPipelineBehavior { get; }
     public INamedTypeSymbol? CancellationToken { get; }
     public INamedTypeSymbol? Task { get; }
     public INamedTypeSymbol? TaskOfT { get; }

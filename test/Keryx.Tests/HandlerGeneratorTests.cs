@@ -343,6 +343,38 @@ public class HandlerGeneratorTests : GeneratorTest
     }
 
     [Test]
+    public async Task Should_Compile_A_Closed_Generic_Behavior_Over_A_Nullable_Response(CancellationToken cancellationToken)
+    {
+        // typeof drops nullable annotations, so the manifest line would name Tag<Ping, string> against a constraint that needs
+        // IRequest<string?> (CS8631, an error); the manifest attribute is written with nullable annotations disabled.
+        var result = await Generate(
+            """
+            namespace Sample;
+
+            public sealed record Ping : IRequest<string?>;
+
+            public sealed class Tag<TRequest, TResponse> : IRequestPipelineBehavior<TRequest, TResponse>
+                where TRequest : IRequest<TResponse>
+            {
+                public ValueTask<TResponse> Handle<TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+            }
+
+            public static partial class PingHandler
+            {
+                [Behavior(typeof(Tag<Ping, string?>))]
+                private static string? Handle(Ping request) => null;
+            }
+            """,
+            cancellationToken
+        );
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        await Verify(result);
+    }
+
+    [Test]
     public async Task Should_Suppress_A_Nullability_Only_Response_Difference(CancellationToken cancellationToken)
     {
         var result = await Generate(
