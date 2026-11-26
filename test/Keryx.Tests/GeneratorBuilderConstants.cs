@@ -9,7 +9,7 @@ internal static class GeneratorBuilderConstants
                                                                 .Create()
                                                                 .WithGenerator<KeryxGenerator>()
                                                                 .AddReferences(
-                                                                     typeof(KeryxPackage).Assembly,
+                                                                     typeof(Unit).Assembly,
                                                                      typeof(Attribute).Assembly
                                                                  );
 }

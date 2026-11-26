@@ -129,6 +129,42 @@ verification pass picked one reading.
   immediately only when there are neither handlers nor per-publish behaviors, or when the runtime type is unknown.
 - **Proposal:** confirm (logging and outbox behaviors then see every publish).
 
+### OQ-19: Shapes of the attributes the ADR lists only in the Attribute reference table
+
+The ADR gives exact declarations for `BehaviorOrder`, `RunsAfter`/`RunsBefore`, `PublishStrategy`, `HandlerOrder`, `KeryxHandler` and
+`KeryxManifest`, but only a table row (targets, "multiple") for `KeryxHost`, `KeryxContracts`, `Behavior`, `GlobalBehavior`,
+`ExcludeBehavior` and `ExcludeHandler`. Their property names and `AttributeUsage.Inherited` are unstated, and Phase 1 fixes them in the
+public API snapshot.
+
+- **Interim:** sealed attributes with a primary constructor, as the declared ones are. `Behavior(Type)` and `ExcludeBehavior(Type)` expose
+  `BehaviorType` (as `RunsAfter`/`RunsBefore` do); `ExcludeHandler(Type)` exposes `HandlerType`. `KeryxHost`, `KeryxContracts` and
+  `GlobalBehavior` have no members. `AllowMultiple` follows the table ("multiple" → `true`, otherwise `false`); `Inherited` keeps the
+  default (`true`) everywhere, like the attributes the ADR declares. The generator reads attributes through Roslyn, which ignores
+  `Inherited`, so it has no effect on Keryx itself.
+- **Proposal:** confirm and copy the declarations into the ADR's Attribute reference. Alternative: `Inherited = false` on the class-level
+  attributes (`GlobalBehavior`, `BehaviorOrder`, `RunsAfter`/`RunsBefore`, `PublishStrategy`), so reflection-based tooling does not
+  report a derived class as a global behavior or a parallel notification when the generator does not treat it as one.
+
+### OQ-20: C# language version floor set by `init` attribute properties
+
+The ADR declares `KeryxHandlerAttribute.Behaviors`, `Order` and `StaticInvoker`, `KeryxManifestAttribute.FormatVersion` and
+`BehaviorOrderAttribute.Order` as `init` properties. Setting an `init` property through an attribute named argument needs C# 9 (CS8400
+in C# 8). The generator emits `[assembly: KeryxManifest(FormatVersion = 1)]` into every project that references Keryx, and the ADR lets
+contracts and handler libraries target `netstandard2.0`, where the default `LangVersion` is 7.3. Such a project gets compile errors in
+generated code it cannot edit; hand-written `[BehaviorOrder(..., Order = n)]` hits the same error. The generated `#nullable enable`
+already needs C# 8, so these projects must raise `LangVersion` either way; `init` moves the floor from C# 8 to C# 9 without the ADR
+saying so.
+
+- **Interim:** keep `init`, as the ADR declares. Keryx requires C# 9 or later in every project that references it. Phase 2 reports a
+  diagnostic for a project below C# 9 instead of emitting code that does not compile, and emits `Behaviors` as
+  `new global::System.Type[] { ... }` (a collection expression would raise the floor to C# 12). `ManifestContractTests` compiles the
+  attributes as generated code writes them against the `netstandard2.0` `Keryx.dll` with C# 9 and the latest version, reads them back from
+  metadata by `KnownTypeNames`, and pins the C# 8 failure (five CS8400 errors).
+- **Proposal:** change the four generated-only `Keryx.Internal` properties to `{ get; set; }`. They are `[EditorBrowsable(Never)]`, so
+  mutability costs nothing, `set` is the usual attribute pattern, and the floor drops back to C# 8 (the `#nullable enable` in generated
+  code). Consider the same for `BehaviorOrderAttribute.Order`. The change is source compatible for attribute usage (a named argument is
+  stored by name), but it changes the public API snapshot and the ADR declarations, and flips the C# 8 test in `ManifestContractTests`.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)

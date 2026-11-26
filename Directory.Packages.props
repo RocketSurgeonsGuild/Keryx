@@ -46,6 +46,8 @@
     <PackageVersion Include="Rocket.Surgery.Extensions.Testing.TUnit" Version="11.0.1" />
     <PackageVersion Include="Rocket.Surgery.Extensions.Testing.SourceGenerators" Version="11.0.1" />
     <PackageVersion Include="Verify.TUnit" Version="33.7.3" />
+    <!-- Public API snapshot of Keryx.dll (test/Keryx.Tests/PublicApiTests.cs). -->
+    <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
   </ItemGroup>
   <ItemGroup>
     <!-- Benchmarks: Keryx against a hand-written baseline and the other mediators (pinned exactly). -->

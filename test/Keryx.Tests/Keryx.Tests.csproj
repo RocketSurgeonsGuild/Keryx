@@ -8,13 +8,32 @@
         <ProjectReference Include="..\..\src\Keryx.Analyzers\Keryx.Analyzers.csproj" />
         <ProjectReference Include="..\..\src\Keryx.Analyzers.CodeFixes\Keryx.Analyzers.CodeFixes.csproj" />
         <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
+        <!--
+            The netstandard2.0 Keryx.dll, built but not referenced: ManifestContractTests compile generated-style code against it, as a
+            netstandard2.0 contracts or handler library would. Its path reaches the tests through AssemblyMetadata (see the target below).
+        -->
+        <ProjectReference
+            Include="..\..\src\Keryx\Keryx.csproj"
+            SetTargetFramework="TargetFramework=netstandard2.0"
+            ReferenceOutputAssembly="false"
+            OutputItemType="KeryxNetStandardAssembly"
+        />
     </ItemGroup>
+    <Target Name="AddKeryxNetStandardAssemblyMetadata" AfterTargets="ResolveProjectReferences" BeforeTargets="GetAssemblyAttributes">
+        <ItemGroup>
+            <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+                <_Parameter1>KeryxNetStandardAssembly</_Parameter1>
+                <_Parameter2>@(KeryxNetStandardAssembly->'%(FullPath)')</_Parameter2>
+            </AssemblyAttribute>
+        </ItemGroup>
+    </Target>
     <ItemGroup>
         <!-- The source generator testing helpers need Roslyn 5.9 or later; the analyzers themselves build against 5.0. -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="5.12.0" />
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" VersionOverride="5.12.0" PrivateAssets="all" />
         <PackageReference Include="Rocket.Surgery.Extensions.Testing.SourceGenerators" />
+        <PackageReference Include="PublicApiGenerator" />
     </ItemGroup>
     <ItemGroup>
         <Compile Remove="snapshots\**" />
