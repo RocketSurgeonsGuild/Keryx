@@ -139,6 +139,13 @@ internal sealed record GlobalBehaviorModel(string Name, string Assembly, Locatio
 /// <param name="Location">The attribute.</param>
 internal sealed record ExclusionModel(string Operand, string Display, LocationInfo? Location);
 
+/// <summary>An <c>[assembly: ExternallyHandled(typeof(X))]</c> entry of the host, for KRX030 and KRX036.</summary>
+/// <param name="Type">The named type's <c>typeof</c> operand, fully qualified with <c>global::</c>, as <see cref="HostRequestModel.Type" /> is.</param>
+/// <param name="Display">The named type's display name.</param>
+/// <param name="IsRequest">Whether the type is a request or stream request type; otherwise the entry has no effect (KRX036).</param>
+/// <param name="Location">The attribute.</param>
+internal sealed record ExternallyHandledModel(string Type, string Display, bool IsRequest, LocationInfo? Location);
+
 /// <summary>
 ///     One parameter of a generated constructor (a handler's, later a behavior's), resolved by a generated factory (ADR 0001, Injected
 ///     parameters).
@@ -199,7 +206,7 @@ internal sealed record HostDiagnosticModel(Microsoft.CodeAnalysis.DiagnosticDesc
 ///     The compilation-wide inputs of the host generator.
 /// </summary>
 /// <param name="Enabled">
-///     The compilation references Keryx, has <c>[assembly: KeryxHost]</c> and compiles with C# 11 or later (KRX022). When false the host
+///     The compilation references Keryx, has <c>[assembly: KeryxHost]</c> and compiles with C# 14 or later (KRX022). When false the host
 ///     generator emits and reports nothing.
 /// </param>
 /// <param name="Namespace">The namespace of the generated host types (ADR 0001, Opting in).</param>
@@ -248,9 +255,13 @@ internal sealed record HostBuildProperties(string? RootNamespace, string? Target
 ///     Every request and stream request type that has a handler in the composed set, malformed or excluded-by-error ones included, fully
 ///     qualified (KRX030).
 /// </param>
-/// <param name="ReferencedRequests">The request and stream request types of the references that KRX030 covers, ordered by type.</param>
+/// <param name="ReferencedRequests">
+///     The request and stream request types of the references that KRX030 covers (those declared in a referenced host included, OQ-16),
+///     ordered by type.
+/// </param>
 /// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), own and referenced, for KRX035.</param>
 /// <param name="BehaviorExclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
+/// <param name="ExternallyHandled">The host's <c>ExternallyHandled</c> entries, for KRX030 and KRX036, in declaration order.</param>
 /// <param name="Diagnostics">
 ///     The diagnostics found while composing: KRX005 across assemblies, KRX032, KRX033, KRX034, and KRX036 for <c>ExcludeHandler</c>.
 /// </param>
@@ -262,6 +273,7 @@ internal sealed record HostModel(
     EquatableArray<HostRequestModel> ReferencedRequests,
     EquatableArray<GlobalBehaviorModel> GlobalBehaviors,
     EquatableArray<ExclusionModel> BehaviorExclusions,
+    EquatableArray<ExternallyHandledModel> ExternallyHandled,
     EquatableArray<HostDiagnosticModel> Diagnostics
 )
 {
@@ -275,6 +287,7 @@ internal sealed record HostModel(
             ImmutableArray<HostRequestModel>.Empty,
             ImmutableArray<GlobalBehaviorModel>.Empty,
             ImmutableArray<ExclusionModel>.Empty,
+            ImmutableArray<ExternallyHandledModel>.Empty,
             ImmutableArray<HostDiagnosticModel>.Empty
         );
 }

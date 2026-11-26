@@ -576,12 +576,12 @@ public class HandlerAnalyzerTests : AnalyzerTest
     }
 
     [Test]
-    public async Task Reports_Nothing_Below_CSharp_11(CancellationToken cancellationToken)
+    public async Task Reports_Nothing_Below_CSharp_14(CancellationToken cancellationToken)
     {
         var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
             "public sealed class Ping : IRequest<string> { } public class H { public string Handle(Ping request) => \"\"; }",
             cancellationToken,
-            Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp10
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp13
         );
 
         await Assert.That(Ids(diagnostics)).IsEmpty();

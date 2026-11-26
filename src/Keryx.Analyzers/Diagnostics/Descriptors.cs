@@ -268,12 +268,12 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor LanguageVersionTooLow = new(
         "KRX022",
-        "Keryx needs C# 11 or later",
-        "This project compiles with C# {0}, but Keryx needs C# 11 or later; remove the LangVersion setting (the Keryx package then defaults it to 'latest') or set it to 11 or later",
+        "Keryx needs C# 14 or later",
+        "This project compiles with C# {0}, but Keryx needs C# 14 or later; remove the LangVersion setting (the Keryx package then defaults it to 'latest') or set it to 14 or later",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Generated code sets init-only attribute properties, and [RunsAfter<T>]/[RunsBefore<T>] are generic attributes, so every project that references Keryx compiles with C# 11 or later. The Keryx generators emit nothing in a project below that.",
+        description: "Every project that references Keryx compiles with C# 14 or later, the default language of the .NET 10 SDK that Keryx requires; generated code may use any C# 14 feature. The Keryx generators emit nothing in a project below that.",
         helpLinkUri: HelpLinkBase + "krx022",
         customTags: WellKnownDiagnosticTags.CompilationEnd
     );
@@ -285,7 +285,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Every request and stream request type a host can see needs exactly one handler in the host's composed set: the host's own handlers and the handlers of the assemblies it references. Its severity can be changed in .editorconfig, for example in a client that sends requests handled out of process.",
+        description: "Every request and stream request type a host can see, including those declared in a referenced host, needs exactly one handler in the host's composed set: the host's own handlers and the handlers of the assemblies it references. A request handled outside the host is named with [assembly: ExternallyHandled(typeof(X))], which turns the rule off for that type; the severity can also be changed in .editorconfig.",
         helpLinkUri: HelpLinkBase + "krx030"
     );
 
@@ -361,12 +361,12 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor UnusedExclusion = new(
         "KRX036",
-        "ExcludeHandler or ExcludeBehavior names a type that is not part of any pipeline",
-        "[assembly: {0}(typeof({1}))] has no effect, because '{1}' is not part of any pipeline in this host",
+        "An exclusion or ExternallyHandled has no effect",
+        "[assembly: {0}(typeof({1}))] has no effect, because {2}",
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "An exclusion removes a handler or behavior the host would otherwise use. One that names nothing the host uses is probably a mistake.",
+        description: "An exclusion removes a handler or behavior the host would otherwise use, and ExternallyHandled turns KRX030 off for a request the host does not handle. One that names nothing the host uses, a request the host handles, or a type that is not a request or stream request is probably a mistake.",
         helpLinkUri: HelpLinkBase + "krx036"
     );
 
@@ -413,4 +413,24 @@ internal static class Descriptors
         description: "[Behavior] attaches a behavior to a handler method, a notification type or the assembly; on any other class, struct or method it does nothing. [GlobalBehavior] marks a class that implements exactly one Keryx behavior interface closing.",
         helpLinkUri: HelpLinkBase + "krx042"
     );
+
+    public static readonly DiagnosticDescriptor HostOnlyAttributeOutsideHost = new(
+        "KRX043",
+        "Host-only attribute outside a host",
+        "[assembly: {0}] has no effect, because this assembly is not a host ([assembly: KeryxHost])",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "[assembly: ExternallyHandled], [assembly: ExcludeHandler] and [assembly: ExcludeBehavior] are read only by a host. In an assembly without [assembly: KeryxHost] they do nothing.",
+        helpLinkUri: HelpLinkBase + "krx043"
+    );
+
+    /// <summary>The KRX036 reason for an exclusion that removes nothing.</summary>
+    public static string NotPartOfAnyPipeline(string display) => $"'{display}' is not part of any pipeline in this host";
+
+    /// <summary>The KRX036 reason for <c>ExternallyHandled</c> naming a request the host handles.</summary>
+    public static string HandledByThisHost(string display) => $"'{display}' has a handler in this host";
+
+    /// <summary>The KRX036 reason for <c>ExternallyHandled</c> naming a type that is not a request or stream request.</summary>
+    public static string NotARequest(string display) => $"'{display}' is not a request or stream request";
 }

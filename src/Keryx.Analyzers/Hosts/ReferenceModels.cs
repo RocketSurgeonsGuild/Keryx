@@ -24,7 +24,10 @@ internal sealed record KeryxReferenceModel(EquatableArray<ReferencedAssemblyMode
 /// </summary>
 /// <param name="Name">The assembly's metadata name.</param>
 /// <param name="FormatVersion">The manifest's <c>FormatVersion</c>, or <see langword="null" /> when the assembly has no manifest (KRX033).</param>
-/// <param name="IsHost">Whether the assembly carries <c>[assembly: KeryxHost]</c> (KRX030 skips its request types, OQ-16).</param>
+/// <param name="IsHost">
+///     Whether the assembly carries <c>[assembly: KeryxHost]</c>. KRX030 covers a referenced host's request types like any other reference's
+///     (OQ-16), so the host composition does not read it.
+/// </param>
 /// <param name="Handlers">The public handler classes, ordered by metadata name.</param>
 /// <param name="GlobalBehaviors">The public <c>[GlobalBehavior]</c> classes (unbound when generic), ordered by metadata name.</param>
 /// <param name="Messages">The public, concrete, non-generic request, stream request and notification types, ordered by metadata name.</param>

@@ -12,7 +12,7 @@ internal sealed class KeryxSymbols
     /// <summary>
     ///     The language version Keryx needs (KRX022).
     /// </summary>
-    public const LanguageVersion MinimumLanguageVersion = LanguageVersion.CSharp11;
+    public const LanguageVersion MinimumLanguageVersion = LanguageVersion.CSharp14;
 
     private KeryxSymbols(Compilation compilation, INamedTypeSymbol requestOfT, INamedTypeSymbol streamRequest, INamedTypeSymbol notification)
     {
@@ -36,6 +36,7 @@ internal sealed class KeryxSymbols
         RunsBeforeAttributeOfT = compilation.GetTypeByMetadataName(KnownTypeNames.RunsBeforeAttributeOfT);
         ExcludeBehaviorAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeBehaviorAttribute);
         ExcludeHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExcludeHandlerAttribute);
+        ExternallyHandledAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.ExternallyHandledAttribute);
         KeryxHandlerAttribute = compilation.GetTypeByMetadataName(KnownTypeNames.KeryxHandlerAttribute);
         RequestPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IRequestPipelineBehavior);
         StreamPipelineBehavior = compilation.GetTypeByMetadataName(KnownTypeNames.IStreamPipelineBehavior);
@@ -70,6 +71,7 @@ internal sealed class KeryxSymbols
     public INamedTypeSymbol? RunsBeforeAttributeOfT { get; }
     public INamedTypeSymbol? ExcludeBehaviorAttribute { get; }
     public INamedTypeSymbol? ExcludeHandlerAttribute { get; }
+    public INamedTypeSymbol? ExternallyHandledAttribute { get; }
     public INamedTypeSymbol? KeryxHandlerAttribute { get; }
     public INamedTypeSymbol? RequestPipelineBehavior { get; }
     public INamedTypeSymbol? StreamPipelineBehavior { get; }

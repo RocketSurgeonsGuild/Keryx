@@ -92,14 +92,12 @@ internal static class HostComposer
                 }
 
                 var classified = MessageType.Classify(type, symbols);
-                if (classified is { IsConcrete: true, IsUnsupportedShape: false } && ( classified.IsRequest || classified.IsStream ))
+                if (classified.IsCoveredRequest)
                 {
-                    // A request declared in a host is handled by that host's own mediator (OQ-16).
-                    if (!assembly.IsHost)
-                    {
-                        var operand = CSharpText.TypeOf(type);
-                        referencedRequests[operand] = new(operand, type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat), null);
-                    }
+                    // Request types declared in a referenced host are covered too: the referencing host composes only the handlers that host
+                    // keeps public (OQ-16).
+                    var operand = CSharpText.TypeOf(type);
+                    referencedRequests[operand] = new(operand, type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat), null);
                 }
                 else if (classified.IsNotificationOnly)
                 {
@@ -206,7 +204,7 @@ internal static class HostComposer
         {
             if (!usedHandlerExclusions.Contains(exclusion.Operand))
             {
-                context.Report(Descriptors.UnusedExclusion, exclusion.Location, "ExcludeHandler", exclusion.Display);
+                context.Report(Descriptors.UnusedExclusion, exclusion.Location, "ExcludeHandler", exclusion.Display, Descriptors.NotPartOfAnyPipeline(exclusion.Display));
             }
         }
 
@@ -240,8 +238,36 @@ internal static class HostComposer
             referencedRequests.Values.ToImmutableArray(),
             GlobalBehaviors(catalog),
             BehaviorExclusions(catalog),
+            ExternallyHandled(compilation, symbols),
             context.Diagnostics.ToImmutableArray()
         );
+    }
+
+    /// <summary>
+    ///     The host's <c>[assembly: ExternallyHandled(typeof(X))]</c> entries (ADR 0001, Host control), for KRX030 and KRX036, in declaration
+    ///     order.
+    /// </summary>
+    private static ImmutableArray<ExternallyHandledModel> ExternallyHandled(Compilation compilation, KeryxSymbols symbols)
+    {
+        var entries = ImmutableArray.CreateBuilder<ExternallyHandledModel>();
+        foreach (var attribute in compilation.Assembly.GetAttributes())
+        {
+            if (KeryxSymbols.IsAttribute(attribute, symbols.ExternallyHandledAttribute)
+             && attribute.ConstructorArguments is [{ Kind: TypedConstantKind.Type, Value: ITypeSymbol type }])
+            {
+                entries.Add(
+                    new(
+                        CSharpText.TypeOf(type),
+                        type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                        // The same set KRX030 covers: an interface, abstract base or open generic is never reported, so naming one does nothing.
+                        MessageType.Classify(type, symbols).IsCoveredRequest,
+                        LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute))
+                    )
+                );
+            }
+        }
+
+        return entries.ToImmutable();
     }
 
     /// <summary>

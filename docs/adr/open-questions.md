@@ -15,7 +15,18 @@ OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and
 
 ## Open
 
-None.
+### OQ-56: The `net11.0` dependency on `Microsoft.Extensions.DependencyInjection.Abstractions` (2026-11-26)
+
+OQ-8 makes the `Keryx` package depend on `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.x for `net11.0`. The .NET 11 shared
+framework (`Microsoft.NETCore.App`) now carries `Microsoft.Extensions.DependencyInjection.Abstractions.dll`, so the SDK's package pruning
+drops the `PackageReference` for `net11.0`, and `dotnet pack` writes an empty `net11.0` dependency group. The ADR and the Phase 9 "Done
+when" list expect the package in every TFM's group.
+
+- **Interim:** `Keryx.csproj` removes the package from `PrunePackageReference` (target `_KeryxKeepDependencyInjectionAbstractions`), so
+  the `net11.0` group lists `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.0 as the ADR says. A `net11.0` consumer's own
+  restore prunes it again (the framework already provides the assembly), so it changes nothing at run time.
+- **Proposal:** keep the interim (the package lists the dependency for every TFM, as decided), or let pruning drop it for `net11.0` and
+  say in the ADR (Package and assemblies) that `net11.0` gets the assembly from the shared framework. Needs a decision.
 
 ## Decided
 

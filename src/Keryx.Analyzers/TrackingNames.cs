@@ -6,7 +6,7 @@ namespace Keryx.Analyzers;
 /// </summary>
 internal static class TrackingNames
 {
-    /// <summary>Whether the parse options are C# 11 or later (KRX022).</summary>
+    /// <summary>Whether the parse options are C# 14 or later (KRX022).</summary>
     public const string LanguageVersion = "Keryx.LanguageVersion";
 
     /// <summary>What the handler generator reads from the compilation itself. Fed directly by the compilation, so it always runs.</summary>
@@ -30,7 +30,7 @@ internal static class TrackingNames
     /// <summary>The handler models combined with the settings, one per generated handler source.</summary>
     public const string HandlerSources = "Keryx.HandlerSources";
 
-    /// <summary>The host generator: whether the parse options are C# 11 or later (KRX022).</summary>
+    /// <summary>The host generator: whether the parse options are C# 14 or later (KRX022).</summary>
     public const string HostLanguageVersion = "Keryx.Host.LanguageVersion";
 
     /// <summary>What the host generator reads from the compilation itself. Fed directly by the compilation, so it always runs.</summary>

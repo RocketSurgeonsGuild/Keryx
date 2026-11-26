@@ -9,6 +9,11 @@
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="Polyfill" PrivateAssets="all" />
+        <!--
+            Generated host code uses IServiceCollection, IServiceProvider and the keyed-service APIs. The version follows the target framework
+            (Directory.Packages.props, OQ-8).
+        -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     </ItemGroup>
     <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
         <PackageReference Include="System.Threading.Tasks.Extensions" />
@@ -25,6 +30,17 @@
         <None Include="build/*.*" Pack="true" PackagePath="build" />
         <None Include="buildMultiTargeting/*.*" Pack="true" PackagePath="buildMultiTargeting" />
     </ItemGroup>
+
+    <!--
+        .NET 11's shared framework carries Microsoft.Extensions.DependencyInjection.Abstractions, so package pruning drops the reference for
+        net11.0 and the package would list no dependency there. Keep it, so every target framework's dependency group lists the package
+        (OQ-8; OQ-56 is open on whether net11.0 should list it).
+    -->
+    <Target Name="_KeryxKeepDependencyInjectionAbstractions" BeforeTargets="CollectPrunePackageReferences" DependsOnTargets="AddPrunePackageReferences">
+        <ItemGroup>
+            <PrunePackageReference Remove="Microsoft.Extensions.DependencyInjection.Abstractions" />
+        </ItemGroup>
+    </Target>
 
     <!--
         Adds Keryx.Analyzers.dll (and the System.Text.Json the generator loads on .NET Framework compiler hosts) to analyzers/dotnet/cs,

@@ -7,7 +7,7 @@ namespace Keryx.Analyzers;
 /// <summary>
 ///     Generates the other half of every handler class (constructor, invoker, <c>[KeryxHandler]</c> manifest entry) and the assembly's
 ///     <c>[assembly: KeryxManifest]</c> (ADR 0001, Handlers and Manifest). Runs in every project that references Keryx. It never reports
-///     diagnostics: it skips handlers the analyzers reject, and it emits nothing below C# 11 (KRX022).
+///     diagnostics: it skips handlers the analyzers reject, and it emits nothing below C# 14 (KRX022).
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class HandlerGenerator : IIncrementalGenerator

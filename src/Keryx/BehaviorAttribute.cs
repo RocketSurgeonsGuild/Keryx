@@ -38,7 +38,7 @@ public sealed class GlobalBehaviorAttribute : Attribute;
 /// <summary>
 ///     In a host, removes a behavior from every pipeline, whatever scope attached it.
 /// </summary>
-/// <remarks>A type that is not part of any pipeline is KRX036.</remarks>
+/// <remarks>A type that is not part of any pipeline is KRX036. Outside a host the attribute has no effect and is KRX043.</remarks>
 /// <param name="behaviorType">The behavior class, open (<c>typeof(X&lt;,&gt;)</c>) or closed.</param>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class ExcludeBehaviorAttribute(Type behaviorType) : Attribute
@@ -52,7 +52,7 @@ public sealed class ExcludeBehaviorAttribute(Type behaviorType) : Attribute
 /// <summary>
 ///     In a host, ignores a handler class from a referenced assembly, for example to replace it in a test host.
 /// </summary>
-/// <remarks>A type that is not part of any pipeline is KRX036.</remarks>
+/// <remarks>A type that is not part of any pipeline is KRX036. Outside a host the attribute has no effect and is KRX043.</remarks>
 /// <param name="handlerType">The handler class to ignore.</param>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class ExcludeHandlerAttribute(Type handlerType) : Attribute

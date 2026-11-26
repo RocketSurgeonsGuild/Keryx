@@ -619,10 +619,10 @@ public class HandlerGeneratorTests : GeneratorTest
     }
 
     [Test]
-    public async Task Should_Emit_Nothing_Below_CSharp_11(CancellationToken cancellationToken)
+    public async Task Should_Emit_Nothing_Below_CSharp_14(CancellationToken cancellationToken)
     {
         var result = await Builder
-                          .WithLanguageVersion(LanguageVersion.CSharp10)
+                          .WithLanguageVersion(LanguageVersion.CSharp13)
                           .AddSources(
                                """
                                namespace Sample;
@@ -643,9 +643,9 @@ public class HandlerGeneratorTests : GeneratorTest
     }
 
     [Test]
-    [Arguments(LanguageVersion.CSharp11)]
+    [Arguments(LanguageVersion.CSharp14)]
     [Arguments(LanguageVersion.Latest)]
-    public async Task Should_Emit_From_CSharp_11(LanguageVersion languageVersion, CancellationToken cancellationToken)
+    public async Task Should_Emit_From_CSharp_14(LanguageVersion languageVersion, CancellationToken cancellationToken)
     {
         var result = await Builder
                           .WithLanguageVersion(languageVersion)

@@ -37,6 +37,7 @@ internal static class KnownTypeNames
     public const string RunsBeforeAttributeOfT = "Keryx.RunsBeforeAttribute`1";
     public const string ExcludeBehaviorAttribute = "Keryx.ExcludeBehaviorAttribute";
     public const string ExcludeHandlerAttribute = "Keryx.ExcludeHandlerAttribute";
+    public const string ExternallyHandledAttribute = "Keryx.ExternallyHandledAttribute";
     public const string PublishStrategyAttribute = "Keryx.PublishStrategyAttribute";
     public const string HandlerOrderAttribute = "Keryx.HandlerOrderAttribute";
     public const string KeryxHostAttribute = "Keryx.KeryxHostAttribute";

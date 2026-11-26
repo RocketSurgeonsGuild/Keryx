@@ -127,14 +127,10 @@ internal static class HostModelFactory
     /// </summary>
     public static HostRequestModel? CreateRequest(GeneratorSyntaxContext context, CancellationToken cancellationToken)
     {
-        if (context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is not INamedTypeSymbol type
-         || KeryxSymbols.Create(context.SemanticModel.Compilation) is not { } symbols)
-        {
-            return null;
-        }
-
-        var messageType = MessageType.Classify(type, symbols);
-        return ( messageType.IsRequest || messageType.IsStream ) && messageType.IsConcrete && !messageType.IsUnsupportedShape
+        return  context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is not INamedTypeSymbol type
+         || KeryxSymbols.Create(context.SemanticModel.Compilation) is not { } symbols 
+            ?   null  
+            :   MessageType.Classify(type, symbols).IsCoveredRequest
             ? new(
                 CSharpText.TypeOf(type),
                 type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),

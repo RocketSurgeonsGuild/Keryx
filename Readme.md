@@ -33,11 +33,12 @@ analyzers and code fixes (`analyzers/dotnet/cs`).
 **Requirements**
 
 - **The .NET 10 SDK (Roslyn 5.0) or later**, whatever framework your project targets. The generator does not load in older compilers.
-- **C# 11 or later** in every project that references Keryx. The package sets `LangVersion` to `latest` when your project leaves it empty;
-  a `LangVersion` below 11 that you set yourself is error [KRX022](#krx022).
+- **C# 14 or later** (the .NET 10 SDK's default) in every project that references Keryx, whatever framework it targets. The package sets
+  `LangVersion` to `latest` when your project leaves it empty; a `LangVersion` below 14 that you set yourself is error [KRX022](#krx022).
 - Requests, notifications and handler libraries may target `netstandard2.0`. A **host** (the project with the mediator) targets
-  `net10.0` or later ([KRX031](#krx031)) and references `Microsoft.Extensions.DependencyInjection.Abstractions` itself (every ASP.NET
-  Core and generic-host app already does).
+  `net10.0` or later ([KRX031](#krx031)).
+- The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (8.0.x for `netstandard2.0`, 10.0.x for
+  `net10.0`, 11.0.x for `net11.0`), which the generated host code uses.
 - Analyzers do not flow through a `ProjectReference`: every project that declares requests or handlers, and every host, references the
   `Keryx` package directly.
 
@@ -300,9 +301,13 @@ which every host that references it reads, whether the reference is a project or
   [KRX001](#krx001) there.
 - A **handler library** contains `public` handler classes, and may declare `[GlobalBehavior]`s that every referencing host applies.
 - In the host, a request handled in two assemblies is [KRX005](#krx005); `[assembly: ExcludeHandler(typeof(X))]` drops a referenced
-  handler. A request the host can see without a handler anywhere is [KRX030](#krx030), whose severity `.editorconfig` can lower (for a
-  client that references contracts handled out of process).
-- A host referenced by another host (a test project referencing the app) keeps its own requests out of KRX030 in the referencing host.
+  handler. A request the host can see without a handler anywhere is [KRX030](#krx030). A host that references contracts handled out of
+  process names each such request with `[assembly: ExternallyHandled(typeof(X))]`; `.editorconfig` can also lower KRX030 for the whole
+  host.
+- A host referenced by another host (a test project referencing the app) gets only the handlers the referenced host keeps `public`; the
+  referencing host reports KRX030 for every request of the referenced host without such a handler, unless it names it with
+  `ExternallyHandled`.
+- `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` are read only by a host; anywhere else they are [KRX043](#krx043).
 
 See [samples/libraries](samples/libraries) (a `netstandard2.0` contracts library and a handler library with a global behavior and
 notification handlers) and [samples/hosts](samples/hosts).
@@ -334,18 +339,19 @@ shows them with full-solution analysis on, and every build reports them.
 | <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape, implements more than one behavior interface closing, is `abstract`, or implements `Handle` as `virtual`/`override`. |
 | <a id="krx020"></a>KRX020      | Error    | A behavior class does not have exactly one public constructor.                                                                                                |
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
-| <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 11. Remove the `LangVersion` setting or set it to 11 or later. The generators emit nothing until then.                     |
-| <a id="krx030"></a>KRX030      | Error    | A request the host can see has no handler anywhere in the host. Severity can be changed in `.editorconfig`.                                                   |
+| <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
+| <a id="krx030"></a>KRX030      | Error    | A request the host can see has no handler anywhere in the host, unless `[assembly: ExternallyHandled(typeof(X))]` names it. Severity can be changed in `.editorconfig`. |
 | <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`.                                                                                              |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
 | <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names cannot be resolved from the host. Reference the assembly the message names.                                                |
 | <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies and the assembly it comes from.                                                                                   |
-| <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline.                                                                          |
+| <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline, or `ExternallyHandled` names a type the host handles or that is not a request or stream request. |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |
 | <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect, or `[GlobalBehavior]` on a type that is not a behavior.                                                                  |
+| <a id="krx043"></a>KRX043      | Warning  | `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` or `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`, where it has no effect. |
 
 ## Benchmarks
 

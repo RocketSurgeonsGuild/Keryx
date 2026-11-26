@@ -32,7 +32,7 @@ public class RunsAfterBeforeFormsTests
         """;
 
     [Test]
-    [Arguments(LanguageVersion.CSharp11)]
+    [Arguments(LanguageVersion.CSharp14)]
     [Arguments(LanguageVersion.Latest)]
     public async Task Both_Forms_Produce_The_Same_Edges(LanguageVersion languageVersion)
     {

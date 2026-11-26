@@ -25,6 +25,12 @@
         public ExcludeHandlerAttribute(System.Type handlerType) { }
         public System.Type HandlerType { get; }
     }
+    [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=true)]
+    public sealed class ExternallyHandledAttribute : System.Attribute
+    {
+        public ExternallyHandledAttribute(System.Type requestType) { }
+        public System.Type RequestType { get; }
+    }
     [System.AttributeUsage(System.AttributeTargets.Class)]
     public sealed class GlobalBehaviorAttribute : System.Attribute
     {

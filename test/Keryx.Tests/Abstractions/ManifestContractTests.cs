@@ -11,7 +11,7 @@ namespace Keryx.Tests.Abstractions;
 /// </summary>
 /// <remarks>
 ///     The named arguments set <c>init</c> properties, which need C# 9. OQ-20 (decided 2026-11-26) keeps them <c>init</c>; Keryx itself
-///     requires C# 11 (KRX022). If those properties become <c>set</c>, the C# 8 test fails: update the ADR and the test together.
+///     requires C# 14 (KRX022). If those properties become <c>set</c>, the C# 8 test fails: update the ADR and the test together.
 /// </remarks>
 public class ManifestContractTests
 {

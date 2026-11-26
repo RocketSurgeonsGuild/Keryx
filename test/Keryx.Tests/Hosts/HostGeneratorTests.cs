@@ -8,7 +8,7 @@ namespace Keryx.Tests.Hosts;
 
 /// <summary>
 ///     Snapshots and diagnostics of the host generator (ADR 0001, Generated host; the Phase 3 brief): the mediator, <c>AddKeryx()</c>, the
-///     host namespace, the dispatch threshold, KRX022, KRX030 and KRX031.
+///     host namespace, the dispatch threshold, KRX022, KRX030 (with <c>ExternallyHandled</c>), KRX031 and KRX036 for <c>ExternallyHandled</c>.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HostGeneratorTests : HostTest
@@ -201,11 +201,11 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
-    public async Task KRX022_A_Host_Below_CSharp_11_Gets_No_Host_Sources(CancellationToken cancellationToken)
+    public async Task KRX022_A_Host_Below_CSharp_14_Gets_No_Host_Sources(CancellationToken cancellationToken)
     {
-        // Requests is valid C# 10 once its collection expression is gone; the orphan shows that KRX030 is not reported either.
-        var source = Usings + Requests.Replace("=> [];", "=> new();", StringComparison.Ordinal) + Orphan;
-        var result = await HostBuilder.WithLanguageVersion(LanguageVersion.CSharp10)
+        // Requests is valid C# 13; the orphan shows that KRX030 is not reported either.
+        var source = Usings + Requests + Orphan;
+        var result = await HostBuilder.WithLanguageVersion(LanguageVersion.CSharp13)
                                       .WithAnalyzer<LanguageVersionAnalyzer>()
                                       .AddSources(source)
                                       .Build()
@@ -274,6 +274,75 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;\n" + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task ExternallyHandled_Silences_KRX030_For_The_Named_Type_Only(CancellationToken cancellationToken)
+    {
+        var result = await HostBuilder.AddSources(
+                                           Usings
+                                         + """
+                                           [assembly: KeryxHost]
+                                           [assembly: ExternallyHandled(typeof(Sample.Orphan))]
+                                           [assembly: ExternallyHandled(typeof(Sample.OrphanStream))]
+
+                                           namespace Sample;
+
+                                           public sealed record Orphan : IRequest<int>;
+                                           public sealed record OrphanStream : IStreamRequest<int>;
+                                           public sealed record Other : IRequest<int>;
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}"))
+                    .IsEquivalentTo(["KRX030: Request type 'Other' has no handler in this host"]);
+    }
+
+    [Test]
+    public async Task KRX036_For_ExternallyHandled_On_A_Handled_Request_Or_A_Type_That_Is_Not_A_Request(CancellationToken cancellationToken)
+    {
+        var result = await HostBuilder.AddSources(
+                                           Usings
+                                         + """
+                                           [assembly: KeryxHost]
+                                           [assembly: ExternallyHandled(typeof(Sample.Handled))]
+                                           [assembly: ExternallyHandled(typeof(Sample.Happened))]
+                                           [assembly: ExternallyHandled(typeof(string))]
+                                           [assembly: ExternallyHandled(typeof(IRequest<int>))]
+                                           [assembly: ExternallyHandled(typeof(Sample.Base))]
+                                           [assembly: ExternallyHandled(typeof(Sample.Generic<>))]
+
+                                           namespace Sample;
+
+                                           public sealed record Handled : IRequest<int>;
+                                           public static partial class H { private static int Handle(Handled request) => 1; }
+                                           public sealed record Happened : INotification;
+                                           public abstract record Base : IRequest<int>;
+                                           public sealed record Generic<T> : IRequest<int>;
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
+        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}"))
+                    .IsEquivalentTo(
+                         [
+                             "KRX036: [assembly: ExternallyHandled(typeof(Handled))] has no effect, because 'Handled' has a handler in this host",
+                             "KRX036: [assembly: ExternallyHandled(typeof(Happened))] has no effect, because 'Happened' is not a request or stream request",
+                             "KRX036: [assembly: ExternallyHandled(typeof(string))] has no effect, because 'string' is not a request or stream request",
+                             "KRX036: [assembly: ExternallyHandled(typeof(IRequest<int>))] has no effect, because 'IRequest<int>' is not a request or stream request",
+                             "KRX036: [assembly: ExternallyHandled(typeof(Base))] has no effect, because 'Base' is not a request or stream request",
+                             "KRX036: [assembly: ExternallyHandled(typeof(Generic<>))] has no effect, because 'Generic<>' is not a request or stream request",
+                         ]
+                     );
+        await Assert.That(diagnostics.All(static d => d.Severity == DiagnosticSeverity.Warning && d.Location.IsInSource)).IsTrue();
+        foreach (var diagnostic in diagnostics)
+        {
+            await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).StartsWith("ExternallyHandled");
+        }
     }
 
     [Test]

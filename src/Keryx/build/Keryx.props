@@ -1,11 +1,10 @@
 <Project>
     <!--
-        Keryx needs C# 11 or later in every project that references it: the attributes' init-only properties (C# 9) are set by generated
-        code and by [BehaviorOrder(..., Order = n)], and [RunsAfter<T>]/[RunsBefore<T>] are generic attributes (C# 11). A netstandard2.0
-        project defaults to C# 7.3, so, imported before the project file, this raises only that default, as Specular.Scanning.Sources does
-        for its own generator projects. A LangVersion the project (or its Directory.Build.props) sets itself still wins: it is never
-        raised behind the project's back, because that would change the language the project's own code is compiled with. One below
-        C# 11 is error KRX022 instead of compiler errors in generated code.
+        Keryx needs C# 14 or later in every project that references it: the default language of the .NET 10 SDK that Keryx requires, so
+        generated code may use any C# 14 feature. A netstandard2.0 project defaults to C# 7.3, so, imported before the project file, this
+        raises only that default, as Specular.Scanning.Sources does for its own generator projects. A LangVersion the project (or its
+        Directory.Build.props) sets itself still wins: it is never raised behind the project's back, because that would change the language
+        the project's own code is compiled with. One below C# 14 is error KRX022 instead of compiler errors in generated code.
     -->
     <PropertyGroup>
         <LangVersion Condition="'$(LangVersion)' == ''">latest</LangVersion>

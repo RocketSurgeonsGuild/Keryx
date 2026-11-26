@@ -13,7 +13,8 @@ namespace Keryx.Tests.Hosts;
 /// <summary>
 ///     Cross-assembly discovery (ADR 0001, Cross-assembly discovery; phase 7): a host composes the handlers, global behaviors, request and
 ///     notification types of the assemblies it references, read from their manifests with one scan, and reports the host rules about them
-///     (KRX005 across assemblies, KRX030 for referenced requests, KRX032, KRX033, KRX034, KRX035, KRX036 for <c>ExcludeHandler</c>).
+///     (KRX005 across assemblies, KRX030 for referenced requests and <c>ExternallyHandled</c>, KRX032, KRX033, KRX034, KRX035, KRX036 for
+///     <c>ExcludeHandler</c> and <c>ExternallyHandled</c>).
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class CrossAssemblyTests : HostTest
@@ -424,36 +425,89 @@ public class CrossAssemblyTests : HostTest
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
     }
 
+    /// <summary>An app host: one request whose handler is internal (no manifest entry), one whose handler is public.</summary>
+    private const string AppHost = """
+        using Keryx;
+
+        [assembly: KeryxHost]
+
+        namespace App;
+
+        public sealed record Hidden : IRequest<int>;
+        internal static partial class HiddenHandler { private static int Handle(Hidden request) => 1; }
+
+        public sealed record Visible : IRequest<int>;
+        public static partial class VisibleHandler { private static int Handle(Visible request) => 2; }
+        """;
+
     [Test]
     public async Task A_Test_Host_That_References_An_App_Host(CancellationToken cancellationToken)
     {
-        // OQ-16: the app host's request types are its own mediator's, so KRX030 skips them; its public handler has a manifest entry, so the
-        // test host dispatches that request, and its internal handler is invisible.
-        var app = TestLibraries.Reference(
-            "App",
-            """
-            using Keryx;
-
-            [assembly: KeryxHost]
-
-            namespace App;
-
-            public sealed record Hidden : IRequest<int>;
-            internal static partial class HiddenHandler { private static int Handle(Hidden request) => 1; }
-
-            public sealed record Visible : IRequest<int>;
-            public static partial class VisibleHandler { private static int Handle(Visible request) => 2; }
-            """,
-            host: true
-        );
+        // OQ-16: the app host's request types are covered by KRX030 like any other reference's. Its public handler has a manifest entry, so
+        // the test host dispatches that request; its internal handler is invisible, so the test host reports KRX030 for that request.
+        var app = TestLibraries.Reference("App", AppHost, host: true);
 
         var result = await HostBuilder.AddReferences(app).AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;").Build().GenerateAsync(cancellationToken);
 
-        result.AssertCompilationWasSuccessful();
-        await Assert.That(Diagnostics(result)).IsEmpty();
+        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Hidden' has no handler in this host"]);
+        await AssertOnHostAttributeAsync(HostDiagnostics(result));
         var mediator = Source(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("Send(global::App.Visible request");
         await Assert.That(mediator).DoesNotContain("Hidden");
+    }
+
+    [Test]
+    public async Task ExternallyHandled_Names_A_Request_Of_A_Referenced_App_Host(CancellationToken cancellationToken)
+    {
+        var app = TestLibraries.Reference("App", AppHost, host: true);
+
+        var result = await HostBuilder.AddReferences(app)
+                                      .AddSources(Usings + "[assembly: KeryxHost]\n[assembly: ExternallyHandled(typeof(App.Hidden))]\nnamespace Sample;")
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(Diagnostics(result)).IsEmpty();
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Hidden");
+    }
+
+    [Test]
+    public async Task ExternallyHandled_Silences_KRX030_For_The_Named_Referenced_Types_Only(CancellationToken cancellationToken)
+    {
+        var contracts = TestLibraries.Reference("Contracts", Contracts);
+
+        var result = await HostBuilder.AddReferences(contracts)
+                                      .AddSources(
+                                           Usings
+                                         + "[assembly: KeryxHost]\n[assembly: ExternallyHandled(typeof(Contracts.GetName))]\n[assembly: ExternallyHandled(typeof(Contracts.Countdown))]\nnamespace Sample;"
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'CreateOrder' has no handler in this host"]);
+    }
+
+    [Test]
+    public async Task KRX036_For_ExternallyHandled_On_A_Handled_Referenced_Request_Or_A_Notification(CancellationToken cancellationToken)
+    {
+        var result = await GenerateAsync(
+            "[assembly: ExternallyHandled(typeof(Contracts.GetName))]\n[assembly: ExternallyHandled(typeof(Contracts.OrderPlaced))]\n" + Host,
+            cancellationToken
+        );
+
+        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX036: [assembly: ExternallyHandled(typeof(GetName))] has no effect, because 'GetName' has a handler in this host",
+                             "KRX036: [assembly: ExternallyHandled(typeof(OrderPlaced))] has no effect, because 'OrderPlaced' is not a request or stream request",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+        // Reported on the attribute.
+        foreach (var diagnostic in HostDiagnostics(result).Where(static d => d.Id == "KRX036"))
+        {
+            await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).StartsWith("ExternallyHandled");
+        }
     }
 
     [Test]
