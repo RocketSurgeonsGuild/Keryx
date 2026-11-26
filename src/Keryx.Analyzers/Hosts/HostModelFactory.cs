@@ -98,19 +98,19 @@ internal static class HostModelFactory
     /// </summary>
     public static string? UnsupportedTargetFramework(HostBuildProperties properties, HostCompilationInfo compilation)
     {
-        return  properties is { TargetFrameworkIdentifier: { } identifier, TargetFrameworkVersion: { } versionText } 
-            ?  string.Equals(identifier, ".NETCoreApp", StringComparison.OrdinalIgnoreCase)
+        return properties is { TargetFrameworkIdentifier: { } identifier, TargetFrameworkVersion: { } versionText }
+            ? string.Equals(identifier, ".NETCoreApp", StringComparison.OrdinalIgnoreCase)
              && Version.TryParse(versionText.TrimStart('v', 'V'), out var version)
              && version >= MinimumFramework
                 ? null
-                : $"{identifier},Version={versionText}" 
-            :  compilation switch
-        {
-            { RuntimeAssemblyName: SystemRuntime or "System.Private.CoreLib", RuntimeAssemblyVersion: { } runtimeVersion } when runtimeVersion >= MinimumFramework => null,
-            { RuntimeAssemblyName: { } name, RuntimeAssemblyVersion: { } runtimeVersion } =>
-                $"a framework whose {name} is version {runtimeVersion.ToString(2)}",
-            _ => "a framework without System.Runtime",
-        };
+                : $"{identifier},Version={versionText}"
+            : compilation switch
+            {
+                { RuntimeAssemblyName: SystemRuntime or "System.Private.CoreLib", RuntimeAssemblyVersion: { } runtimeVersion } when runtimeVersion >= MinimumFramework => null,
+                { RuntimeAssemblyName: { } name, RuntimeAssemblyVersion: { } runtimeVersion } =>
+                    $"a framework whose {name} is version {runtimeVersion.ToString(2)}",
+                _ => "a framework without System.Runtime",
+            };
     }
 
     /// <summary>

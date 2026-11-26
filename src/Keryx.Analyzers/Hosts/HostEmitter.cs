@@ -379,11 +379,11 @@ internal static class HostEmitter
         if (parameter.DefaultValue is not { } defaultValue)
         {
             // Nullable<T> does not satisfy the notnull constraint of GetRequiredService<T>, so it is resolved by type and unboxed.
-            return  parameter.NullableUnderlyingType is not null 
-                ?  key is null
+            return parameter.NullableUnderlyingType is not null
+                ? key is null
                     ? $"({parameter.Type}){ServiceProviderExtensions}.GetRequiredService({provider}, typeof({parameter.Type}))"
-                    : $"({parameter.Type}){KeyedServiceProviderExtensions}.GetRequiredKeyedService({provider}, typeof({parameter.Type}), {key})" 
-                :  key is null
+                    : $"({parameter.Type}){KeyedServiceProviderExtensions}.GetRequiredKeyedService({provider}, typeof({parameter.Type}), {key})"
+                : key is null
                 ? $"{ServiceProviderExtensions}.GetRequiredService<{parameter.ServiceType}>({provider})"
                 : $"{KeyedServiceProviderExtensions}.GetRequiredKeyedService<{parameter.ServiceType}>({provider}, {key})";
         }
