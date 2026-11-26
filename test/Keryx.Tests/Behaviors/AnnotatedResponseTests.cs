@@ -1,4 +1,3 @@
-using System.Runtime.Loader;
 using Keryx.Analyzers.Diagnostics;
 using Keryx.Analyzers.Hosts;
 using Keryx.Tests.Hosts;
@@ -253,7 +252,7 @@ public class AnnotatedResponseTests : HostTest
         result.AssertCompilationWasSuccessful();
         // Warnings are errors: no nullability warning (CS8619, CS8620, CS8631) in the generated code for any fit.
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
 
         // Annotated: TResponse is the response without its annotation, as C# infers it.
         await Assert.That(mediator).Contains("global::Sample.Maybe.Handle<global::Sample.Find, string, ");
@@ -278,7 +277,7 @@ public class AnnotatedResponseTests : HostTest
         await Assert.That(CalledWithWarningsDisabled(mediator, "global::Sample.ClosedLegacyAll.HandleAsync<")).IsTrue();
         await Assert.That(mediator).DoesNotContain("global::Sample.ClosedReturn.");
         await Assert.That(mediator).DoesNotContain("global::Sample.ClosedNames.");
-        await Verify(new { Mediator = mediator });
+        await VerifyHost(result);
     }
 
     [Test]
@@ -320,7 +319,7 @@ public class AnnotatedResponseTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Sample.Maybe.Handle<global::Sample.Find, string, ");
         await Assert.That(mediator).DoesNotContain("global::Sample.Maybe.Handle<global::Sample.Ping");
         await Assert.That(mediator).DoesNotContain("global::Sample.Maybe.HandleAsync<global::Sample.Names");
@@ -368,7 +367,7 @@ public class AnnotatedResponseTests : HostTest
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(CalledWithWarningsDisabled(mediator, "global::Sample.ClosedLegacy.Handle<")).IsTrue();
         await Assert.That(mediator).DoesNotContain("global::Sample.ClosedReturn.");
         await Assert.That(mediator).DoesNotContain("global::Sample.ClosedNames.");
@@ -390,11 +389,12 @@ public class AnnotatedResponseTests : HostTest
     public async Task A_Referenced_Global_Behavior_With_An_Annotated_Response_Fits_The_Same_Targets(CancellationToken cancellationToken)
     {
         // The behaviors live in a library; the host's own requests get them as global behaviors, matched against the library's metadata.
-        var result = await HostBuilder.AddReferences(TestLibraries.Reference("Lib", LibrarySource)).AddSources(Usings + ReferencingHost).Build().GenerateAsync(cancellationToken);
+        var library = await CompileLibraryAsync("Lib", LibrarySource, cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + ReferencingHost).Build().GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Lib.Maybe.Handle<global::Sample.Find, string, ");
         await Assert.That(CalledWithWarningsDisabled(mediator, "global::Lib.Maybe.Handle<global::Sample.Legacy, string, ")).IsTrue();
         await Assert.That(mediator).Contains("global::Lib.MaybeValue.Handle<global::Sample.MaybeCount, int, ");
@@ -406,8 +406,9 @@ public class AnnotatedResponseTests : HostTest
     [Test]
     public async Task A_Referenced_Global_Behavior_With_An_Annotated_Response_Runs_For_Every_Target_It_Fits(CancellationToken cancellationToken)
     {
-        var host = await CompileHostAsync(ReferencingHost, "Lib", CompileLibrary("Lib", LibrarySource), cancellationToken);
-        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var library = await CompileLibraryAsync("Lib", LibrarySource, cancellationToken);
+        var host = await CompileHostAsync(ReferencingHost, cancellationToken, library);
+        var lib = library.Assembly!;
         _ = Call<string[]>(lib, "Lib.Log", "Take");
         await using var provider = BuildProvider(host);
 

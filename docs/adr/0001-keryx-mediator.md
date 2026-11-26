@@ -127,7 +127,10 @@ Indago-era branch:
 - Projects: `src/Keryx`, `src/Keryx.Analyzers` (generators, analyzers and, in its `CodeFixes` folder, code fixes), `test/Keryx.Tests`,
   `test/Keryx.Benchmarks`, `samples/hosts/*`, `samples/libraries/*`.
 - Tests: TUnit on Microsoft.Testing.Platform, `TUnit.Assertions.Should`, `Verify.TUnit` snapshots in `snapshots/`,
-  `Rocket.Surgery.Extensions.Testing.SourceGenerators` for generator, analyzer and code-fix tests.
+  `Rocket.Surgery.Extensions.Testing.SourceGenerators` (11.0.2 or later) for generator, analyzer and code-fix tests. Every test
+  compilation goes through it, including referenced libraries, compilation options, severity options and incremental reruns; no test
+  drives a `CSharpGeneratorDriver` or emits a compilation by hand (decided 2026-11-26). Each kind of generated output has one snapshot
+  shape: the host generator's is the object `{ Mediator, AddKeryx }`, the handler generator's is `Verify(result)`.
 - The analyzer project has `AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` from the start (RS2008).
 
 Specular-specific parts are not copied: the Astro docs site, the multi-Roslyn `*.supports` projects, Uno/MAUI/Blazor samples and
@@ -935,6 +938,11 @@ internal sealed partial class KeryxMediator : IMediator
 - `Publish<TNotification>`: when `typeof(TNotification).IsValueType`, generated arms compare `typeof(TNotification) == typeof(X)` (folded
   by the JIT, because value-type instantiations are not shared) and convert with `Unsafe.As<TNotification, X>(ref notification)`, so a
   struct notification is never boxed by dispatch. Only for a reference-type `TNotification` does dispatch call `notification.GetType()`.
+- Above the threshold (for `Publish`, with a reference-type `TNotification`) the lookup is by exact type as well: a type derived from a
+  dispatched type, with no handler of its own, is not in the table, so it takes the default arm (not found for a request or a stream
+  request, nothing to run for a notification) and never reaches the base type's handler. Tests cover both sides of the threshold for
+  `Send`, `Stream` and `Publish<TNotification>`, in the generated syntax, in the compiled IL (a `switch` opcode above the threshold, none
+  at or below it) and at run time (decided 2026-11-26).
 - A `null` argument throws `ArgumentNullException`. An unknown request type throws `KeryxHandlerNotFoundException` naming the type, with
   a hint to reference the handler's assembly from the host. Both throw synchronously, before any behavior runs; behaviors never observe
   them.

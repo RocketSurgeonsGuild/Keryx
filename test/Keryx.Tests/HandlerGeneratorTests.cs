@@ -1,3 +1,4 @@
+using Keryx.Analyzers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -517,28 +518,30 @@ public class HandlerGeneratorTests : GeneratorTest
     [Test]
     public async Task Should_Compile_Null_Defaults_From_A_Nullable_Oblivious_Handler(CancellationToken cancellationToken)
     {
-        var compilation = DirectCompilation.Create(
-            """
-            using Keryx;
+        // Nullable disabled for the whole project (the testing library's default), as a project without <Nullable> compiles.
+        var result = await Builder.WithNullableContext(NullableContextOptions.Disable)
+                                  .AddSources(
+                                       """
+                                       using Keryx;
 
-            namespace Sample;
+                                       namespace Sample;
 
-            public interface IFoo { }
+                                       public interface IFoo { }
 
-            public sealed record Q1 : IRequest<string>;
+                                       public sealed record Q1 : IRequest<string>;
 
-            public partial class Ping
-            {
-                private static string Handle(Q1 request, IFoo foo = null, string s = null, int? count = null) => s;
-            }
-            """,
-            NullableContextOptions.Disable
-        );
+                                       public partial class Ping
+                                       {
+                                           private static string Handle(Q1 request, IFoo foo = null, string s = null, int? count = null) => s;
+                                       }
+                                       """
+                                   )
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
 
-        var (output, sources) = DirectCompilation.Generate(compilation, cancellationToken);
-
-        await Assert.That(output.GetDiagnostics(cancellationToken).Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Verify(sources.Single(static s => s.HintName.EndsWith(".Keryx.g.cs", StringComparison.Ordinal)).SourceText.ToString());
+        await Assert.That(result.Results[typeof(HandlerGenerator)].Diagnostics).IsEmpty();
+        result.AssertCompilationWasSuccessful();
+        await Verify(result);
     }
 
     [Test]

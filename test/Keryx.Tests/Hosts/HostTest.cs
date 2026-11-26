@@ -1,6 +1,7 @@
 using System.Reflection;
-using System.Runtime.Loader;
+using System.Runtime.CompilerServices;
 using Keryx.Analyzers;
+using Keryx.Analyzers.Hosts;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Rocket.Surgery.Extensions.Testing.SourceGenerators;
@@ -16,16 +17,8 @@ public abstract class HostTest : GeneratorTest
     /// <summary>The <c>RootNamespace</c> the hosts in these tests compile with, so the generated host types are <c>Sample.KeryxMediator</c>.</summary>
     protected const string HostNamespace = "Sample";
 
-    protected const string Usings = """
-        #nullable enable
-        using System;
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Keryx;
-        using Microsoft.Extensions.DependencyInjection;
-
-        """;
+    /// <summary>The usings every test source starts with (<see cref="TestSources.Usings" />).</summary>
+    protected const string Usings = TestSources.Usings;
 
     /// <summary>A host: both generators, <see cref="HostNamespace" /> as <c>RootNamespace</c> and <c>KeryxHost</c> set.</summary>
     protected GeneratorTestContextBuilder HostBuilder => HostGenerators.WithKeryxHost();
@@ -36,86 +29,47 @@ public abstract class HostTest : GeneratorTest
     /// </summary>
     protected GeneratorTestContextBuilder HostGenerators =>
         Builder.WithGenerator<HostGenerator>()
-               .AddGlobalOption("build_property.RootNamespace", HostNamespace)
+               .WithRootNamespace(HostNamespace)
                // FrozenDictionary, which generic dispatch uses above the threshold; a net10.0 host gets it from the shared framework.
                .AddReferences(typeof(System.Collections.Frozen.FrozenDictionary).Assembly);
 
-    /// <summary>Compiles a host from the sources (after <see cref="Usings" />) and loads it.</summary>
-    protected async Task<Assembly> CompileHostAsync(string source, CancellationToken cancellationToken)
+    /// <summary>
+    ///     Compiles a host from the sources (after <see cref="Usings" />) against the referenced libraries (see
+    ///     <see cref="GeneratorTest.CompileLibraryAsync" />), and loads it into the test's load context, where it resolves them by name.
+    /// </summary>
+    protected async Task<Assembly> CompileHostAsync(string source, CancellationToken cancellationToken, params GeneratorTestResults[] libraries)
     {
-        var result = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(libraries).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
         result.AssertCompilationWasSuccessful();
         return result.Assembly!;
     }
 
     /// <summary>
-    ///     Compiles a host from the sources (after <see cref="Usings" />) with optimizations on, as a Release build would, and loads it into a
-    ///     load context of its own. Allocation tests of user-written <c>async</c> behaviors need it: a Debug build compiles an async state
-    ///     machine to a class, allocated on every call even when the method completes synchronously.
+    ///     Compiles a host from the sources (after <see cref="Usings" />) with optimizations on, as a Release build would, and loads it.
+    ///     Allocation tests of user-written <c>async</c> behaviors need it: a Debug build compiles an async state machine to a class,
+    ///     allocated on every call even when the method completes synchronously.
     /// </summary>
     protected async Task<Assembly> CompileReleaseHostAsync(string source, CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.WithOptimizationLevel(OptimizationLevel.Release).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
         result.AssertCompilationWasSuccessful();
-        var compilation = result.FinalCompilation.WithOptions(result.FinalCompilation.Options.WithOptimizationLevel(OptimizationLevel.Release));
-        using var image = new MemoryStream();
-        var emit = compilation.Emit(image, cancellationToken: cancellationToken);
-        if (!emit.Success)
-        {
-            throw new InvalidOperationException(string.Join(Environment.NewLine, emit.Diagnostics.Select(static d => d.ToString())));
-        }
-
-        var context = new CollectibleTestAssemblyLoadContext();
-        Disposables.Add(context);
-        image.Position = 0;
-        return context.LoadFromStream(image);
+        return result.Assembly!;
     }
 
     /// <summary>
-    ///     Compiles a host from the sources (after <see cref="Usings" />) against a referenced library (see <see cref="CompileLibrary" />), and
-    ///     loads both into a load context of their own, where the host resolves the library by name.
+    ///     The one snapshot shape of host-generator output (testing-library review, convention 10): the generated mediator and
+    ///     <c>AddKeryx()</c> as one object, in one <c>.verified.txt</c>. Every test that snapshots what the host generator emits goes through
+    ///     it. Diagnostics are asserted by the test, not snapshotted, and the handler partials have their own snapshots (HandlerGeneratorTests).
     /// </summary>
-    protected Task<Assembly> CompileHostAsync(string source, string libraryName, byte[] library, CancellationToken cancellationToken) =>
-        CompileHostAsync(source, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [libraryName] = library }, cancellationToken);
-
-    /// <summary>
-    ///     Compiles a host from the sources (after <see cref="Usings" />) against referenced libraries (by assembly name, see
-    ///     <see cref="CompileLibrary" />), and loads them all into a load context of their own, where the host resolves each library by name.
-    /// </summary>
-    protected async Task<Assembly> CompileHostAsync(string source, IReadOnlyDictionary<string, byte[]> libraries, CancellationToken cancellationToken)
-    {
-        var result = await HostBuilder.AddReferences(libraries.Values.Select(static image => MetadataReference.CreateFromImage(image)))
-                                      .AddSources(Usings + source)
-                                      .Build()
-                                      .GenerateAsync(cancellationToken);
-        result.AssertCompilationWasSuccessful();
-        return LoadHost(result, libraries, cancellationToken);
-    }
-
-    /// <summary>
-    ///     Emits a generated host's final compilation, whatever its generators reported (a host whose generator reported an error such as
-    ///     KRX034 still compiles), and loads it with the referenced libraries (by assembly name) into a load context of its own.
-    /// </summary>
-    protected Assembly LoadHost(GeneratorTestResults result, IReadOnlyDictionary<string, byte[]> libraries, CancellationToken cancellationToken)
-    {
-        using var image = new MemoryStream();
-        var emit = result.FinalCompilation.Emit(image, cancellationToken: cancellationToken);
-        if (!emit.Success)
-        {
-            throw new InvalidOperationException(string.Join(Environment.NewLine, emit.Diagnostics.Select(static d => d.ToString())));
-        }
-
-        var context = new LibraryLoadContext(libraries);
-        Disposables.Add(context);
-        image.Position = 0;
-        return context.LoadFromStream(image);
-    }
-
-    /// <summary>
-    ///     Compiles a library that a host references, against Keryx, with the handler generator, so it carries its manifest as a project that
-    ///     references the Keryx package does, and returns its image.
-    /// </summary>
-    protected static byte[] CompileLibrary(string assemblyName, string source) => TestLibraries.Image(assemblyName, source);
+    protected static SettingsTask VerifyHost(GeneratorTestResults result, [CallerFilePath] string sourceFile = "") =>
+        Verify(
+            new
+            {
+                Mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName),
+                AddKeryx = TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName),
+            },
+            sourceFile: sourceFile
+        );
 
     /// <summary>
     ///     A root provider with <c>AddKeryx()</c> applied (twice, which must change nothing) plus the test's own registrations. Scopes are
@@ -140,29 +94,4 @@ public abstract class HostTest : GeneratorTest
     /// <summary>Calls a public static method of a type in the compiled host (the probes the sources declare).</summary>
     protected static T Call<T>(Assembly assembly, string typeName, string methodName, params object?[] arguments) =>
         (T)assembly.GetType(typeName, throwOnError: true)!.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static)!.Invoke(null, arguments)!;
-
-    /// <summary>A collectible load context that resolves the referenced libraries from their images and everything else from the default context.</summary>
-    private sealed class LibraryLoadContext(IReadOnlyDictionary<string, byte[]> libraries) : AssemblyLoadContext(isCollectible: true), IDisposable
-    {
-        private readonly Dictionary<string, Assembly> _loaded = [with(StringComparer.Ordinal)];
-
-        public void Dispose() => Unload();
-
-        protected override Assembly? Load(AssemblyName assemblyName)
-        {
-            if (assemblyName.Name is not { } name || !libraries.TryGetValue(name, out var library))
-            {
-                return null;
-            }
-
-            if (!_loaded.TryGetValue(name, out var assembly))
-            {
-                using var stream = new MemoryStream(library);
-                assembly = LoadFromStream(stream);
-                _loaded.Add(name, assembly);
-            }
-
-            return assembly;
-        }
-    }
 }

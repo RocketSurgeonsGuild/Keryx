@@ -1,4 +1,6 @@
+using Keryx.Analyzers;
 using Keryx.Analyzers.Diagnostics;
+using Microsoft.CodeAnalysis;
 
 namespace Keryx.Tests.Diagnostics;
 
@@ -377,18 +379,18 @@ public class HandlerAnalyzerTests : AnalyzerTest
     [Arguments("delegate*<int, int> function")]
     public async Task KRX013_Pointer_Parameter(string parameter, CancellationToken cancellationToken)
     {
-        var compilation = DirectCompilation.Create(
-            Usings + Ping + $"public partial class H {{ private static unsafe string Handle(Ping request, {parameter}) => \"\"; }}",
-            allowUnsafe: true
-        );
+        var result = await Builder.WithAllowUnsafe()
+                                  .WithNullableContext(NullableContextOptions.Enable)
+                                  .WithAnalyzer<HandlerAnalyzer>()
+                                  .AddSources(Usings + Ping + $"public partial class H {{ private static unsafe string Handle(Ping request, {parameter}) => \"\"; }}")
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
 
-        var diagnostics = await DirectCompilation.AnalyzeAsync<HandlerAnalyzer>(compilation, cancellationToken);
-        var (output, sources) = DirectCompilation.Generate(compilation, cancellationToken);
-
-        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX013"]);
+        await Assert.That(Ids(result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics)).IsEquivalentTo(["KRX013"]);
         // The generator skips the handler, so the generated code cannot fail to compile (CS0214, CS8345).
-        await Assert.That(sources.Select(static s => s.HintName)).IsEquivalentTo(["KeryxManifest.g.cs"]);
-        await Assert.That(output.GetDiagnostics(cancellationToken).Where(static d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)).IsEmpty();
+        await Assert.That(result.Results[typeof(HandlerGenerator)].SyntaxTrees.Select(static t => Path.GetFileName(t.FilePath))).IsEquivalentTo(["KeryxManifest.g.cs"]);
+        await Assert.That(result.Results[typeof(HandlerGenerator)].Diagnostics).IsEmpty();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error && d.Id != "KRX013")).IsEmpty();
     }
 
     [Test]
@@ -578,7 +580,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
     {
         // A library and a host alike: a request's handler lives in the request's own assembly (decision 2026-11-26, KeryxContracts removed).
         var result = await ( host ? Builder.WithKeryxHost() : Builder )
-                          .AddReferences(Hosts.TestLibraries.Reference("Messages", MessagesLibrary))
+                          .AddCompilationReferences(await CompileLibraryAsync("Messages", MessagesLibrary, cancellationToken))
                           .WithAnalyzer<HandlerAnalyzer>()
                           .AddSources(Usings + "public static partial class H { " + handler + " }")
                           .Build()
@@ -609,7 +611,7 @@ public class HandlerAnalyzerTests : AnalyzerTest
         // Notifications are unaffected: a handler of a notification declared in another assembly is fine. A request declared here is fine
         // even when its request interface comes from another assembly.
         var result = await Builder
-                          .AddReferences(Hosts.TestLibraries.Reference("Messages", MessagesLibrary + "public interface IBase : Keryx.IRequest<string> { }"))
+                          .AddCompilationReferences(await CompileLibraryAsync("Messages", MessagesLibrary + "public interface IBase : Keryx.IRequest<string> { }", cancellationToken))
                           .WithAnalyzer<HandlerAnalyzer>()
                           .AddSources(Usings + source)
                           .Build()

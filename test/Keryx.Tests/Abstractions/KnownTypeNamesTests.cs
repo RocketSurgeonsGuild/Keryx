@@ -52,7 +52,7 @@ public class KnownTypeNamesTests
             "WellKnownTypeNames",
             references:
             [
-                .. ManifestContractTests.FrameworkReferences,
+                .. TestReferences.Framework,
                 MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute).Assembly.Location),
             ]
         );

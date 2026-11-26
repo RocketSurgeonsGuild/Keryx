@@ -1,23 +1,20 @@
 using Keryx.Analyzers;
-using Microsoft.CodeAnalysis;
 using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests;
 
 internal static class GeneratorBuilderConstants
 {
-    public static GeneratorTestContextBuilder Builder { get; } = GeneratorTestContextBuilder
-                                                                .Create()
-                                                                .WithGenerator<HandlerGenerator>()
-                                                                .AddReferences(
-                                                                     typeof(Unit).Assembly,
-                                                                     typeof(Attribute).Assembly,
-                                                                     typeof(Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute).Assembly
-                                                                 )
-                                                                // IServiceProvider, which handlers may inject, is forwarded through System.ComponentModel.
-                                                                .AddReferences(
-                                                                     MetadataReference.CreateFromFile(
-                                                                         Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "System.ComponentModel.dll")
-                                                                     )
-                                                                 );
+    /// <summary>The references every test compilation has: the framework, Keryx, <c>System.ComponentModel</c> and the DI abstractions.</summary>
+    public static GeneratorTestContextBuilder References { get; } = GeneratorTestContextBuilder
+                                                                   .Create()
+                                                                   .AddReferences(
+                                                                        typeof(Unit).Assembly,
+                                                                        typeof(Attribute).Assembly,
+                                                                        typeof(Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute).Assembly
+                                                                    )
+                                                                   .AddReferences(TestReferences.ComponentModel);
+
+    /// <summary><see cref="References" /> with the handler generator, as every project that references the Keryx package compiles.</summary>
+    public static GeneratorTestContextBuilder Builder { get; } = References.WithGenerator<HandlerGenerator>();
 }

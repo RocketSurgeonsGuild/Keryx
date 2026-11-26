@@ -54,7 +54,7 @@ public class PipelineOrderingTests : HostTest
         var result = await HostBuilder.AddSources(Usings + Source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Assert.That(PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName)).Contains("global::Sample.Wrap.Handle<global::Sample.R7a, string, ");
+        await Assert.That(TestSources.HostSource(result, HostEmitter.MediatorHintName)).Contains("global::Sample.Wrap.Handle<global::Sample.R7a, string, ");
     }
 
     private static readonly string Source = BuildSource();

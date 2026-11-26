@@ -34,7 +34,7 @@ public class PipelineGeneratorTests : HostTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         var addKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName);
         await Assert.That(addKeryx).DoesNotContain("Step");
-        await Verify(new { Mediator = Source(result, HostEmitter.MediatorHintName), AddKeryx = addKeryx }).UseParameters(depth);
+        await VerifyHost(result).UseParameters(depth);
     }
 
     [Test]
@@ -241,7 +241,7 @@ public class PipelineGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Verify(new { Mediator = Source(result, HostEmitter.MediatorHintName), AddKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName) });
+        await VerifyHost(result);
     }
 
     /// <summary>
@@ -282,6 +282,5 @@ public class PipelineGeneratorTests : HostTest
         return builder.ToString();
     }
 
-    internal static string Source(GeneratorTestResults result, string hintName) =>
-        result.Results[typeof(HostGenerator)].SyntaxTrees.Single(t => t.FilePath.EndsWith(hintName, StringComparison.Ordinal)).ToString();
+    private static string Source(GeneratorTestResults result, string hintName) => TestSources.HostSource(result, hintName);
 }

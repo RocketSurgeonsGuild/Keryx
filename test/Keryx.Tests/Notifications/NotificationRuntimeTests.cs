@@ -647,16 +647,17 @@ public class NotificationRuntimeTests : HostTest
     {
         // OQ-42 (b): the host knows Contracts.OrderShipped only because one of its handlers takes it, and then delivers it to every handler
         // it converts to, in handler order.
-        var contracts = CompileLibrary(
+        var contracts = await CompileLibraryAsync(
             "Contracts",
             """
             namespace Contracts;
 
             public interface IDomainEvent : global::Keryx.INotification { string Id { get; } }
             public sealed record OrderShipped(string Id) : IDomainEvent;
-            """
+            """,
+            cancellationToken
         );
-        var host = await CompileHostAsync(ReferencedNotificationHost, "Contracts", contracts, cancellationToken);
+        var host = await CompileHostAsync(ReferencedNotificationHost, cancellationToken, contracts);
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
         await Assert.That(await Call<Task<string[]>>(host, "Sample.Probe", "Run", scope.ServiceProvider, scenario, cancellationToken))

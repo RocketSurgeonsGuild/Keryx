@@ -12,16 +12,8 @@ namespace Keryx.Tests.Diagnostics;
 /// </summary>
 public abstract class AnalyzerTest : GeneratorTest
 {
-    protected const string Usings = """
-        #nullable enable
-        using System;
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Keryx;
-        using Microsoft.Extensions.DependencyInjection;
-
-        """;
+    /// <summary>The usings every test source starts with (<see cref="TestSources.Usings" />).</summary>
+    protected const string Usings = TestSources.Usings;
 
     protected async Task<ImmutableArray<Diagnostic>> AnalyzeAsync<TAnalyzer>(
         string source,

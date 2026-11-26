@@ -2,6 +2,7 @@ using System.Globalization;
 using Keryx.Analyzers;
 using Keryx.Tests.Hosts;
 using Microsoft.CodeAnalysis;
+using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests.Behaviors;
 
@@ -245,8 +246,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
 
         excluded.AssertCompilationWasSuccessful();
         await Assert.That(excluded.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
-        await Assert.That(PipelineGeneratorTests.Source(excluded, Analyzers.Hosts.HostEmitter.MediatorHintName)).DoesNotContain("Everywhere");
-        var mediator = PipelineGeneratorTests.Source(applied, Analyzers.Hosts.HostEmitter.MediatorHintName);
+        await Assert.That(TestSources.HostSource(excluded, Analyzers.Hosts.HostEmitter.MediatorHintName)).DoesNotContain("Everywhere");
+        var mediator = TestSources.HostSource(applied, Analyzers.Hosts.HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Sample.Everywhere.Handle<global::Sample.Ping, string, ");
         await Assert.That(mediator).Contains("global::Sample.Everywhere.HandleAsync<global::Sample.Names, string, ");
         await Assert.That(mediator).Contains("global::Sample.Everywhere.Handle<global::Sample.Placed, ");
@@ -256,7 +257,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     public async Task KRX008_For_A_Pair_With_A_Referenced_Behavior(CancellationToken cancellationToken)
     {
         // A library behavior in Phase.Transaction; the host's own behavior, in Phase.Observability, claims to run after it.
-        var library = Library(
+        var library = await LibraryAsync(
             """
             using Keryx;
 
@@ -278,7 +279,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
                     where TRequest : IRequest<TResponse>
                     where TNext : struct, INext<TResponse> => next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
         const string source = """
             namespace Sample;
@@ -319,7 +321,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
             }
             """;
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
@@ -336,7 +338,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     {
         // Early's class edge contradicts its phase in the request pipeline; its stream method's own [RunsAfter] list does too, in the stream
         // pipeline: one KRX008 per kind.
-        var library = Library(
+        var library = await LibraryAsync(
             """
             using Keryx;
 
@@ -355,7 +357,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
                     where TRequest : IStreamRequest<TItem>
                     where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
         const string source = """
             namespace Sample;
@@ -394,7 +397,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
             }
             """;
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
@@ -410,7 +413,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     public async Task KRX008_For_Notification_Behavior_Pairs_With_A_Referenced_Behavior(CancellationToken cancellationToken)
     {
         // A library notification behavior in Phase.Transaction; the host's own, in Phase.Observability, claims to run after it.
-        var library = Library(
+        var library = await LibraryAsync(
             """
             using Keryx;
 
@@ -424,7 +427,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
                     where T : INotification
                     where TNext : struct, INext => next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
         const string source = """
             namespace Sample;
@@ -448,7 +452,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
             }
             """;
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
         await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}"))
@@ -470,7 +474,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
     {
         // Two referenced behaviors declare the same contradiction from both sides: A runs after B, and B runs before A. The library's handler
         // attaches both (a request's handler lives in the request's assembly, KRX023); the library is built without its analyzers.
-        var library = Library(
+        var library = await LibraryAsync(
             """
             using Keryx;
 
@@ -501,13 +505,14 @@ public class HostBehaviorDiagnosticsTests : HostTest
                 [Behavior(typeof(B))]
                 private static string Handle(Ping request) => "";
             }
-            """
+            """,
+            cancellationToken
         );
         const string source = """
             namespace Sample;
             """;
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}"))
                     .IsEquivalentTo(
@@ -553,7 +558,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
             }
             """;
 
-        var result = await HostBuilder.AddReferences(Library(CycleLibrary)).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(await LibraryAsync(CycleLibrary, cancellationToken)).AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
 
         var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
         await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}"))
@@ -599,7 +604,7 @@ public class HostBehaviorDiagnosticsTests : HostTest
             """;
 
         var result = await HostBuilder.WithAnalyzer<Analyzers.Diagnostics.BehaviorAnalyzer>()
-                                      .AddReferences(Library(CycleLibrary))
+                                      .AddCompilationReferences(await LibraryAsync(CycleLibrary, cancellationToken))
                                       .AddSources(Usings + source)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -627,5 +632,5 @@ public class HostBehaviorDiagnosticsTests : HostTest
         """;
 
     /// <summary>Compiles a referenced library against Keryx.</summary>
-    private static MetadataReference Library(string source) => TestLibraries.Reference("Lib", source);
+    private Task<GeneratorTestResults> LibraryAsync(string source, CancellationToken cancellationToken) => CompileLibraryAsync("Lib", source, cancellationToken);
 }

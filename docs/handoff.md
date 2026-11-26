@@ -106,7 +106,15 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
   synchronous region after warm-up; tests of `async` behaviors compile the test host optimized) and BenchmarkDotNet `[MemoryDiagnoser]`
   numbers.
 - Tests: generator output as Verify snapshots; analyzer and code-fix tests through `Rocket.Surgery.Extensions.Testing.SourceGenerators`;
-  runtime behavior tests compile and run generated code. Test compilations use C# 14 or later.
+  runtime behavior tests compile and run generated code. Test compilations use C# 14 or later. Every test compilation goes through the
+  testing library (decided 2026-11-26), the way Dovetail and Specular use it: the shared `GeneratorTestContextBuilder` in a load context
+  of the test's own; referenced libraries built with the library itself (`CompileLibraryAsync`, each with a distinct project name, then
+  `AddCompilationReferences`), loaded into that context, where a host resolves them by name; compilation options through its builder
+  (`WithNullableContext`, `WithAllowUnsafe`, `WithOptimizationLevel`, `WithDiagnosticOption`, and `dotnet_diagnostic.*.severity` as
+  global or per-file options); `build_property.*` options through named builder helpers (`BuildProperties`); incremental tests through
+  `WithIncrementalTracking()` and `RerunAsync`; `UseParameters` for every snapshotted argument row; one snapshot shape per kind of
+  output (host-generator output is `{ Mediator, AddKeryx }` through `HostTest.VerifyHost`, handler-generator, analyzer and code-fix
+  results are `Verify(result)`). Only `KnownTypeNamesTests` builds a Roslyn compilation by hand.
 
 ## Git workflow
 
@@ -199,7 +207,11 @@ generator does not collect them; KRX030 is Phase 7's, for referenced request typ
 **Done when:** runtime tests send through typed and generic paths (value-type and reference-type responses, `IRequest`, struct requests);
 allocation tests show 0 B after warm-up for synchronous handlers (class requests on both paths; struct requests on the typed path); a
 concurrency test covers concurrent first use in one scope; a micro-benchmark compares lazy pipeline contexts against
-`GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15); a host with
+`GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15); generic `Send` is
+tested on both sides of the threshold (decided 2026-11-26): the generated shape (type compares at the threshold, an index lookup
+governing a `switch` above it), the compiled IL (a `switch` opcode above the threshold and none at or below it, read with
+System.Reflection.Metadata), every request dispatched to its own handler above it, and a type derived from a handled request, with no
+handler of its own, not dispatched to the base handler (`KeryxHandlerNotFoundException`), as an unknown type is not; a host with
 `LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`) cover the
 `KeryxHost` defaults through `build/` and `buildTransitive/`, the project's own value, and the compiler-visible property; `dotnet pack`
 ships `build/`, `buildMultiTargeting/` and `buildTransitive/` (the `_KeryxCheckPackedBuildFiles` target in `Keryx.csproj` fails the pack
@@ -293,7 +305,10 @@ behaviors and no fused segments.
   directly with explicit type arguments;
 - allocation tests show 0 extra with no behaviors, one iterator per stream behavior per `Stream` call, and 0 per item; the two-token test
   asserts exactly one linked `CancellationTokenSource` in total with a stream behavior outermost when two distinct cancellable tokens are
-  supplied, and none when one token is `default` or the two are equal.
+  supplied, and none when one token is `default` or the two are equal;
+- generic `Stream` is tested on both sides of the dispatch threshold, as generic `Send` is (Phase 3): the generated shape and the
+  compiled IL at the threshold and one above, every stream request streaming from its own handler above it, and an unknown type or a
+  type derived from a handled stream request throwing `KeryxHandlerNotFoundException` when `Stream` is called.
 
 ### Phase 6: notifications
 
@@ -314,7 +329,10 @@ synchronous throw from the outermost behavior; an `[assembly: Behavior]` naming 
 type's assembly, and in an assembly that declares notification handlers but not the notification type it changes no publish pipeline;
 KRX042 has positive tests for `[Behavior]` on a notification handler method (exact-type and polymorphic), and it changes no generated
 code; snapshot tests of publish pipelines at depths 0, 1, 3 and 8 show the handlers called directly under both strategies; allocation tests
-show 0 B for a sequential publish (with behaviors that take injected services) and for a parallel publish with synchronous handlers.
+show 0 B for a sequential publish (with behaviors that take injected services) and for a parallel publish with synchronous handlers;
+generic `Publish<TNotification>` is tested on both sides of the dispatch threshold, as generic `Send` is (Phase 3): the generated shape and
+the compiled IL at the threshold and one above, every notification type reaching its own handlers above it, and an unknown type or a type
+derived from a handled notification type (unknown to the host) running nothing.
 
 ### Phase 7: cross-assembly discovery
 

@@ -318,7 +318,7 @@ await mediator.Publish(new OrderPlaced(id), ct);
 ```
 
 - A handler whose parameter is a base type or interface (or `INotification` itself) receives every notification type the host knows
-  that converts to it.
+  that converts to it. A type the host does not know reaches no handler.
 - Handlers run in `[HandlerOrder]` order (default 0), then by class name.
 - Publishing is sequential by default. `[PublishStrategy(PublishStrategy.Parallel)]` on the notification type starts every handler
   before awaiting any.
@@ -391,8 +391,11 @@ services that need it create a scope with `IServiceScopeFactory`. A handler's or
 as long as the scope.
 
 The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a `FrozenDictionary` lookup
-above 32 request types) and never boxes the response. A struct request is boxed when sent through `ISender`; the typed overload avoids
-it (Info [KRX021](#krx021)). An unknown request type throws `KeryxHandlerNotFoundException`.
+and a jump table above 32 request types) and never boxes the response. A struct request is boxed when sent through `ISender`; the typed
+overload avoids it (Info [KRX021](#krx021)). An unknown request type throws `KeryxHandlerNotFoundException`, and so does a type derived
+from a handled request that has no handler of its own: dispatch never falls back to a base type's handler. Generic `Stream` dispatches
+the same way. Generic `Publish` does too, so a notification type the host does not know (even one derived from a type it does) runs
+nothing; polymorphic handlers receive only the types the host knows.
 
 Hosts are Native AOT and trimming safe: CI publishes the [sample host](samples/hosts/Keryx.Samples.Host) with `PublishAot=true`, fails
 on any trim or AOT warning and runs it.

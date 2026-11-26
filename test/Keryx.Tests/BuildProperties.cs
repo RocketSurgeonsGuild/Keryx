@@ -1,17 +1,21 @@
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Diagnostics;
 using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests;
 
 /// <summary>
 ///     The MSBuild properties a real build passes the generators and analyzers as <c>build_property.*</c> options (the package's
-///     <c>build/Keryx.props</c> and <c>build/Keryx.targets</c>), for the tests to set the same way.
+///     <c>build/Keryx.props</c> and <c>build/Keryx.targets</c>, and the SDK), set the same way in every test.
 /// </summary>
 internal static class BuildProperties
 {
     /// <summary>The option <c>build/Keryx.targets</c> sets from the <c>KeryxHost</c> MSBuild property (ADR 0001, Opting in).</summary>
     public const string KeryxHost = "build_property.KeryxHost";
+
+    /// <summary>The project's <c>RootNamespace</c>, which names the namespace of the generated host types.</summary>
+    public const string RootNamespace = "build_property.RootNamespace";
+
+    /// <summary>The project's <c>IntermediateOutputPath</c> (<c>obj/</c>), where a host writes its scan cache.</summary>
+    public const string IntermediateOutputPath = "build_property.IntermediateOutputPath";
 
     /// <summary>
     ///     Makes the compilation a host (<c>build_property.KeryxHost</c> = <c>true</c>), as <c>build/Keryx.targets</c> does for an executable,
@@ -21,32 +25,18 @@ internal static class BuildProperties
     public static GeneratorTestContextBuilder WithKeryxHost(this GeneratorTestContextBuilder builder, bool isHost = true) =>
         builder.AddGlobalOption(KeryxHost, isHost ? "true" : "false");
 
+    /// <summary>Sets the project's <c>RootNamespace</c>.</summary>
+    public static GeneratorTestContextBuilder WithRootNamespace(this GeneratorTestContextBuilder builder, string rootNamespace) =>
+        builder.AddGlobalOption(RootNamespace, rootNamespace);
+
     /// <summary>
-    ///     An options provider with the given global <c>build_property.*</c> options, for the tests that drive a generator or an analyzer with
-    ///     Roslyn directly.
+    ///     Sets the project's target framework as the SDK passes it (<c>TargetFrameworkIdentifier</c>, <c>TargetFrameworkVersion</c>), for
+    ///     KRX031.
     /// </summary>
-    public static AnalyzerConfigOptionsProvider Provider(params (string Key, string Value)[] globalOptions) => new OptionsProvider(globalOptions);
+    public static GeneratorTestContextBuilder WithTargetFramework(this GeneratorTestContextBuilder builder, string identifier, string version) =>
+        builder.AddGlobalOption("build_property.TargetFrameworkIdentifier", identifier).AddGlobalOption("build_property.TargetFrameworkVersion", version);
 
-    /// <summary>The options of a host: <c>build_property.KeryxHost</c> = <c>true</c>.</summary>
-    public static AnalyzerConfigOptionsProvider Host { get; } = Provider((KeryxHost, "true"));
-
-    private sealed class OptionsProvider((string Key, string Value)[] globalOptions) : AnalyzerConfigOptionsProvider
-    {
-        public override AnalyzerConfigOptions GlobalOptions { get; } = new Options(globalOptions.ToDictionary(static o => o.Key, static o => o.Value, StringComparer.Ordinal));
-
-        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => Options.Empty;
-
-        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => Options.Empty;
-    }
-
-    private sealed class Options(Dictionary<string, string> values) : AnalyzerConfigOptions
-    {
-        public static Options Empty { get; } = new([]);
-
-        // The base method's out parameter is [NotNullWhen(true)]; that attribute is ambiguous here (the analyzers' Polyfill copy is visible
-        // through InternalsVisibleTo), so the override leaves it off.
-#pragma warning disable CS8765
-        public override bool TryGetValue(string key, out string? value) => values.TryGetValue(key, out value);
-#pragma warning restore CS8765
-    }
+    /// <summary>Sets the project's <c>IntermediateOutputPath</c> (absolute, ending with a directory separator, as MSBuild passes it).</summary>
+    public static GeneratorTestContextBuilder WithIntermediateOutputPath(this GeneratorTestContextBuilder builder, string intermediateOutputPath) =>
+        builder.AddGlobalOption(IntermediateOutputPath, intermediateOutputPath);
 }

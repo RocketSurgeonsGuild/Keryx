@@ -51,7 +51,7 @@ public class StreamOrderingTests : HostTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
 
         // The links, as their generated documentation states them.
-        var links = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName)
+        var links = TestSources.HostSource(result, HostEmitter.MediatorHintName)
                                           .Split('\n')
                                           .Select(static line => line.Trim())
                                           .Where(static line => line.StartsWith("/// <summary>The <c>next</c> of", StringComparison.Ordinal))

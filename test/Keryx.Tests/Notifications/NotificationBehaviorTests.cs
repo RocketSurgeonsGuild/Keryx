@@ -1,6 +1,5 @@
 using System.Reflection;
 using Keryx.Tests.Hosts;
-using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using TUnit.Assertions.Enums;
 
@@ -398,8 +397,8 @@ public class NotificationBehaviorTests : HostTest
                 }
             }
             """;
-        var contractsImage = TestLibraries.Image("Contracts", contracts);
-        var handlersImage = TestLibraries.Image("Handlers", handlers, [MetadataReference.CreateFromImage(contractsImage)]);
+        var contractsLibrary = await CompileLibraryAsync("Contracts", contracts, cancellationToken);
+        var handlersLibrary = await CompileLibraryAsync("Handlers", handlers, cancellationToken, references: [contractsLibrary]);
         var host = await CompileHostAsync(
             """
             namespace Sample;
@@ -413,8 +412,9 @@ public class NotificationBehaviorTests : HostTest
                 }
             }
             """,
-            new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Contracts"] = contractsImage, ["Handlers"] = handlersImage },
-            cancellationToken
+            cancellationToken,
+            contractsLibrary,
+            handlersLibrary
         );
 
         await using var provider = BuildProvider(host);

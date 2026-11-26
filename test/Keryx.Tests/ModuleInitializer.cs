@@ -17,6 +17,8 @@ internal static class ModuleInitializer
         VerifierSettings.ScrubInlineGuids();
         // The analyzer assembly's version changes with every commit; generated [GeneratedCode] attributes carry it.
         VerifierSettings.AddScrubber(static builder => builder.Replace($"\"Keryx\", \"{HandlerEmitter.Version}\"", "\"Keryx\", \"{KeryxVersion}\""));
+        // The scan-cache tests write under the temp directory; a path there must not reach a snapshot as it is.
+        VerifierSettings.AddScrubber(static builder => builder.Replace(Path.GetTempPath(), "{TempPath}"));
 
         DiffRunner.Disabled = true;
         DerivePathInfo(

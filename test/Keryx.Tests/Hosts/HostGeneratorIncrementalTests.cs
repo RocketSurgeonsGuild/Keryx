@@ -1,7 +1,7 @@
 using Keryx.Analyzers;
 using Keryx.Analyzers.Hosts;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
+using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests.Hosts;
 
@@ -13,9 +13,10 @@ namespace Keryx.Tests.Hosts;
 ///     themselves are a cached step. With references, every step after the scan stays cached on an unrelated edit, and swapping in a reference
 ///     whose manifest changed produces <c>Modified</c> host sources.
 /// </summary>
-public class HostGeneratorIncrementalTests
+[Timeout(ModuleInitializer.TestTimeout)]
+public class HostGeneratorIncrementalTests : HostTest
 {
-    private const string Host = """
+    private const string Source = """
         using System;
         using System.Threading;
         using System.Threading.Tasks;
@@ -86,12 +87,10 @@ public class HostGeneratorIncrementalTests
         TrackingNames.HostDiagnosticsAndCompilation,
     ];
 
-    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
-
     [Test]
     public async Task Every_Named_Step_Runs(CancellationToken cancellationToken)
     {
-        var result = Run(Compile(Host), cancellationToken).GetRunResult().Results.Single();
+        var result = ( await GenerateAsync(cancellationToken) ).RunResult<HostGenerator>();
 
         await Assert.That(result.Exception).IsNull();
         await Assert.That(result.TrackedSteps.Keys.Where(static k => k.StartsWith("Keryx.", StringComparison.Ordinal))).IsEquivalentTo(NamedSteps);
@@ -102,16 +101,8 @@ public class HostGeneratorIncrementalTests
     [Test]
     public async Task An_Unrelated_Edit_Leaves_Every_Step_And_Output_Cached_Or_Unchanged(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Host);
-        var driver = Run(compilation, cancellationToken);
-
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(
-                CSharpSyntaxTree.ParseText("namespace Sample; public sealed class Unrelated { public int Value { get; set; } }", ParseOptions, "Unrelated.cs", cancellationToken: cancellationToken)
-            ),
-            cancellationToken
-        );
-        var result = driver.GetRunResult().Results.Single();
+        var first = await GenerateAsync(cancellationToken);
+        var result = ( await first.RerunWithSourceAsync("Unrelated.cs", Unrelated, cancellationToken) ).RunResult<HostGenerator>();
 
         foreach (var (name, steps) in result.TrackedSteps)
         {
@@ -120,185 +111,130 @@ public class HostGeneratorIncrementalTests
                 continue;
             }
 
-            var reasons = steps.SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+            var reasons = steps.Reasons();
             await Assert.That(reasons).IsNotEmpty().Because(name);
-            await Assert.That(reasons.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
-                        .IsTrue()
-                        .Because($"{name}: {string.Join(", ", reasons.Select(static r => r.ToString()))}");
+            await Assert.That(reasons.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because($"{name}: {reasons.Describe()}");
         }
 
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        var outputs = SourceOutputSteps(result).Reasons();
         await Assert.That(outputs).IsNotEmpty();
-        await Assert.That(outputs.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
-                    .IsTrue()
-                    .Because(string.Join(", ", outputs.Select(static r => r.ToString())));
+        await Assert.That(outputs.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because(outputs.Describe());
     }
 
     [Test]
     public async Task Adding_A_Handler_Modifies_The_Host_Sources(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Host);
-        var driver = Run(compilation, cancellationToken);
-
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(
-                CSharpSyntaxTree.ParseText(
-                    "namespace Sample; public sealed record Pong : Keryx.IRequest<int>; public static partial class PongHandler { private static int Handle(Pong request) => 1; }",
-                    ParseOptions,
-                    "Pong.cs",
-                    cancellationToken: cancellationToken
-                )
-            ),
+        var first = await GenerateAsync(cancellationToken);
+        var second = await first.RerunWithSourceAsync(
+            "Pong.cs",
+            "namespace Sample; public sealed record Pong : Keryx.IRequest<int>; public static partial class PongHandler { private static int Handle(Pong request) => 1; }",
             cancellationToken
         );
-        var result = driver.GetRunResult().Results.Single();
+        var result = second.RunResult<HostGenerator>();
 
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
-        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
-        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("Send(global::Sample.Pong request");
+        await Assert.That(SourceOutputSteps(result).Reasons()).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("Send(global::Sample.Pong request");
     }
 
     [Test]
     public async Task Adding_A_Global_Behavior_Modifies_The_Host_Sources(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Host);
-        var driver = Run(compilation, cancellationToken);
+        var first = await GenerateAsync(cancellationToken);
 
         // A global behavior in another file changes every pipeline although no handler's syntax changed.
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(
-                CSharpSyntaxTree.ParseText(
-                    """
-                    namespace Sample;
+        var second = await first.RerunWithSourceAsync(
+            "Audit.cs",
+            """
+            namespace Sample;
 
-                    [Keryx.RequestBehavior]
-                    [Keryx.GlobalBehavior]
-                    public static class Audit
-                    {
-                        public static System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
-                            where TRequest : Keryx.IRequest<TResponse>
-                            where TNext : struct, Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
-                    }
-                    """,
-                    ParseOptions,
-                    "Audit.cs",
-                    cancellationToken: cancellationToken
-                )
-            ),
+            [Keryx.RequestBehavior]
+            [Keryx.GlobalBehavior]
+            public static class Audit
+            {
+                public static System.Threading.Tasks.ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, System.Threading.CancellationToken cancellationToken)
+                    where TRequest : Keryx.IRequest<TResponse>
+                    where TNext : struct, Keryx.INext<TResponse> => next.InvokeAsync(cancellationToken);
+            }
+            """,
             cancellationToken
         );
-        var result = driver.GetRunResult().Results.Single();
+        var result = second.RunResult<HostGenerator>();
 
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
-        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
-        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
+        await Assert.That(SourceOutputSteps(result).Reasons()).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName])
                     .Contains("global::Sample.Audit.Handle<global::Sample.CreateOrder.Command, global::System.Guid, ");
     }
 
     [Test]
     public async Task Adding_A_Notification_Type_A_Polymorphic_Handler_Receives_Modifies_The_Host_Sources(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Host);
-        var driver = Run(compilation, cancellationToken);
+        var first = await GenerateAsync(cancellationToken);
 
         // No handler's syntax changes, but the polymorphic AuditDomainEvents now receives one more concrete type.
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(
-                CSharpSyntaxTree.ParseText("namespace Sample; public sealed record Shipped : IDomainEvent;", ParseOptions, "Shipped.cs", cancellationToken: cancellationToken)
-            ),
-            cancellationToken
-        );
-        var result = driver.GetRunResult().Results.Single();
+        var second = await first.RerunWithSourceAsync("Shipped.cs", "namespace Sample; public sealed record Shipped : IDomainEvent;", cancellationToken);
+        var result = second.RunResult<HostGenerator>();
 
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
-        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
-        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("private __Notification1 __CreateNotification1()");
+        await Assert.That(SourceOutputSteps(result).Reasons()).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("private __Notification1 __CreateNotification1()");
     }
 
     [Test]
     public async Task With_References_An_Unrelated_Edit_Leaves_Every_Step_After_The_Scan_Cached_Or_Unchanged(CancellationToken cancellationToken)
     {
-        var contracts = TestLibraries.Reference("Contracts", CrossAssemblyTests.Contracts);
-        var orders = TestLibraries.Reference("Orders", CrossAssemblyTests.Orders, [contracts]);
-        var compilation = Compile(Host).AddReferences(contracts, orders);
-        var driver = Run(compilation, cancellationToken);
-        await Assert.That(driver.GetRunResult().Results.Single().GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("Send(global::Orders.CreateOrder request");
+        var contracts = await CompileLibraryAsync("Contracts", CrossAssemblyTests.Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", CrossAssemblyTests.Orders, cancellationToken, references: [contracts]);
+        var first = await GenerateAsync(cancellationToken, contracts, orders);
+        await Assert.That(first.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("Send(global::Orders.CreateOrder request");
 
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(
-                CSharpSyntaxTree.ParseText("namespace Sample; public sealed class Unrelated { public int Value { get; set; } }", ParseOptions, "Unrelated.cs", cancellationToken: cancellationToken)
-            ),
-            cancellationToken
-        );
-        var result = driver.GetRunResult().Results.Single();
+        var result = ( await first.RerunWithSourceAsync("Unrelated.cs", Unrelated, cancellationToken) ).RunResult<HostGenerator>();
 
         foreach (var name in (string[])[Specular.Scanning.ScanTrackingNames.Output, .. NamedSteps.Except(CompilationFedSteps)])
         {
-            var reasons = result.TrackedSteps[name].SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+            var reasons = result.TrackedSteps[name].Reasons();
             await Assert.That(reasons).IsNotEmpty().Because(name);
-            await Assert.That(reasons.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
-                        .IsTrue()
-                        .Because($"{name}: {string.Join(", ", reasons.Select(static r => r.ToString()))}");
+            await Assert.That(reasons.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because($"{name}: {reasons.Describe()}");
         }
 
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        var outputs = SourceOutputSteps(result).Reasons();
         await Assert.That(outputs).IsNotEmpty();
-        await Assert.That(outputs.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
-                    .IsTrue()
-                    .Because(string.Join(", ", outputs.Select(static r => r.ToString())));
+        await Assert.That(outputs.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because(outputs.Describe());
     }
 
     [Test]
     public async Task Swapping_In_A_Reference_With_A_Changed_Manifest_Modifies_The_Host_Sources(CancellationToken cancellationToken)
     {
-        var contracts = TestLibraries.Reference("Contracts", CrossAssemblyTests.Contracts);
-        var orders = TestLibraries.Reference("Orders", CrossAssemblyTests.Orders, [contracts]);
-        var compilation = Compile(Host).AddReferences(contracts, orders);
-        var driver = Run(compilation, cancellationToken);
+        var contracts = await CompileLibraryAsync("Contracts", CrossAssemblyTests.Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", CrossAssemblyTests.Orders, cancellationToken, references: [contracts]);
+        var first = await GenerateAsync(cancellationToken, contracts, orders);
 
-        // The same library, rebuilt with one more handler: its manifest changed.
-        var rebuilt = TestLibraries.Reference(
+        // The same library, rebuilt with one more handler: its manifest changed. A second build of Orders needs a load context of its own.
+        var rebuilt = await CompileLibraryAsync(
             "Orders",
             CrossAssemblyTests.Orders + "\npublic sealed record Archive : IRequest;\npublic static partial class ArchiveHandler { private static void Handle(Archive request) { } }\n",
-            [contracts]
+            cancellationToken,
+            references: [contracts],
+            ownLoadContext: true
         );
-        driver = driver.RunGenerators(compilation.ReplaceReference(orders, rebuilt), cancellationToken);
-        var result = driver.GetRunResult().Results.Single();
+        var second = await first.RerunAsync(c => c.ReplaceReference(orders.MetadataReference!, rebuilt.MetadataReference!), cancellationToken: cancellationToken);
+        var result = second.RunResult<HostGenerator>();
 
-        await Assert.That(result.TrackedSteps[Specular.Scanning.ScanTrackingNames.Output].SelectMany(static s => s.Outputs).Select(static o => o.Reason))
-                    .Contains(IncrementalStepRunReason.Modified);
-        var outputs = SourceOutputSteps(result).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
-        await Assert.That(outputs).Contains(IncrementalStepRunReason.Modified);
-        await Assert.That(result.GeneratedSources.Single(static s => s.HintName == HostEmitter.MediatorHintName).SourceText.ToString())
-                    .Contains("Send(global::Orders.Archive request");
+        await Assert.That(result.TrackedSteps[Specular.Scanning.ScanTrackingNames.Output].Reasons()).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(SourceOutputSteps(result).Reasons()).Contains(IncrementalStepRunReason.Modified);
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("Send(global::Orders.Archive request");
     }
+
+    private const string Unrelated = "namespace Sample; public sealed class Unrelated { public int Value { get; set; } }";
 
     /// <summary>The runs of the output that adds the host sources (fed by <see cref="TrackingNames.HostSources" />).</summary>
     private static IEnumerable<IncrementalGeneratorRunStep> SourceOutputSteps(GeneratorRunResult result) =>
         result.TrackedOutputSteps.SelectMany(static s => s.Value).Where(static s => s.Inputs.Any(static i => i.Source.Name == TrackingNames.HostSources));
 
-    private static CSharpCompilation Compile(string source) =>
-        CSharpCompilation.Create(
-            "Incremental",
-            [CSharpSyntaxTree.ParseText(source, ParseOptions, "Host.cs")],
-            [
-                .. Abstractions.ManifestContractTests.FrameworkReferences,
-                MetadataReference.CreateFromFile(Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "System.ComponentModel.dll")),
-                MetadataReference.CreateFromFile(typeof(Unit).Assembly.Location),
-            ],
-            new(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable)
-        );
-
-    private static GeneratorDriver Run(Compilation compilation, CancellationToken cancellationToken) =>
-        CSharpGeneratorDriver
-           .Create(
-                [new HostGenerator().AsSourceGenerator()],
-                parseOptions: ParseOptions,
-                optionsProvider: BuildProperties.Host,
-                driverOptions: new(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true)
-            )
-           .RunGenerators(compilation, cancellationToken);
+    /// <summary>A host from <see cref="Source" />, with nullable enabled, tracking the incremental steps.</summary>
+    private Task<GeneratorTestResults> GenerateAsync(CancellationToken cancellationToken, params GeneratorTestResults[] references) =>
+        HostBuilder.WithNullableContext(NullableContextOptions.Enable)
+                   .WithIncrementalTracking()
+                   .AddCompilationReferences(references)
+                   .AddSource("Host.cs", Source)
+                   .Build()
+                   .GenerateAsync(cancellationToken);
 }

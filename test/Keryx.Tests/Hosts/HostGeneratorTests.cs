@@ -3,6 +3,7 @@ using Keryx.Analyzers.Diagnostics;
 using Keryx.Analyzers.Hosts;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests.Hosts;
 
@@ -86,6 +87,19 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(Usings + Requests).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        await VerifyHost(result);
+    }
+
+    /// <summary>
+    ///     The handler partials and manifest a host's handler generator emits for <see cref="Requests" />, in the handler generator's own
+    ///     snapshot shape (<c>Verify(result)</c>); <see cref="Should_Generate_The_Mediator_And_AddKeryx" /> snapshots the host output.
+    /// </summary>
+    [Test]
+    public async Task Should_Generate_The_Handlers_Of_A_Host(CancellationToken cancellationToken)
+    {
+        var result = await Builder.WithRootNamespace(HostNamespace).WithKeryxHost().AddSources(Usings + Requests).Build().GenerateAsync(cancellationToken);
+
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         await Verify(result);
     }
 
@@ -97,7 +111,8 @@ public class HostGeneratorTests : HostTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         var mediator = MediatorSource(result);
         await Assert.That(mediator).Contains("FrozenDictionary");
-        await Verify(mediator);
+        await Assert.That(GenericDispatch.Of(mediator, "Send")).IsEqualTo(new GenericDispatch("__RequestIndex", 0, "__requestTypes"));
+        await VerifyHost(result);
     }
 
     [Test]
@@ -108,7 +123,7 @@ public class HostGeneratorTests : HostTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         var mediator = MediatorSource(result);
         await Assert.That(mediator).DoesNotContain("FrozenDictionary");
-        await Assert.That(mediator.Split("if (requestType == typeof(").Length - 1).IsEqualTo(HostEmitter.DispatchThreshold);
+        await Assert.That(GenericDispatch.Of(mediator, "Send")).IsEqualTo(new GenericDispatch(null, HostEmitter.DispatchThreshold, ""));
     }
 
     [Test]
@@ -117,7 +132,7 @@ public class HostGeneratorTests : HostTest
         var result = await HostBuilder.AddSources(Usings).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Verify(result);
+        await VerifyHost(result);
     }
 
     [Test]
@@ -157,7 +172,7 @@ public class HostGeneratorTests : HostTest
     {
         var result = await Builder.WithGenerator<HostGenerator>()
                                   .WithKeryxHost()
-                                  .AddGlobalOption("build_property.RootNamespace", rootNamespace)
+                                  .WithRootNamespace(rootNamespace)
                                   .AddSources(Usings)
                                   .Build()
                                   .GenerateAsync(cancellationToken);
@@ -183,10 +198,9 @@ public class HostGeneratorTests : HostTest
     [Test]
     public async Task KRX031_Is_Reported_Without_A_Location_And_Nothing_Is_Generated(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddGlobalOption("build_property.TargetFrameworkIdentifier", ".NETStandard")
-                                      .AddGlobalOption("build_property.TargetFrameworkVersion", "v2.0")
+        var result = await HostBuilder.WithTargetFramework(".NETStandard", "v2.0")
                                       .WithProjectName("Legacy.Host")
-                                      .AddReferences(OrphanLibrary)
+                                      .AddCompilationReferences(await OrphanLibraryAsync(cancellationToken))
                                       .AddSources(Usings + Requests)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -208,8 +222,7 @@ public class HostGeneratorTests : HostTest
     [Test]
     public async Task KRX031_Is_Not_Reported_For_Net10(CancellationToken cancellationToken)
     {
-        var result = await HostBuilder.AddGlobalOption("build_property.TargetFrameworkIdentifier", ".NETCoreApp")
-                                      .AddGlobalOption("build_property.TargetFrameworkVersion", "v10.0")
+        var result = await HostBuilder.WithTargetFramework(".NETCoreApp", "v10.0")
                                       .AddSources(Usings + Requests)
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -227,7 +240,7 @@ public class HostGeneratorTests : HostTest
         // Requests is valid C# 13; the referenced orphan shows that KRX030 is not reported either.
         var source = Usings + Requests;
         var result = await HostBuilder.WithLanguageVersion(LanguageVersion.CSharp13)
-                                      .AddReferences(OrphanLibrary)
+                                      .AddCompilationReferences(await OrphanLibraryAsync(cancellationToken))
                                       .WithAnalyzer<LanguageVersionAnalyzer>()
                                       .AddSources(source)
                                       .Build()
@@ -304,14 +317,14 @@ public class HostGeneratorTests : HostTest
     [Arguments(ReportDiagnostic.Default, DiagnosticSeverity.Error)]
     public async Task KRX030_Severity_Can_Be_Changed(ReportDiagnostic option, DiagnosticSeverity? expected, CancellationToken cancellationToken)
     {
-        // What dotnet_diagnostic.KRX030.severity in .editorconfig becomes; the testing helpers do not pass severity options on.
-        var compilation = DirectCompilation.Create(Usings + "namespace Sample;").AddReferences(OrphanLibrary);
-        compilation = compilation.WithOptions(compilation.Options.WithSpecificDiagnosticOptions([new("KRX030", option)]));
+        // What <WarningsAsErrors>, /nowarn or a severity option become: the compilation's specific diagnostic options.
+        var result = await HostBuilder.WithDiagnosticOption("KRX030", option)
+                                      .AddCompilationReferences(await OrphanLibraryAsync(cancellationToken))
+                                      .AddSources(Usings + "namespace Sample;")
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
 
-        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions, optionsProvider: BuildProperties.Host)
-                             .RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics, cancellationToken);
-
-        await Assert.That(diagnostics.Where(static d => d.Id == "KRX030").Select(static d => (DiagnosticSeverity?)d.Severity).SingleOrDefault()).IsEqualTo(expected);
+        await Assert.That(Krx030Severity(result)).IsEqualTo(expected);
     }
 
     [Test]
@@ -329,14 +342,25 @@ public class HostGeneratorTests : HostTest
         // A referenced request's KRX030 has no source location (a host is an MSBuild property, not an attribute to report on). A per-tree
         // option, what `[*.cs] dotnet_diagnostic.KRX030.severity` in an .editorconfig becomes, applies only to a diagnostic reported on the
         // tree itself (OQ-35); a global one, what a global AnalyzerConfig (.globalconfig) becomes, applies to it.
-        var compilation = DirectCompilation.Create(Usings + "namespace Sample;").AddReferences(OrphanLibrary);
-        compilation = compilation.WithOptions(compilation.Options.WithSyntaxTreeOptionsProvider(new TreeOptions(compilation.SyntaxTrees.Single(), "KRX030", option, global)));
+        var severity = option switch
+        {
+            ReportDiagnostic.Suppress => "none",
+            ReportDiagnostic.Warn => "warning",
+            _ => throw new ArgumentOutOfRangeException(nameof(option), option, null),
+        };
+        var builder = HostBuilder.AddCompilationReferences(await OrphanLibraryAsync(cancellationToken)).AddSource("Host.cs", Usings + "namespace Sample;");
+        builder = global
+            ? builder.AddGlobalOption("dotnet_diagnostic.KRX030.severity", severity)
+            : builder.AddOption("Host.cs", "dotnet_diagnostic.KRX030.severity", severity);
+        var result = await builder.Build().GenerateAsync(cancellationToken);
 
-        _ = CSharpGeneratorDriver.Create([new HostGenerator().AsSourceGenerator()], parseOptions: DirectCompilation.ParseOptions, optionsProvider: BuildProperties.Host)
-                             .RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics, cancellationToken);
-
-        await Assert.That(diagnostics.Where(static d => d.Id == "KRX030").Select(static d => (DiagnosticSeverity?)d.Severity).SingleOrDefault()).IsEqualTo(expected);
+        // The per-file option names the host's only source file.
+        await Assert.That(result.InputCompilation.SyntaxTrees.Select(static t => t.FilePath)).IsEquivalentTo(["Host.cs"]);
+        await Assert.That(Krx030Severity(result)).IsEqualTo(expected);
     }
+
+    private static DiagnosticSeverity? Krx030Severity(GeneratorTestResults result) =>
+        result.Results[typeof(HostGenerator)].Diagnostics.Where(static d => d.Id == "KRX030").Select(static d => (DiagnosticSeverity?)d.Severity).SingleOrDefault();
 
     [Test]
     public async Task Obsolete_Requests_And_Handler_Classes_Do_Not_Warn_In_Generated_Code(CancellationToken cancellationToken)
@@ -429,7 +453,8 @@ public class HostGeneratorTests : HostTest
     /// <summary>
     ///     A referenced library with a request and no handler, for KRX030 (built without the analyzers, as if KRX001 were suppressed there).
     /// </summary>
-    private static MetadataReference OrphanLibrary { get; } = TestLibraries.Reference("Orphans", "namespace Orphans; public sealed record Orphan : Keryx.IRequest<int>;");
+    private Task<GeneratorTestResults> OrphanLibraryAsync(CancellationToken cancellationToken) =>
+        CompileLibraryAsync("Orphans", "namespace Orphans; public sealed record Orphan : Keryx.IRequest<int>;", cancellationToken);
 
     internal static string ManyRequests(int count)
     {
@@ -443,25 +468,5 @@ public class HostGeneratorTests : HostTest
         return builder.ToString();
     }
 
-    private static string MediatorSource(Rocket.Surgery.Extensions.Testing.SourceGenerators.GeneratorTestResults result) =>
-        result.Results[typeof(HostGenerator)].SyntaxTrees.Single(static t => t.FilePath.EndsWith(HostEmitter.MediatorHintName, StringComparison.Ordinal)).ToString();
-
-    /// <summary>Per-tree diagnostic options, as the compiler builds them from an <c>.editorconfig</c> section.</summary>
-    /// <summary>One severity option, for <paramref name="optionsTree" /> (a per-file option) or, with <paramref name="global" />, global.</summary>
-    private sealed class TreeOptions(SyntaxTree optionsTree, string optionsDiagnosticId, ReportDiagnostic optionsValue, bool global = false) : SyntaxTreeOptionsProvider
-    {
-        public override GeneratedKind IsGenerated(SyntaxTree tree, CancellationToken cancellationToken) => GeneratedKind.Unknown;
-
-        public override bool TryGetDiagnosticValue(SyntaxTree tree, string diagnosticId, CancellationToken cancellationToken, out ReportDiagnostic severity)
-        {
-            severity = optionsValue;
-            return !global && tree == optionsTree && diagnosticId == optionsDiagnosticId;
-        }
-
-        public override bool TryGetGlobalDiagnosticValue(string diagnosticId, CancellationToken cancellationToken, out ReportDiagnostic severity)
-        {
-            severity = optionsValue;
-            return global && diagnosticId == optionsDiagnosticId;
-        }
-    }
+    private static string MediatorSource(GeneratorTestResults result) => TestSources.HostSource(result, HostEmitter.MediatorHintName);
 }

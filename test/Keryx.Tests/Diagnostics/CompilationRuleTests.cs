@@ -2,6 +2,7 @@ using Keryx.Analyzers.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests.Diagnostics;
 
@@ -139,14 +140,17 @@ public class CompilationRuleTests : AnalyzerTest
     public async Task KRX022_In_A_NetStandard_Library(LanguageVersion languageVersion, bool reported, CancellationToken cancellationToken)
     {
         // A netstandard2.0 contracts or handler library: compiled against the netstandard2.0 Keryx.dll, where the language floor is the same.
-        var compilation = CSharpCompilation.Create(
-            "Sample.Contracts",
-            [CSharpSyntaxTree.ParseText("public sealed class Ping : Keryx.IRequest<int> { }", new(languageVersion), cancellationToken: cancellationToken)],
-            [.. Abstractions.ManifestContractTests.FrameworkReferences, Abstractions.ManifestContractTests.KeryxNetStandard],
-            new(OutputKind.DynamicallyLinkedLibrary)
-        );
-
-        var diagnostics = await compilation.WithAnalyzers([new LanguageVersionAnalyzer()]).GetAnalyzerDiagnosticsAsync(cancellationToken);
+        var result = await GeneratorTestContextBuilder.CreateWithoutDefaultReferences()
+                                                      .WithAssemblyLoadContext(AssemblyLoadContext)
+                                                      .WithProjectName("Sample.Contracts")
+                                                      .AddReferences(TestReferences.Framework)
+                                                      .AddReferences(TestReferences.KeryxNetStandard)
+                                                      .WithLanguageVersion(languageVersion)
+                                                      .WithAnalyzer<LanguageVersionAnalyzer>()
+                                                      .AddSources("public sealed class Ping : Keryx.IRequest<int> { }")
+                                                      .Build()
+                                                      .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(LanguageVersionAnalyzer)].Diagnostics;
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(reported ? (string[])["KRX022"] : []);
     }

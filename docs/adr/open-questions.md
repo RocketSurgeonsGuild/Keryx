@@ -15,6 +15,7 @@ OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and
 raised while implementing the static-behavior rework and decided by the owner the same day (at the end). The owner's decisions for the
 second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
 raised while implementing it and are open, and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and are open.
+"Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) come last.
 
 ## Open
 
@@ -1364,3 +1365,77 @@ their `Keryx.props`/`Keryx.targets` is missing from the nuspec. Checked by hand:
 that references Keryx) generates the mediator in the `Exe` only (`KeryxHost` true there through `buildTransitive/`, false in the
 library) and runs. Gaps raised: OQ-61 (apps whose `OutputType` is not `Exe`) and OQ-62 (executables and test projects below `net10.0` are hosts by
 default and fail with KRX031).
+
+### Test compilations go through the testing library (2026-11-26)
+
+Owner decisions 6, 10 and 13 of the second rework. Every generator, analyzer and code-fix test compiles through
+`Rocket.Surgery.Extensions.Testing.SourceGenerators`, the way Dovetail and Specular use it; the hand-built `CSharpCompilation` and
+`CSharpGeneratorDriver` paths are gone. `Directory.Packages.props` pins the package at 11.0.2 (RocketSurgeonsGuild/Testing#2430), which
+adds what 11.0.1 lacked, so no interim harness is kept: `DirectCompilation.cs` and `Hosts/TestLibraries.cs` are deleted, and so are
+`HostTest.LibraryLoadContext`, `LoadHost`, `CompileLibrary` and `BuildProperties.Host`/`Provider`.
+`Rocket.Surgery.Extensions.Testing.TUnit` stays at 11.0.1: its 11.0.2 needs `Microsoft.Extensions.DependencyInjection.Abstractions`
+11.0.0, above the 10.0.15 that `Keryx` pins (NU1605).
+
+- One shared builder (`GeneratorBuilderConstants`: `References`, and `Builder` with the handler generator) cloned per test into a load
+  context of the test's own (`GeneratorTest`).
+- Referenced libraries are built with the library: `GeneratorTest.CompileLibraryAsync(name, source, ...)` (kinds `Handlers`, `Plain`,
+  `Host`; nullable enabled; a distinct project name per library; errors fail with the library's diagnostics), passed on with
+  `AddCompilationReferences`. Every library is loaded into the test's load context, where the host resolves it by name; a second build
+  of the same assembly name (another version of it) takes `ownLoadContext: true`. An IDE project reference is
+  `FinalCompilation.ToMetadataReference()`.
+- Compilation options through the builder: `WithNullableContext` (the nullable-oblivious handler test, libraries, incremental tests),
+  `WithAllowUnsafe` (KRX013 pointer parameters), `WithOptimizationLevel(Release)` (`CompileReleaseHostAsync`, which now generates and
+  analyzes under Release too), `WithDiagnosticOption` (KRX030 severity), and `dotnet_diagnostic.KRX030.severity` as a global or per-file
+  option (KRX030 without a location takes only the global one).
+- No custom "compiles" helper: 11.0.2's `AssertCompilationWasSuccessful` lists the failing diagnostics (and fails when emit fails);
+  libraries assert at `DiagnosticSeverity.Error`.
+- `build_property.*` options through named builder helpers in `BuildProperties`: `WithKeryxHost`, `WithRootNamespace`,
+  `WithTargetFramework`, `WithIntermediateOutputPath` (the scan-cache tests, which feed the cache file back with `AddAdditionalText`).
+- Incremental tests (`HandlerGeneratorIncrementalTests`, `Hosts/HostGeneratorIncrementalTests`) build with `WithIncrementalTracking()`
+  and rerun with `RerunAsync` (an added source, a replaced tree, a replaced reference), through the shared `IncrementalRuns` helpers; the
+  host ones now set `RootNamespace` like every other host test.
+- `ManifestContractTests` compile the netstandard2.0 library through the library too (`CreateWithoutDefaultReferences`, the emit result
+  from `EmitResult`); `BehaviorMatchingTests` share one compilation built through it; only `KnownTypeNamesTests` builds a Roslyn
+  compilation by hand.
+- Code-fix tests take each action's changes from the library (`CodeActionTestResult.Changes`) and re-verify every fixed project through
+  the library with the handler generator and the analyzer; the generator diagnostics are no longer discarded (no snapshot changed).
+- `UseParameters` on every snapshotted argument row (already the case); the snapshots' temp directory is scrubbed to `{TempPath}`. Shared
+  references (`TestReferences`), the shared usings and the generated-source reader (`TestSources`) live outside the tests.
+- One snapshot shape per kind of output (the review's convention 10). Host-generator output is always the single object
+  `{ Mediator, AddKeryx }` in one `.verified.txt`, through `HostTest.VerifyHost(result)`; generator diagnostics are asserted by the test,
+  not snapshotted. Handler-generator output, and analyzer and code-fix results, stay `Verify(result)`. Before, host output was snapshotted
+  four ways (the mediator string, `{ Mediator }`, `{ Mediator, AddKeryx }` and `Verify(result)`); the shapes change now so that the
+  SyntaxFactory step's snapshot diff stays formatting only (decision 6).
+
+Deliberate snapshot changes, with identical generated code in every one: the nullable-oblivious handler test snapshots `Verify(result)`
+(its `.verified.txt` plus one `#hint.verified.cs` per generated file) instead of one string. The host snapshots take the one host shape:
+the stream and publish pipeline depth rows, `HostGeneratorTests.Should_Dispatch_Through_A_FrozenDictionary_Above_The_Threshold` and
+`AnnotatedResponseTests.Should_Generate_Pipelines_For_Annotated_Response_Type_Parameters` add `AddKeryx` next to the mediator they held;
+`HostGeneratorTests.Should_Generate_The_Mediator_And_AddKeryx` and `Should_Generate_An_Empty_Mediator_For_A_Host_Without_Handlers` move
+from `Verify(result)` to the host shape. The handler partials and manifest the first of these snapshotted move unchanged to a new test,
+`HostGeneratorTests.Should_Generate_The_Handlers_Of_A_Host` (handler generator only, `Verify(result)`); the empty host's manifest is the
+one `HandlerGeneratorTests` already snapshots. No test was removed. Found while
+migrating, in the testing library: a project name with a dot emits an assembly named after its first segment (emit passes the project
+name as the output file name), so a library meant to be read back by assembly name uses a name without a dot. Folded into the ADR
+(Repository layout) and the brief (Engineering rules).
+
+### Jump-table dispatch has tests (2026-11-26)
+
+Owner decision 8 of the second rework, ahead of the switch-expression change it guards (decision 7). `Hosts/JumpTableDispatchTests`
+(non-sealed record messages, each with its own handler):
+
+- generic `Stream` above the threshold: every `S{n}` streams from its own handler through `IMediator.Stream`, and an unknown type throws
+  `KeryxHandlerNotFoundException` when `Stream` is called;
+- for requests, stream requests and notifications above the threshold: a type derived from a handled one, compiled into another assembly
+  against the host (so the host does not know it), is not dispatched to the base type's handler (`KeryxHandlerNotFoundException` for a
+  request or stream request, no handler run for a notification), while the base type is; and the not-found path of each kind;
+- the boundary for streams and notifications (the request kind's already existed): at `DispatchThreshold` the generic method compares
+  types and has no table, one above it a lookup governs the dispatch and the table exists;
+- the IL of the generic `Send`, `Stream` and `Publish<TNotification>`, read from the emitted image with System.Reflection.Metadata, has one
+  `switch` opcode above the threshold and none at or below it, for each kind.
+
+The text asserts that would break on the switch-expression change are structural now: `GenericDispatch.Of(mediator, method)` reads, from
+the syntax of the generic method, the index method a `switch` statement or expression is governed by, the number of `requestType ==
+typeof(X)`/`notificationType == typeof(X)` comparisons (in an `if` or a `when` guard alike) and the mediator's `FrozenDictionary` tables;
+`HostGeneratorTests` (both request boundary tests), `StreamGeneratorTests` and `NotificationGeneratorTests` use it. All pass on today's
+generated code. Folded into the ADR (Generic entry points), the brief (Phases 3, 5 and 6) and the README (Hosts, Notifications).

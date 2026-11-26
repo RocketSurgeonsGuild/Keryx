@@ -1,6 +1,6 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection;
-using System.Runtime.Loader;
 using System.Text.Json;
 using Keryx.Analyzers;
 using Keryx.Analyzers.Hosts;
@@ -136,16 +136,11 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task A_Host_Dispatches_The_Handlers_Of_Its_Metadata_References(CancellationToken cancellationToken)
     {
-        var contracts = TestLibraries.Image("Contracts", Contracts);
-        var orders = TestLibraries.Image("Orders", Orders, [MetadataReference.CreateFromImage(contracts)]);
-        var host = await CompileHostAsync(
-            Host,
-            new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Contracts"] = contracts, ["Orders"] = orders },
-            cancellationToken
-        );
-        var context = AssemblyLoadContext.GetLoadContext(host)!;
-        var contractsAssembly = context.LoadFromAssemblyName(new("Contracts"));
-        var ordersAssembly = context.LoadFromAssemblyName(new("Orders"));
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
+        var host = await CompileHostAsync(Host, cancellationToken, contracts, orders);
+        var contractsAssembly = contracts.Assembly!;
+        var ordersAssembly = orders.Assembly!;
         var journal = Create(host, "Sample.Journal");
         await using var provider = BuildProvider(host, services => services.AddScoped(ordersAssembly.GetType("Orders.IJournal", throwOnError: true)!, _ => journal));
         await using var scope = provider.CreateAsyncScope();
@@ -178,10 +173,13 @@ public class CrossAssemblyTests : HostTest
     public async Task A_Host_Composes_The_Handlers_Of_Its_Project_References(CancellationToken cancellationToken)
     {
         // An IDE project reference is a compilation reference: no MVID, so nothing reaches the disk cache, but the manifest reads the same.
-        var contracts = TestLibraries.Compilation("Contracts", Contracts).ToMetadataReference();
-        var orders = TestLibraries.Compilation("Orders", Orders, [contracts]).ToMetadataReference();
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
 
-        var result = await HostBuilder.AddReferences(contracts, orders).AddSources(Usings + Host).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddReferences(contracts.FinalCompilation.ToMetadataReference(), orders.FinalCompilation.ToMetadataReference())
+                                      .AddSources(Usings + Host)
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal))).IsEmpty();
@@ -316,8 +314,8 @@ public class CrossAssemblyTests : HostTest
     public async Task KRX030_For_A_Referenced_Request_Without_A_Handler(CancellationToken cancellationToken)
     {
         // A library with requests and no handlers: built without the analyzers here, as if KRX001 were suppressed there.
-        var contracts = TestLibraries.Reference("Contracts", Contracts);
-        var unhandled = TestLibraries.Reference(
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var unhandled = await CompileLibraryAsync(
             "Unhandled",
             """
             using Keryx;
@@ -327,10 +325,11 @@ public class CrossAssemblyTests : HostTest
             public sealed record CreateOrder(string Sku) : IRequest<int>;
             public sealed record GetName(int Id) : IRequest<string>;
             public sealed record Countdown(int From) : IStreamRequest<int>;
-            """
+            """,
+            cancellationToken
         );
 
-        var result = await HostBuilder.AddReferences(contracts, unhandled).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(contracts, unhandled).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result).Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
@@ -352,10 +351,10 @@ public class CrossAssemblyTests : HostTest
     {
         // The handler library references the contracts, the host does not (a PrivateAssets reference, for example). Only the polymorphic
         // notification handler names a contracts type; the request handlers live with their requests and are composed.
-        var contracts = TestLibraries.Reference("Contracts", Contracts);
-        var orders = TestLibraries.Reference("Orders", Orders, [contracts]);
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
 
-        var result = await HostBuilder.AddReferences(orders).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(orders).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // The handlers are left out, so the generated code compiles: KRX034 is the only error.
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id).Distinct()).IsEquivalentTo(["KRX034"]);
@@ -377,8 +376,8 @@ public class CrossAssemblyTests : HostTest
     {
         // The generated constructor's parameter is not named in the manifest, but AddKeryx() would name it (OQ-47). The handler is left out,
         // and its request still counts as handled, so there is no KRX030 on top.
-        var services = TestLibraries.Reference("Services", "namespace Services; public interface IClock { }");
-        var library = TestLibraries.Reference(
+        var services = await CompileLibraryAsync("Services", "namespace Services; public interface IClock { }", cancellationToken);
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             namespace Lib;
@@ -390,10 +389,11 @@ public class CrossAssemblyTests : HostTest
                 private static string Handle(GetName request, Services.IClock clock) => "";
             }
             """,
-            [services]
+            cancellationToken,
+            references: [services]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var diagnostics = Diagnostics(result).ToArray();
         await Assert.That(diagnostics.Where(static d => d.StartsWith("KRX030", StringComparison.Ordinal) && d.Contains("GetName", StringComparison.Ordinal))).IsEmpty();
@@ -406,9 +406,9 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task KRX032_For_A_Newer_Manifest_Format(CancellationToken cancellationToken)
     {
-        var future = TestLibraries.Reference("Future", FutureLibrary, generate: false);
+        var future = await CompileLibraryAsync("Future", FutureLibrary, cancellationToken, kind: LibraryKind.Plain);
 
-        var result = await HostBuilder.AddReferences(future).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(future).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // Nothing of the assembly is read, so its request is not reported as unhandled either.
         await Assert.That(Diagnostics(result))
@@ -421,9 +421,9 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task KRX033_For_A_Keryx_Reference_Without_A_Manifest(CancellationToken cancellationToken)
     {
-        var plain = TestLibraries.Reference("Plain", "namespace Plain; public sealed record Ping : Keryx.IRequest<int>;", generate: false);
+        var plain = await CompileLibraryAsync("Plain", "namespace Plain; public sealed record Ping : Keryx.IRequest<int>;", cancellationToken, kind: LibraryKind.Plain);
 
-        var result = await HostBuilder.AddReferences(plain).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(plain).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(
@@ -453,9 +453,9 @@ public class CrossAssemblyTests : HostTest
     {
         // OQ-16: the app host's request types are covered by KRX030 like any other reference's. Its public handler has a manifest entry, so
         // the test host dispatches that request; its internal handler is invisible, so the test host reports KRX030 for that request.
-        var app = TestLibraries.Reference("App", AppHost, host: true);
+        var app = await CompileLibraryAsync("App", AppHost, cancellationToken, kind: LibraryKind.Host);
 
-        var result = await HostBuilder.AddReferences(app).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(app).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Hidden' has no handler in this host"]);
         await AssertWithoutLocationAsync(HostDiagnostics(result));
@@ -470,11 +470,11 @@ public class CrossAssemblyTests : HostTest
         // The handler generator never writes a manifest entry for a handler of another assembly's request (KRX023), so two manifests that
         // name one request are written by hand here, as a Keryx from before KRX023 could have written them; the host check stays as a safety
         // net (OQ-60).
-        var contracts = TestLibraries.Reference("Contracts", "using Keryx; namespace Contracts; public sealed record GetName(int Id) : IRequest<string>;");
-        var libA = TestLibraries.Reference("LibA", HandWrittenManifest("LibA", "NameA"), [contracts], generate: false);
-        var libB = TestLibraries.Reference("LibB", HandWrittenManifest("LibB", "NameB"), [contracts], generate: false);
+        var contracts = await CompileLibraryAsync("Contracts", "using Keryx; namespace Contracts; public sealed record GetName(int Id) : IRequest<string>;", cancellationToken);
+        var libA = await CompileLibraryAsync("LibA", HandWrittenManifest("LibA", "NameA"), cancellationToken, references: [contracts], kind: LibraryKind.Plain);
+        var libB = await CompileLibraryAsync("LibB", HandWrittenManifest("LibB", "NameB"), cancellationToken, references: [contracts], kind: LibraryKind.Plain);
 
-        var result = await HostBuilder.AddReferences(contracts, libA, libB).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(contracts, libA, libB).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var duplicates = HostDiagnostics(result).Where(static d => d.Id == "KRX005").ToArray();
         await Assert.That(duplicates.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
@@ -504,7 +504,7 @@ public class CrossAssemblyTests : HostTest
     public async Task KRX005_Is_Not_Reported_Again_For_Duplicates_Inside_One_Referenced_Assembly(CancellationToken cancellationToken)
     {
         // The library compiles: same-assembly KRX005 is its analyzer's, which the test library does not run, and its generator reports nothing.
-        var library = TestLibraries.Reference(
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             namespace Lib;
@@ -512,10 +512,11 @@ public class CrossAssemblyTests : HostTest
             public sealed record GetName(int Id) : Keryx.IRequest<string>;
             public static partial class NameA { private static string Handle(GetName request) => "a"; }
             public static partial class NameB { private static string Handle(GetName request) => "b"; }
-            """
+            """,
+            cancellationToken
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(HostDiagnostics(result).Where(static d => d.Id == "KRX005")).IsEmpty();
     }
@@ -523,12 +524,12 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task ExcludeHandler_Removes_A_Referenced_Notification_Handler(CancellationToken cancellationToken)
     {
-        var contracts = TestLibraries.Image("Contracts", Contracts);
-        var orders = TestLibraries.Image("Orders", Orders, [MetadataReference.CreateFromImage(contracts)]);
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
         var source = "[assembly: ExcludeHandler(typeof(Orders.AuditEvents))]\n" + Host;
 
         var result = await HostBuilder
-                          .AddReferences(MetadataReference.CreateFromImage(contracts), MetadataReference.CreateFromImage(orders))
+                          .AddCompilationReferences(contracts, orders)
                           .AddSources(Usings + source)
                           .Build()
                           .GenerateAsync(cancellationToken);
@@ -544,16 +545,11 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task An_Excluded_Referenced_Notification_Handler_Is_Not_Delivered(CancellationToken cancellationToken)
     {
-        var contracts = TestLibraries.Image("Contracts", Contracts);
-        var orders = TestLibraries.Image("Orders", Orders, [MetadataReference.CreateFromImage(contracts)]);
-        var host = await CompileHostAsync(
-            "[assembly: ExcludeHandler(typeof(Orders.AuditEvents))]\n" + Host,
-            new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Contracts"] = contracts, ["Orders"] = orders },
-            cancellationToken
-        );
-        var context = AssemblyLoadContext.GetLoadContext(host)!;
-        var contractsAssembly = context.LoadFromAssemblyName(new("Contracts"));
-        var ordersAssembly = context.LoadFromAssemblyName(new("Orders"));
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
+        var host = await CompileHostAsync("[assembly: ExcludeHandler(typeof(Orders.AuditEvents))]\n" + Host, cancellationToken, contracts, orders);
+        var contractsAssembly = contracts.Assembly!;
+        var ordersAssembly = orders.Assembly!;
         var journal = Create(host, "Sample.Journal");
         await using var provider = BuildProvider(host, services => services.AddScoped(ordersAssembly.GetType("Orders.IJournal", throwOnError: true)!, _ => journal));
         await using var scope = provider.CreateAsyncScope();
@@ -570,10 +566,10 @@ public class CrossAssemblyTests : HostTest
     {
         // A test host excludes a handler whose infrastructure it does not reference: the excluded entry is never resolved, so neither KRX034
         // nor KRX036 is reported. The request is left without a handler (KRX030): the host cannot replace it with its own (KRX023, OQ-59).
-        var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface IDb { }");
-        var library = TestLibraries.Image("Lib", ExcludedLibrary, [infra]);
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface IDb { }", cancellationToken);
+        var library = await CompileLibraryAsync("Lib", ExcludedLibrary, cancellationToken, references: [infra]);
 
-        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library)).AddSources(Usings + ExcludingHost).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + ExcludingHost).Build().GenerateAsync(cancellationToken);
 
         await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Ping' has no handler in this host"]);
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Ping");
@@ -590,8 +586,8 @@ public class CrossAssemblyTests : HostTest
     {
         // The behavior itself resolves, but the pipeline context would name its behavior method's injected parameter type (OQ-47): it is
         // left out of the request pipelines, the kind of that method (OQ-57), so the generated code compiles, and KRX035 does not list it.
-        var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface ILog { }");
-        var library = TestLibraries.Reference(
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface ILog { }", cancellationToken);
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             using System.Threading;
@@ -617,10 +613,11 @@ public class CrossAssemblyTests : HostTest
                     next.InvokeAsync(cancellationToken);
             }
             """,
-            [infra]
+            cancellationToken,
+            references: [infra]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -640,7 +637,7 @@ public class CrossAssemblyTests : HostTest
         // OQ-57: a referenced global behavior with a request and a stream behavior method, where only the request method injects a type the
         // host cannot resolve. KRX034 names that method and its kind; the class stays in the stream pipelines, and KRX035 lists it for the
         // stream kind only.
-        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface ILog { }", cancellationToken);
         const string librarySource = """
             using System.Collections.Generic;
             using System.Threading;
@@ -691,9 +688,9 @@ public class CrossAssemblyTests : HostTest
                 }
             }
             """;
-        var library = TestLibraries.Image("Lib", librarySource, [MetadataReference.CreateFromImage(infra)]);
+        var library = await CompileLibraryAsync("Lib", librarySource, cancellationToken, references: [infra]);
 
-        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+        var result = await HostBuilder.AddCompilationReferences(library)
                                       .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -713,10 +710,10 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).Contains("global::Lib.Split.HandleAsync<global::Lib.Numbers, int, ");
 
         // The generated code compiles (KRX034 is the generator's error, not the compiler's), and the stream kind runs.
-        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        var host = result.Assembly!;
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
-        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var lib = library.Assembly!;
         var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
         await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
         var items = new List<int>();
@@ -798,10 +795,10 @@ public class CrossAssemblyTests : HostTest
     {
         // OQ-57: an attached behavior is checked for the kind of the handler it is attached to. The request handler keeps Split (its request
         // method resolves); the stream handler, whose Split method injects a type the host cannot resolve, is left out, with one KRX034.
-        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
-        var library = TestLibraries.Image("Lib", SplitLibrary("", "[Behavior(typeof(Split))]"), [MetadataReference.CreateFromImage(infra)]);
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface ILog { }", cancellationToken);
+        var library = await CompileLibraryAsync("Lib", SplitLibrary("", "[Behavior(typeof(Split))]"), cancellationToken, references: [infra]);
 
-        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+        var result = await HostBuilder.AddCompilationReferences(library)
                                       .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -814,10 +811,10 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
         await Assert.That(mediator).DoesNotContain("global::Lib.Numbers");
 
-        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        var host = result.Assembly!;
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
-        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var lib = library.Assembly!;
         var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
         await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
         var entries = (List<string>)lib.GetType("Lib.Log", throwOnError: true)!.GetField("Entries")!.GetValue(null)!;
@@ -829,10 +826,10 @@ public class CrossAssemblyTests : HostTest
     {
         // OQ-57: an [assembly: Behavior] class is checked for every kind it carries, once (the manifest loop and the catalog's skipped methods
         // both see it). Its request kind stays in the library's request pipelines; the stream handler runs without it.
-        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
-        var library = TestLibraries.Image("Lib", SplitLibrary("[assembly: Behavior(typeof(Lib.Split))]", ""), [MetadataReference.CreateFromImage(infra)]);
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface ILog { }", cancellationToken);
+        var library = await CompileLibraryAsync("Lib", SplitLibrary("[assembly: Behavior(typeof(Lib.Split))]", ""), cancellationToken, references: [infra]);
 
-        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+        var result = await HostBuilder.AddCompilationReferences(library)
                                       .AddSources(Usings + "namespace Sample;")
                                       .Build()
                                       .GenerateAsync(cancellationToken);
@@ -844,10 +841,10 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).Contains("global::Lib.Split.Handle<global::Lib.Ping, int, ");
         await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
 
-        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        var host = result.Assembly!;
         await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
-        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var lib = library.Assembly!;
         var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
         await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
         var items = new List<int>();
@@ -866,8 +863,8 @@ public class CrossAssemblyTests : HostTest
     {
         // A [Behavior] on a referenced notification type is read from the type, not from the manifest; the host checks its injected
         // parameter types too.
-        var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface ILog { }");
-        var library = TestLibraries.Reference(
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface ILog { }", cancellationToken);
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             using System.Threading;
@@ -888,10 +885,11 @@ public class CrossAssemblyTests : HostTest
                     next.InvokeAsync(cancellationToken);
             }
             """,
-            [infra]
+            cancellationToken,
+            references: [infra]
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -910,15 +908,16 @@ public class CrossAssemblyTests : HostTest
     {
         // The library was built against a contracts assembly where Counted is a notification; the host references one where it is not. A
         // request handler cannot be in this position: it lives in its request's assembly (KRX023), so its manifest and its request agree.
-        var contractsV1 = TestLibraries.Reference("Contracts", "using Keryx; namespace Contracts; public sealed record Counted(int To) : INotification;");
-        var contractsV2 = TestLibraries.Reference("Contracts", "namespace Contracts; public sealed record Counted(int To);");
-        var library = TestLibraries.Reference(
+        var contractsV1 = await CompileLibraryAsync("Contracts", "using Keryx; namespace Contracts; public sealed record Counted(int To) : INotification;", cancellationToken);
+        var contractsV2 = await CompileLibraryAsync("Contracts", "namespace Contracts; public sealed record Counted(int To);", cancellationToken, ownLoadContext: true);
+        var library = await CompileLibraryAsync(
             "Lib",
             "namespace Lib; public static partial class CountedHandler { private static System.Threading.Tasks.ValueTask Handle(Contracts.Counted notification) => default; }",
-            [contractsV1]
+            cancellationToken,
+            references: [contractsV1]
         );
 
-        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         // The handler is left out with an error of its own (OQ-47).
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
@@ -938,9 +937,9 @@ public class CrossAssemblyTests : HostTest
         // The library attached a constrained behavior that fit its request when it was built: the request's base class, from a contracts
         // assembly, implemented ITagged. In the contracts assembly the host resolves it no longer does, so the request no longer satisfies the
         // constraint, and the behavior would drop out of the pipeline silently.
-        var contractsV1 = TestLibraries.Reference("Contracts", "namespace Contracts; public interface ITagged { } public abstract class Base : ITagged { }");
-        var contractsV2 = TestLibraries.Reference("Contracts", "namespace Contracts; public interface ITagged { } public abstract class Base { }");
-        var library = TestLibraries.Reference(
+        var contractsV1 = await CompileLibraryAsync("Contracts", "namespace Contracts; public interface ITagged { } public abstract class Base : ITagged { }", cancellationToken);
+        var contractsV2 = await CompileLibraryAsync("Contracts", "namespace Contracts; public interface ITagged { } public abstract class Base { }", cancellationToken, ownLoadContext: true);
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             using System.Threading;
@@ -966,10 +965,11 @@ public class CrossAssemblyTests : HostTest
                 private static string Handle(GetName request) => "name";
             }
             """,
-            [contractsV1]
+            cancellationToken,
+            references: [contractsV1]
         );
 
-        var result = await HostBuilder.AddReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         var diagnostics = HostDiagnostics(result).ToArray();
         await Assert.That(diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX009"]);
@@ -1007,9 +1007,9 @@ public class CrossAssemblyTests : HostTest
                 public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
             }
             """;
-        var behaviors1 = TestLibraries.Reference("Behaviors", behaviorsV1.Replace("CONSTRAINT", "INotification", StringComparison.Ordinal));
-        var behaviors2 = TestLibraries.Reference("Behaviors", behaviorsV1.Replace("CONSTRAINT", "IUrgent", StringComparison.Ordinal));
-        var contracts = TestLibraries.Reference(
+        var behaviors1 = await CompileLibraryAsync("Behaviors", behaviorsV1.Replace("CONSTRAINT", "INotification", StringComparison.Ordinal), cancellationToken);
+        var behaviors2 = await CompileLibraryAsync("Behaviors", behaviorsV1.Replace("CONSTRAINT", "IUrgent", StringComparison.Ordinal), cancellationToken, ownLoadContext: true);
+        var contracts = await CompileLibraryAsync(
             "Contracts",
             """
             using Keryx;
@@ -1020,10 +1020,11 @@ public class CrossAssemblyTests : HostTest
             [Behavior(typeof(Behaviors.Kept))]
             public sealed record Placed : INotification;
             """,
-            [behaviors1]
+            cancellationToken,
+            references: [behaviors1]
         );
 
-        var result = await HostBuilder.AddReferences(behaviors2, contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(behaviors2, contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && d.Id != "KRX009")).IsEmpty();
         var diagnostics = HostDiagnostics(result).ToArray();
@@ -1040,7 +1041,7 @@ public class CrossAssemblyTests : HostTest
     {
         // Contracts attaches Behaviors.Tagged, from a third assembly the host does not reference, to Placed. The host cannot resolve the
         // class, so it is KRX034 naming the assembly to reference, not KRX009; Kept (in Contracts) still runs.
-        var behaviors = TestLibraries.Reference(
+        var behaviors = await CompileLibraryAsync(
             "Behaviors",
             """
             using System.Threading.Tasks;
@@ -1053,9 +1054,10 @@ public class CrossAssemblyTests : HostTest
             {
                 public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
-        var contracts = TestLibraries.Reference(
+        var contracts = await CompileLibraryAsync(
             "Contracts",
             """
             using System.Threading.Tasks;
@@ -1073,10 +1075,11 @@ public class CrossAssemblyTests : HostTest
                 public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext => next.InvokeAsync(default);
             }
             """,
-            [behaviors]
+            cancellationToken,
+            references: [behaviors]
         );
 
-        var result = await HostBuilder.AddReferences(contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(contracts).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
         await Assert.That(Diagnostics(result))
@@ -1094,7 +1097,7 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task A_Fitting_Behavior_On_A_Referenced_Notification_Type_Reports_Nothing(CancellationToken cancellationToken)
     {
-        var library = TestLibraries.Reference(
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             using System.Threading.Tasks;
@@ -1110,10 +1113,11 @@ public class CrossAssemblyTests : HostTest
             {
                 public static ValueTask Handle<TNext>(Placed notification, TNext next) where TNext : struct, INext => next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
 
-        var result = await HostBuilder.AddReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(Diagnostics(result)).IsEmpty();
@@ -1123,7 +1127,7 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task A_Referenced_Global_Behavior_Marked_Only_On_Its_Method_Is_Found(CancellationToken cancellationToken)
     {
-        var library = TestLibraries.Reference(
+        var library = await CompileLibraryAsync(
             "Lib",
             """
             using System.Threading.Tasks;
@@ -1153,10 +1157,11 @@ public class CrossAssemblyTests : HostTest
                     where TNext : struct, IStreamNext<TItem> =>
                     next.InvokeAsync(default);
             }
-            """
+            """,
+            cancellationToken
         );
 
-        var result = await HostBuilder.AddReferences(library)
+        var result = await HostBuilder.AddCompilationReferences(library)
                                       .AddSources(
                                            Usings
                                          + """
@@ -1182,24 +1187,20 @@ public class CrossAssemblyTests : HostTest
     {
         // The first build writes obj/ctp/Keryx.ctpjson; the next one reads the projection back while the reference's MVID is unchanged. The
         // cached projection is altered on disk, so a diagnostic that reflects the alteration proves the cache was read.
-        var image = TestLibraries.Image("Future", FutureLibrary, generate: false);
+        var future = await CompileLibraryAsync("Future", FutureLibrary, cancellationToken, kind: LibraryKind.Plain);
         var directory = Path.Combine(Path.GetTempPath(), "keryx-tests", Guid.NewGuid().ToString("N"));
         try
         {
-            var options = HostOptions(directory + Path.DirectorySeparatorChar);
-            var first = Driver(options).RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken).GetRunResult();
-            await Assert.That(first.Diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX032"]);
+            var first = await ScanCacheHostAsync("First", future, directory, cancellationToken);
+            await Assert.That(first.Select(static d => d.Id)).IsEquivalentTo(["KRX032"]);
 
             var file = Path.Combine(directory, "ctp", "Keryx.ctpjson");
             var text = await File.ReadAllTextAsync(file, cancellationToken);
             await Assert.That(text).Contains("\"formatVersion\":2");
             await File.WriteAllTextAsync(file, text.Replace("\"formatVersion\":2", "\"formatVersion\":7", StringComparison.Ordinal), cancellationToken);
 
-            // A new reference instance over the same image: same MVID, nothing remembered in memory.
-            var second = Driver(options, new CacheFileText(file))
-                        .RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken)
-                        .GetRunResult();
-            await Assert.That(second.Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
+            var second = await ScanCacheHostAsync("Second", future, directory, cancellationToken, file);
+            await Assert.That(second.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
                         .IsEquivalentTo(
                              ["Assembly 'Future' carries a Keryx manifest of format version 7, but the Keryx in this project reads format versions up to 1; upgrade Keryx in this project"]
                          );
@@ -1218,12 +1219,11 @@ public class CrossAssemblyTests : HostTest
     {
         // ProjectionDataVersion changes whenever the projection's shape or derivation does (static behaviors: 2). An entry written with another
         // data version is ignored and the projection recomputed, so the altered format version on disk is never seen.
-        var image = TestLibraries.Image("Future", FutureLibrary, generate: false);
+        var future = await CompileLibraryAsync("Future", FutureLibrary, cancellationToken, kind: LibraryKind.Plain);
         var directory = Path.Combine(Path.GetTempPath(), "keryx-tests", Guid.NewGuid().ToString("N"));
         try
         {
-            var options = HostOptions(directory + Path.DirectorySeparatorChar);
-            _ = Driver(options).RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken).GetRunResult();
+            _ = await ScanCacheHostAsync("First", future, directory, cancellationToken);
 
             var file = Path.Combine(directory, "ctp", "Keryx.ctpjson");
             var text = await File.ReadAllTextAsync(file, cancellationToken);
@@ -1236,10 +1236,8 @@ public class CrossAssemblyTests : HostTest
             await Assert.That(stale).Contains("\"version\":1");
             await File.WriteAllTextAsync(file, stale, cancellationToken);
 
-            var second = Driver(options, new CacheFileText(file))
-                        .RunGenerators(HostCompilation(MetadataReference.CreateFromImage(image)), cancellationToken)
-                        .GetRunResult();
-            await Assert.That(second.Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
+            var second = await ScanCacheHostAsync("Second", future, directory, cancellationToken, file);
+            await Assert.That(second.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
                         .IsEquivalentTo(
                              ["Assembly 'Future' carries a Keryx manifest of format version 2, but the Keryx in this project reads format versions up to 1; upgrade Keryx in this project"]
                          );
@@ -1309,9 +1307,9 @@ public class CrossAssemblyTests : HostTest
 
     private async Task<GeneratorTestResults> GenerateAsync(string host, CancellationToken cancellationToken, bool withHandlerAnalyzer = false)
     {
-        var contracts = TestLibraries.Reference("Contracts", Contracts);
-        var orders = TestLibraries.Reference("Orders", Orders, [contracts]);
-        var builder = HostBuilder.AddReferences(contracts, orders);
+        var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
+        var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
+        var builder = HostBuilder.AddCompilationReferences(contracts, orders);
         builder = withHandlerAnalyzer ? builder.WithAnalyzer<Analyzers.Diagnostics.HandlerAnalyzer>() : builder;
         return await builder.AddSources(Usings + host).Build().GenerateAsync(cancellationToken);
     }
@@ -1339,37 +1337,30 @@ public class CrossAssemblyTests : HostTest
     private static IEnumerable<string> ErrorIds(GeneratorTestResults result) =>
         result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id).Distinct().Order(StringComparer.Ordinal);
 
-    private static string Source(GeneratorTestResults result, string hintName) => Behaviors.PipelineGeneratorTests.Source(result, hintName);
+    private static string Source(GeneratorTestResults result, string hintName) => TestSources.HostSource(result, hintName);
 
     private static IEnumerable<string> Entries(object journal) =>
         (IEnumerable<string>)journal.GetType().GetProperty("Entries", BindingFlags.Public | BindingFlags.Instance)!.GetValue(journal)!;
 
-    private static Microsoft.CodeAnalysis.CSharp.CSharpCompilation HostCompilation(MetadataReference library) =>
-        Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
-            "Host",
-            [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText("namespace Host;", TestLibraries.ParseOptions, "Host.cs")],
-            [.. TestLibraries.References, library],
-            new(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable)
-        );
-
-    private static GeneratorDriver Driver(Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider options, params AdditionalText[] additionalTexts) =>
-        Microsoft.CodeAnalysis.CSharp.CSharpGeneratorDriver.Create(
-            [new HostGenerator().AsSourceGenerator()],
-            additionalTexts,
-            TestLibraries.ParseOptions,
-            options
-        );
-
-    /// <summary>The cache file as the build feeds it back (an AdditionalFile).</summary>
-    private sealed class CacheFileText(string path) : AdditionalText
+    /// <summary>
+    ///     Runs a host that references <paramref name="library" /> and writes its scan cache under <paramref name="directory" />
+    ///     (<c>IntermediateOutputPath</c>), with the cache file fed back as an AdditionalFile when given, as the build does; returns the host
+    ///     generator's diagnostics. Each run references a new reference instance over the same image: same MVID, nothing remembered in memory.
+    /// </summary>
+    private async Task<ImmutableArray<Diagnostic>> ScanCacheHostAsync(
+        string projectName,
+        GeneratorTestResults library,
+        string directory,
+        CancellationToken cancellationToken,
+        string? cacheFile = null
+    )
     {
-        public override string Path { get; } = path;
-
-        public override Microsoft.CodeAnalysis.Text.SourceText GetText(CancellationToken cancellationToken = default) =>
-            Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(Path));
+        var builder = HostBuilder.WithProjectName(projectName)
+                                 .WithIntermediateOutputPath(directory + Path.DirectorySeparatorChar)
+                                 .AddReferences(MetadataReference.CreateFromImage(library.Image))
+                                 .AddSource("Host.cs", "namespace Host;");
+        builder = cacheFile is null ? builder : builder.AddAdditionalText(cacheFile, await File.ReadAllTextAsync(cacheFile, cancellationToken));
+        var result = await builder.Build().GenerateAsync(cancellationToken);
+        return result.Results[typeof(HostGenerator)].Diagnostics;
     }
-
-    /// <summary>The build properties of a host whose scan cache is written to <c>IntermediateOutputPath</c> (absolute).</summary>
-    private static Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider HostOptions(string intermediateOutputPath) =>
-        BuildProperties.Provider((BuildProperties.KeryxHost, "true"), ("build_property.IntermediateOutputPath", intermediateOutputPath));
 }

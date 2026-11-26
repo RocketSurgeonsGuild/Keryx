@@ -2,6 +2,7 @@ using Keryx.Analyzers;
 using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Keryx.Tests.Behaviors;
 
@@ -147,7 +148,7 @@ public class BehaviorMatchingTests
     [Arguments("ComparableB", "RNullableInt", false)]
     public async Task Open_Behavior_Constraints(string behavior, string request, bool fits)
     {
-        var (fitted, reason, typeArguments) = Match(behavior, request);
+        var (fitted, reason, typeArguments) = await Match(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits).Because(reason);
         if (fits)
@@ -167,7 +168,7 @@ public class BehaviorMatchingTests
     [Arguments("ClosedB", "RInt", false, "its request behavior method is closed over 'RString' and 'string', but the target needs exactly 'RInt' and 'int'")]
     public async Task Closed_Behaviors_Need_The_Exact_Types(string behavior, string request, bool fits, string expected)
     {
-        var (fitted, reason, typeArguments) = Match(behavior, request);
+        var (fitted, reason, typeArguments) = await Match(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits);
         await Assert.That(reason).IsEqualTo(expected);
@@ -181,7 +182,7 @@ public class BehaviorMatchingTests
     public async Task A_Closed_Method_Whose_Next_Drops_The_Nullable_Annotation_Is_Rejected()
     {
         // INext<string> for a request that responds with string? would be a nullability error in generated code (KRX019).
-        var compilation = DirectCompilation.Create(Source);
+        var compilation = await SharedCompilation.Value;
         var symbols = KeryxSymbols.Create(compilation)!;
         var issues = new IssueCollector();
 
@@ -226,7 +227,7 @@ public class BehaviorMatchingTests
     {
         // OQ-58: 'TResponse?' is substituted where the method writes it and checked, with its nullability, against the target: an annotated,
         // oblivious or value type response fits; a non-annotated reference response does not (IRequest<> and INext<> are invariant).
-        var (fitted, reason, typeArguments, obliviousFit) = MatchWithFlags(behavior, request);
+        var (fitted, reason, typeArguments, obliviousFit) = await MatchWithFlags(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits).Because(reason);
         if (fits)
@@ -251,7 +252,7 @@ public class BehaviorMatchingTests
         // A closed method's 'next' and return type are checked with nullability against the target, as an open method's are after
         // substitution (OQ-58): an annotated position over an oblivious response fits (called with nullable warnings disabled), and an
         // annotated return type over a non-annotated reference response does not (CS8619 in the generated entry point).
-        var (fitted, reason, _, obliviousFit) = MatchWithFlags(behavior, request);
+        var (fitted, reason, _, obliviousFit) = await MatchWithFlags(behavior, request);
 
         await Assert.That(fitted).IsEqualTo(fits).Because(reason);
         await Assert.That(obliviousFit).IsEqualTo(oblivious);
@@ -270,16 +271,16 @@ public class BehaviorMatchingTests
     public async Task A_Non_Annotated_Reference_Response_Names_The_Annotated_Position()
     {
         // The message constraint is checked first, with its substituted nullability; then 'next' and the return type.
-        var (fitted, reason, _, _) = MatchWithFlags("MaybeClassB", "RString");
+        var (fitted, reason, _, _) = await MatchWithFlags("MaybeClassB", "RString");
         await Assert.That(fitted).IsFalse();
         await Assert.That(reason).IsEqualTo("'RString' does not satisfy the constraint 'TRequest : IRequest<string?>'");
 
-        (fitted, reason, _, _) = MatchWithFlags("AnnotatedNext", "RString");
+        (fitted, reason, _, _) = await MatchWithFlags("AnnotatedNext", "RString");
         await Assert.That(fitted).IsFalse();
         await Assert.That(reason)
                     .IsEqualTo("its request behavior method's 'next' carries 'TResponse?', which is 'string?' for this target, but the target's response type is 'string'");
 
-        (fitted, reason, _, _) = MatchWithFlags("MaybeStructB", "RInt");
+        (fitted, reason, _, _) = await MatchWithFlags("MaybeStructB", "RInt");
         await Assert.That(fitted).IsFalse();
         await Assert.That(reason).IsEqualTo("its request behavior method's 'next' carries 'TResponse?', which is never the response type 'int'");
     }
@@ -287,7 +288,7 @@ public class BehaviorMatchingTests
     [Test]
     public async Task A_Behavior_Of_Another_Kind_Never_Fits()
     {
-        var compilation = DirectCompilation.Create(Source);
+        var compilation = await SharedCompilation.Value;
         var symbols = KeryxSymbols.Create(compilation)!;
         var request = compilation.GetTypeByMetadataName("Sample.RString")!;
         var stream = new BehaviorTarget(BehaviorKind.Stream, request, compilation.GetSpecialType(SpecialType.System_String));
@@ -302,21 +303,34 @@ public class BehaviorMatchingTests
         await Assert.That(reason).IsEqualTo("it has no notification behavior method (the class does not carry [NotificationBehavior])");
     }
 
-    private static (bool Fits, string Reason, string TypeArguments) Match(string behaviorName, string requestName)
+    /// <summary>
+    ///     <see cref="Source" />, compiled once through the testing library (nullable enabled) and shared by every case: the matching reads its
+    ///     symbols only.
+    /// </summary>
+    private static readonly Lazy<Task<CSharpCompilation>> SharedCompilation = new(CompileAsync);
+
+    private static async Task<CSharpCompilation> CompileAsync()
     {
-        var (fits, reason, typeArguments, _) = MatchWithFlags(behaviorName, requestName);
+        using var context = GeneratorBuilderConstants.References.WithProjectName("BehaviorMatching")
+                                                     .WithNullableContext(NullableContextOptions.Enable)
+                                                     .AddSources(Source)
+                                                     .Build();
+        var result = await context.GenerateAsync();
+        result.AssertCompilationWasSuccessful(DiagnosticSeverity.Error);
+        return result.InputCompilation;
+    }
+
+    private static async Task<(bool Fits, string Reason, string TypeArguments)> Match(string behaviorName, string requestName)
+    {
+        var (fits, reason, typeArguments, _) = await MatchWithFlags(behaviorName, requestName);
         return (fits, reason, typeArguments);
     }
 
-    private static (bool Fits, string Reason, string TypeArguments, bool Oblivious) MatchWithFlags(string behaviorName, string requestName)
-    {
-        var compilation = DirectCompilation.Create(Source);
-        var errors = compilation.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Error).ToArray();
-        if (errors.Length > 0)
-        {
-            throw new InvalidOperationException(string.Join(Environment.NewLine, errors.Select(static d => d.ToString())));
-        }
+    private static async Task<(bool Fits, string Reason, string TypeArguments, bool Oblivious)> MatchWithFlags(string behaviorName, string requestName) =>
+        MatchIn(await SharedCompilation.Value, behaviorName, requestName);
 
+    private static (bool Fits, string Reason, string TypeArguments, bool Oblivious) MatchIn(CSharpCompilation compilation, string behaviorName, string requestName)
+    {
         var symbols = KeryxSymbols.Create(compilation)!;
         var behavior = compilation.GetTypeByMetadataName("Sample." + behaviorName)!;
         var shape = BehaviorShapes.Analyze(behavior, symbols, new IssueCollector()) ?? throw new InvalidOperationException(behaviorName + " is not a valid behavior");

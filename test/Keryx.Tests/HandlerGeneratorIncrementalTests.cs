@@ -1,7 +1,8 @@
 using Keryx.Analyzers;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
+using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
 namespace Keryx.Tests;
 
@@ -9,7 +10,8 @@ namespace Keryx.Tests;
 ///     The incremental test for the handler pipeline (ADR 0001, Incremental generation rules): an unrelated edit leaves every named step and
 ///     every source output <c>Cached</c> or <c>Unchanged</c>; an edit to a handler produces <c>Modified</c> output.
 /// </summary>
-public class HandlerGeneratorIncrementalTests
+[Timeout(ModuleInitializer.TestTimeout)]
+public class HandlerGeneratorIncrementalTests : GeneratorTest
 {
     private const string Handlers = """
         using System;
@@ -65,7 +67,7 @@ public class HandlerGeneratorIncrementalTests
     [Test]
     public async Task Every_Named_Step_Runs(CancellationToken cancellationToken)
     {
-        var result = Run(Compile(Handlers), cancellationToken).GetRunResult().Results.Single();
+        var result = ( await GenerateAsync(cancellationToken) ).RunResult<HandlerGenerator>();
 
         await Assert.That(result.Exception).IsNull();
         await Assert.That(result.TrackedSteps.Keys.Where(static k => k.StartsWith("Keryx.", StringComparison.Ordinal))).IsEquivalentTo(NamedSteps);
@@ -76,14 +78,9 @@ public class HandlerGeneratorIncrementalTests
     [Test]
     public async Task An_Unrelated_Edit_Leaves_Every_Step_And_Output_Cached_Or_Unchanged(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Handlers);
-        var driver = Run(compilation, cancellationToken);
-
-        driver = driver.RunGenerators(
-            compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText("namespace Sample; public sealed class Unrelated { public int Value { get; set; } }", ParseOptions, "Unrelated.cs", cancellationToken: cancellationToken)),
-            cancellationToken
-        );
-        var result = driver.GetRunResult().Results.Single();
+        var first = await GenerateAsync(cancellationToken);
+        var result = ( await first.RerunWithSourceAsync("Unrelated.cs", "namespace Sample; public sealed class Unrelated { public int Value { get; set; } }", cancellationToken) )
+           .RunResult<HandlerGenerator>();
 
         foreach (var (name, steps) in result.TrackedSteps)
         {
@@ -93,70 +90,50 @@ public class HandlerGeneratorIncrementalTests
                 continue;
             }
 
-            var reasons = steps.SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+            var reasons = steps.Reasons();
             await Assert.That(reasons).IsNotEmpty().Because(name);
-            await Assert.That(reasons.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged)).IsTrue().Because($"{name}: {string.Join(", ", reasons.Select(static r => r.ToString()))}");
+            await Assert.That(reasons.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because($"{name}: {reasons.Describe()}");
         }
 
-        var outputs = result.TrackedOutputSteps.SelectMany(static s => s.Value).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        var outputs = result.TrackedOutputSteps.SelectMany(static s => s.Value).Reasons();
         await Assert.That(outputs).IsNotEmpty();
-        await Assert.That(outputs.All(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged)).IsTrue().Because(string.Join(", ", outputs.Select(static r => r.ToString())));
+        await Assert.That(outputs.All(static r => r.IsCachedOrUnchanged())).IsTrue().Because(outputs.Describe());
     }
 
     [Test]
     public async Task Editing_A_Handler_Modifies_Its_Output_Only(CancellationToken cancellationToken)
     {
-        var compilation = Compile(Handlers);
-        var driver = Run(compilation, cancellationToken);
-        var before = Sources(driver);
+        var first = await GenerateAsync(cancellationToken);
+        var before = first.GeneratedSources<HandlerGenerator>();
 
-        var oldTree = compilation.SyntaxTrees.Single();
-        var newTree = oldTree.WithChangedText(
-            Microsoft.CodeAnalysis.Text.SourceText.From(Handlers.Replace("IClock clock, CancellationToken ct", "IClock clock, IServiceProvider services, CancellationToken ct", StringComparison.Ordinal))
+        var second = await first.RerunAsync(
+            static compilation =>
+            {
+                var oldTree = compilation.SyntaxTrees.Single();
+                return compilation.ReplaceSyntaxTree(
+                    oldTree,
+                    oldTree.WithChangedText(SourceText.From(Handlers.Replace("IClock clock, CancellationToken ct", "IClock clock, IServiceProvider services, CancellationToken ct", StringComparison.Ordinal)))
+                );
+            },
+            cancellationToken: cancellationToken
         );
-        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(oldTree, newTree), cancellationToken);
-        var result = driver.GetRunResult().Results.Single();
-        var after = Sources(driver);
+        var result = second.RunResult<HandlerGenerator>();
+        var after = second.GeneratedSources<HandlerGenerator>();
 
-        var handlerReasons = result.TrackedSteps[TrackingNames.Handlers].SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
+        var handlerReasons = result.TrackedSteps[TrackingNames.Handlers].Reasons();
         await Assert.That(handlerReasons.Count(static r => r == IncrementalStepRunReason.Modified)).IsEqualTo(1);
-        await Assert.That(handlerReasons.Count(static r => r is IncrementalStepRunReason.Unchanged or IncrementalStepRunReason.Cached)).IsEqualTo(2);
+        await Assert.That(handlerReasons.Count(static r => r.IsCachedOrUnchanged())).IsEqualTo(2);
 
         // Every source output: exactly one Modified (CreateOrder), the other handlers and the manifest Cached or Unchanged.
-        var outputs = result.TrackedOutputSteps.SelectMany(static s => s.Value).SelectMany(static s => s.Outputs).Select(static o => o.Reason).ToArray();
-        await Assert.That(outputs.Count(static r => r == IncrementalStepRunReason.Modified)).IsEqualTo(1).Because(string.Join(", ", outputs.Select(static r => r.ToString())));
-        await Assert.That(outputs.Count(static r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged))
-                    .IsEqualTo(outputs.Length - 1)
-                    .Because(string.Join(", ", outputs.Select(static r => r.ToString())));
+        var outputs = result.TrackedOutputSteps.SelectMany(static s => s.Value).Reasons();
+        await Assert.That(outputs.Count(static r => r == IncrementalStepRunReason.Modified)).IsEqualTo(1).Because(outputs.Describe());
+        await Assert.That(outputs.Count(static r => r.IsCachedOrUnchanged())).IsEqualTo(outputs.Length - 1).Because(outputs.Describe());
 
         await Assert.That(after.Keys).IsEquivalentTo(before.Keys);
         await Assert.That(before.Keys.Where(name => before[name] != after[name])).IsEquivalentTo([CreateOrderHintName]);
         await Assert.That(after[CreateOrderHintName]).Contains("global::System.IServiceProvider services");
     }
 
-    private static Dictionary<string, string> Sources(GeneratorDriver driver) =>
-        driver.GetRunResult().Results.Single().GeneratedSources.ToDictionary(static s => s.HintName, static s => s.SourceText.ToString(), StringComparer.Ordinal);
-
-    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
-
-    private static CSharpCompilation Compile(string source) =>
-        CSharpCompilation.Create(
-            "Incremental",
-            [CSharpSyntaxTree.ParseText(source, ParseOptions, "Handlers.cs")],
-            [
-                .. Abstractions.ManifestContractTests.FrameworkReferences,
-                MetadataReference.CreateFromFile(Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "System.ComponentModel.dll")),
-                MetadataReference.CreateFromFile(typeof(Unit).Assembly.Location),
-            ],
-            new(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable)
-        );
-
-    private static GeneratorDriver Run(Compilation compilation, CancellationToken cancellationToken) =>
-        CSharpGeneratorDriver
-           .Create(
-                [new HandlerGenerator().AsSourceGenerator()],
-                parseOptions: ParseOptions,
-                driverOptions: new(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true)
-            )
-           .RunGenerators(compilation, cancellationToken);
+    private Task<GeneratorTestResults> GenerateAsync(CancellationToken cancellationToken) =>
+        Builder.WithNullableContext(NullableContextOptions.Enable).WithIncrementalTracking().AddSource("Handlers.cs", Handlers).Build().GenerateAsync(cancellationToken);
 }

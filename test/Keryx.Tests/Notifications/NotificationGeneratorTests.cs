@@ -103,7 +103,7 @@ public class NotificationGeneratorTests : HostTest
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         var addKeryx = Source(result, HostEmitter.ServiceCollectionExtensionsHintName);
         await Assert.That(addKeryx).DoesNotContain("Timed");
-        await Verify(new { Mediator = Source(result, HostEmitter.MediatorHintName), AddKeryx = addKeryx });
+        await VerifyHost(result);
     }
 
     [Test]
@@ -172,7 +172,7 @@ public class NotificationGeneratorTests : HostTest
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
         await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("Step");
-        await Verify(Source(result, HostEmitter.MediatorHintName)).UseParameters(depth);
+        await VerifyHost(result).UseParameters(depth);
     }
 
     [Test]
@@ -190,8 +190,7 @@ public class NotificationGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         var mediator = Source(result, HostEmitter.MediatorHintName);
-        await Assert.That(mediator).Contains("switch (__NotificationIndex(notificationType))");
-        await Assert.That(mediator).Contains("__notificationTypes");
+        await Assert.That(GenericDispatch.Of(mediator, "Publish")).IsEqualTo(new GenericDispatch("__NotificationIndex", 0, "__notificationTypes"));
     }
 
     [Test]
@@ -313,29 +312,28 @@ public class NotificationGeneratorTests : HostTest
     {
         // OQ-3: notification behaviors per assembly come from the notification type's assembly; the host's [assembly: Behavior] does not
         // reach a referenced notification type. OQ-42 (b): a host handler's referenced parameter type is a notification type the host knows.
-        var library = MetadataReference.CreateFromImage(
-            CompileLibrary(
-                "Lib",
-                """
-                using System.Threading.Tasks;
-                using Keryx;
+        var library = await CompileLibraryAsync(
+            "Lib",
+            """
+            using System.Threading.Tasks;
+            using Keryx;
 
-                [assembly: Behavior(typeof(Lib.LibPublish))]
+            [assembly: Behavior(typeof(Lib.LibPublish))]
 
-                namespace Lib;
+            namespace Lib;
 
-                public sealed record Shipped : INotification;
+            public sealed record Shipped : INotification;
 
-                [NotificationBehavior]
-                public static class LibPublish
-                {
-                    public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext =>
-                        next.InvokeAsync(default);
-                }
-                """
-            )
+            [NotificationBehavior]
+            public static class LibPublish
+            {
+                public static ValueTask Handle<T, TNext>(T notification, TNext next) where T : INotification where TNext : struct, INext =>
+                    next.InvokeAsync(default);
+            }
+            """,
+            cancellationToken
         );
-        var result = await HostBuilder.AddReferences(library)
+        var result = await HostBuilder.AddCompilationReferences(library)
                                       .AddSources(
                                            Usings
                                          + """
@@ -365,5 +363,5 @@ public class NotificationGeneratorTests : HostTest
         await Assert.That(mediator).DoesNotContain("HostPublish.Handle");
     }
 
-    private static string Source(GeneratorTestResults result, string hintName) => Behaviors.PipelineGeneratorTests.Source(result, hintName);
+    private static string Source(GeneratorTestResults result, string hintName) => TestSources.HostSource(result, hintName);
 }

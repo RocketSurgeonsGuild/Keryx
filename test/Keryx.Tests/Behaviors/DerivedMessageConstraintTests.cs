@@ -140,7 +140,7 @@ public class DerivedMessageConstraintTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(mediator).Contains("global::Sample.Derived.Handle<global::Sample.Create, int, ");
         await Assert.That(mediator).DoesNotContain("global::Sample.Derived.Handle<global::Sample.Query");
         await Assert.That(mediator).Contains("global::Sample.Derived.HandleAsync<global::Sample.Listing, string, ");

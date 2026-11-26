@@ -139,9 +139,9 @@ public class StreamGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        var addKeryx = PipelineGeneratorTests.Source(result, HostEmitter.ServiceCollectionExtensionsHintName);
+        var addKeryx = TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName);
         await Assert.That(addKeryx).DoesNotContain("Step");
-        await Verify(PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName)).UseParameters(depth);
+        await VerifyHost(result).UseParameters(depth);
     }
 
     [Test]
@@ -160,8 +160,8 @@ public class StreamGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        var mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName);
-        await Assert.That(mediator).Contains("switch (__StreamRequestIndex(requestType))");
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(GenericDispatch.Of(mediator, "Stream")).IsEqualTo(new GenericDispatch("__StreamRequestIndex", 0, "__streamRequestTypes"));
         await Assert.That(mediator).Contains("__streamRequestTypes.TryGetValue(requestType, out var requestIndex)");
         await Assert.That(mediator).DoesNotContain("__RequestIndex(");
     }
@@ -174,12 +174,6 @@ public class StreamGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
-        await Verify(
-            new
-            {
-                Mediator = PipelineGeneratorTests.Source(result, HostEmitter.MediatorHintName),
-                AddKeryx = PipelineGeneratorTests.Source(result, HostEmitter.ServiceCollectionExtensionsHintName),
-            }
-        );
+        await VerifyHost(result);
     }
 }

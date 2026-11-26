@@ -1,6 +1,4 @@
-using Keryx.Analyzers;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -9,10 +7,10 @@ namespace Keryx.Tests.CodeFixes;
 
 /// <summary>
 ///     Runs an analyzer and a code fix through the source generator testing helpers, applies every offered code action, and snapshots the
-///     source before and every changed or added document after each action. Each fixed solution is compiled with the handler generator and
-///     analyzed again: the fixed diagnostic must be gone and the result must have no compiler errors. The diagnostics the analyzer still
-///     reports are part of the snapshot. With <c>host</c>, the project is a host (<c>build_property.KeryxHost</c> = <c>true</c>), for the fix and
-///     for the re-verification.
+///     source before and every changed or added document after each action (the library's per-action project changes). Each fixed project is
+///     compiled again through the library with the handler generator and the analyzer: the fixed diagnostic must be gone and the result must
+///     have no compiler errors. The Keryx diagnostics still reported (the analyzer's and the generators') are part of the snapshot. With
+///     <c>host</c>, the project is a host (<c>build_property.KeryxHost</c> = <c>true</c>), for the fix and for the re-verification.
 /// </summary>
 public abstract class CodeFixTest : GeneratorTest
 {
@@ -34,46 +32,32 @@ public abstract class CodeFixTest : GeneratorTest
                           .GenerateAsync(cancellationToken);
 
         var actions = new List<CodeActionSnapshot>();
+        var fixedProjects = 0;
         foreach (var fix in result.CodeFixResults[typeof(TCodeFix)].ResolvedFixes.OrderBy(static f => f.Diagnostic.Location.SourceSpan.Start))
         {
-            var original = fix.Document.Project.Solution;
+            var fixedMessage = fix.Diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
             foreach (var action in fix.CodeActions)
             {
-                var fixedMessage = fix.Diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
+                var title = action.CodeAction.Title;
                 var documents = new SortedDictionary<string, string>(StringComparer.Ordinal);
-                var remaining = new List<string>();
-                foreach (var operation in ( await action.CodeAction.GetOperationsAsync(cancellationToken) ).OfType<ApplyChangesOperation>())
+                foreach (var id in action.Changes.GetChangedDocuments().Concat(action.Changes.GetAddedDocuments()))
                 {
-                    foreach (var change in operation.ChangedSolution.GetChanges(original).GetProjectChanges())
-                    {
-                        foreach (var id in change.GetChangedDocuments().Concat(change.GetAddedDocuments()))
-                        {
-                            var document = operation.ChangedSolution.GetDocument(id)!;
-                            documents[document.Name] = ( await document.GetTextAsync(cancellationToken) ).ToString();
-                        }
-
-                        var diagnostics = await AnalyzeFixedProjectAsync<TAnalyzer>(change.NewProject, host, cancellationToken);
-                        var title = action.CodeAction.Title;
-                        await Assert.That(diagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && !d.Id.StartsWith("KRX", StringComparison.Ordinal)).Select(static d => d.ToString()))
-                                    .IsEmpty()
-                                    .Because($"'{title}' must leave code that compiles");
-                        await Assert.That(diagnostics.Where(d => d.Id == fix.Diagnostic.Id && d.GetMessage(System.Globalization.CultureInfo.InvariantCulture) == fixedMessage).Select(static d => d.ToString()))
-                                    .IsEmpty()
-                                    .Because($"'{title}' must fix '{fixedMessage}'");
-                        remaining.AddRange(diagnostics.Where(static d => d.Id.StartsWith("KRX", StringComparison.Ordinal)).Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}"));
-                    }
+                    var document = action.Changes.NewProject.GetDocument(id)!;
+                    documents[document.Name] = ( await document.GetTextAsync(cancellationToken) ).ToString();
                 }
 
-                remaining.Sort(StringComparer.Ordinal);
-                actions.Add(
-                    new(
-                        $"{fix.Diagnostic.Id}: {fixedMessage}",
-                        action.CodeAction.Title,
-                        action.CodeAction.EquivalenceKey,
-                        documents,
-                        remaining
-                    )
-                );
+                var diagnostics = await AnalyzeFixedProjectAsync<TAnalyzer>(action.Changes.NewProject, $"Fixed{fixedProjects++}", host, cancellationToken);
+                await Assert.That(diagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error && !d.Id.StartsWith("KRX", StringComparison.Ordinal)).Select(static d => d.ToString()))
+                            .IsEmpty()
+                            .Because($"'{title}' must leave code that compiles");
+                await Assert.That(diagnostics.Where(d => d.Id == fix.Diagnostic.Id && d.GetMessage(System.Globalization.CultureInfo.InvariantCulture) == fixedMessage).Select(static d => d.ToString()))
+                            .IsEmpty()
+                            .Because($"'{title}' must fix '{fixedMessage}'");
+                var remaining = diagnostics.Where(static d => d.Id.StartsWith("KRX", StringComparison.Ordinal))
+                                           .Select(static d => $"{d.Id}: {d.GetMessage(System.Globalization.CultureInfo.InvariantCulture)}")
+                                           .Order(StringComparer.Ordinal)
+                                           .ToList();
+                actions.Add(new($"{fix.Diagnostic.Id}: {fixedMessage}", title, action.CodeAction.EquivalenceKey, documents, remaining));
             }
         }
 
@@ -81,30 +65,25 @@ public abstract class CodeFixTest : GeneratorTest
     }
 
     /// <summary>
-    ///     Compiles a fixed project with the handler generator (unless the workspace already ran it) and returns the compiler diagnostics and
-    ///     what <typeparamref name="TAnalyzer" /> reports on the result.
+    ///     Compiles a fixed project's documents again through the testing library, with the handler generator and
+    ///     <typeparamref name="TAnalyzer" />, and returns every diagnostic of the result: the compiler's, the generators' and the analyzer's.
     /// </summary>
-    private static async Task<IReadOnlyList<Diagnostic>> AnalyzeFixedProjectAsync<TAnalyzer>(Project project, bool host, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<Diagnostic>> AnalyzeFixedProjectAsync<TAnalyzer>(Project project, string projectName, bool host, CancellationToken cancellationToken)
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
-        var options = host ? BuildProperties.Host : BuildProperties.Provider();
-        var compilation = ( await project.GetCompilationAsync(cancellationToken) )!;
-        if (!compilation.SyntaxTrees.Any(static t => t.FilePath.EndsWith("KeryxManifest.g.cs", StringComparison.Ordinal)))
+        var builder = ( host ? Builder.WithKeryxHost() : Builder ).WithProjectName(projectName).WithLanguageVersion(LanguageVersion.Latest).WithAnalyzer<TAnalyzer>();
+        foreach (var document in project.Documents)
         {
-            _ = CSharpGeneratorDriver
-               .Create([new HandlerGenerator().AsSourceGenerator()], parseOptions: (CSharpParseOptions?)project.ParseOptions, optionsProvider: options)
-               .RunGeneratorsAndUpdateCompilation(compilation, out compilation, out _, cancellationToken);
+            builder = builder.AddSource(document.Name, ( await document.GetTextAsync(cancellationToken) ).ToString());
         }
 
-        var analyzerDiagnostics = await compilation.WithAnalyzers([new TAnalyzer()], new AnalyzerOptions([], options)).GetAnalyzerDiagnosticsAsync(cancellationToken);
-        return [.. compilation.GetDiagnostics(cancellationToken), .. analyzerDiagnostics];
+        var result = await builder.Build().GenerateAsync(cancellationToken);
+        return result.FinalDiagnostics;
     }
 
     public sealed record CodeFixSnapshot(string[] Before, IReadOnlyList<CodeActionSnapshot> Actions);
 
-    /// <summary>
-    /// 
-    /// </summary>
+    /// <summary>One code action: the diagnostic it fixes, its title and key, the documents it changes or adds, and what is left.</summary>
     /// <param name="Remaining">The diagnostics <c>TAnalyzer</c> still reports after the action, sorted.</param>
     public sealed record CodeActionSnapshot(
         string Diagnostic,
