@@ -19,8 +19,8 @@ OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and
 
 OQ-8 makes the `Keryx` package depend on `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.x for `net11.0`. The .NET 11 shared
 framework (`Microsoft.NETCore.App`) now carries `Microsoft.Extensions.DependencyInjection.Abstractions.dll`, so the SDK's package pruning
-drops the `PackageReference` for `net11.0`, and `dotnet pack` writes an empty `net11.0` dependency group. The ADR and the Phase 9 "Done
-when" list expect the package in every TFM's group.
+drops the `PackageReference` for `net11.0`, and `dotnet pack` writes an empty `net11.0` dependency group. The ADR and the brief's Phase 1
+"Done when" list expect the package in every TFM's group.
 
 - **Interim:** `Keryx.csproj` removes the package from `PrunePackageReference` (target `_KeryxKeepDependencyInjectionAbstractions`), so
   the `net11.0` group lists `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.0 as the ADR says. A `net11.0` consumer's own
@@ -260,7 +260,7 @@ of decisions the same day:
 
 Folded into the ADR (Status, Handlers, Injected parameters, Diagnostics and code fixes, Behaviors, Ordering, Streaming, Notifications,
 Generated host, Cross-assembly discovery, Attribute reference, Performance contract, Phase 4 gate, Alternatives considered,
-Consequences) and the glossary. Implemented in Phase 9 of the brief.
+Consequences) and the glossary. Implemented in the static-behavior rework (7d2fd01 and f54dc49).
 
 ### Stream hook behaviors removed (2026-11-26)
 
@@ -269,7 +269,7 @@ This reverses the "hooks stay optional (`IStreamHookBehavior`)" part of "Stream 
 and OQ-39 moot. Allocation contract per `Stream` call: one iterator per stream behavior, plus one linked `CancellationTokenSource` only
 when two distinct cancellable tokens are supplied; with no behaviors the handler's enumerable is returned as is. The comparison
 benchmarks drop the Keryx hook-behavior stream variant. Folded into the ADR (Streaming, Performance contract, Benchmarks, Alternatives
-considered) and the glossary. Implemented in Phase 9 of the brief.
+considered) and the glossary. Implemented in the static-behavior rework (f54dc49).
 
 ### One notification behavior kind (2026-11-26)
 
@@ -291,7 +291,7 @@ Decided by the owner in the second round of decisions, on top of "Static behavio
 
 This makes OQ-53 moot, OQ-40 moot, and the per-handler part of OQ-43 moot. Folded into the ADR (Status, Behavior kinds, Behavior
 methods, Three ways to attach a behavior, Matching, Ordering, Notifications, Manifest, Attribute reference, Performance contract,
-KRX009 and KRX042 rows, Alternatives considered, Consequences) and the glossary. Implemented in Phase 9 of the brief.
+KRX009 and KRX042 rows, Alternatives considered, Consequences) and the glossary. Implemented in the static-behavior rework (f54dc49).
 
 ### Message constraint on open behavior methods (2026-11-26)
 
@@ -299,7 +299,7 @@ Decided by the owner in the second round of decisions. An open behavior method m
 message interface: `TRequest : IRequest<TResponse>` for `[RequestBehavior]`, `TRequest : IStreamRequest<TItem>` for `[StreamBehavior]`
 and `TNotification : INotification` for `[NotificationBehavior]`. An open method without it is KRX019. A closed method names a concrete
 message type, so the rule does not apply to it. Folded into the ADR (Behavior kinds, Behavior methods, KRX019 row, the examples).
-Implemented in Phase 9 of the brief.
+Implemented in the static-behavior rework (f54dc49).
 
 ### OQ-3: Assembly scope for notification behaviors (2026-11-26)
 
@@ -348,7 +348,7 @@ Generated host code uses `IServiceCollection`, `IServiceProvider` extensions and
   add the dependency to the package (per-TFM versions, as Specular's CPM does). Needs a decision.
 - **Decision:** The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions`, per TFM: 10.0.x for `net10.0`,
   11.0.x for `net11.0` and 8.0.x for `netstandard2.0` (the oldest version with keyed services). No host error is added. Folded into the ADR
-  (Package and assemblies, Injected parameters, Consequences); implemented in Phase 9.
+  (Package and assemblies, Injected parameters, Consequences); implemented in the static-behavior rework (7d2fd01).
 
 ### OQ-9: Analyzer packing folder and Roslyn pin (2026-11-26)
 
@@ -371,7 +371,7 @@ contracts assembly handled out of process, and another it does handle, cannot ke
 - **Decision:** Relief is per request type, not per assembly. The host attribute `[assembly: ExternallyHandled(typeof(X))]`
   (`AllowMultiple`) turns KRX030 off for `X`; naming a type the host does handle, or a type that is not a request or stream request, has no
   effect and is KRX036. `KeryxIgnoreUnhandledFrom` is not added. Folded into the ADR (Host control, Diagnostics, Attribute reference,
-  Alternatives considered); implemented in Phase 9.
+  Alternatives considered); implemented in the static-behavior rework (7d2fd01).
 
 ### OQ-11: Behavior constructors (2026-11-26)
 
@@ -456,7 +456,7 @@ A test project that is a host and references the app host sees the app's public 
   analyzer warning for internal handlers in a host that grants `InternalsVisibleTo`.
 - **Decision:** A host referenced by another host keeps the handlers it wants composed `public`. Enforcement is KRX030 only: the referencing
   host no longer skips KRX030 for request types declared in a referenced host, and nothing new is reported in the referenced host. Folded
-  into the ADR (Host control, KRX030 row, Alternatives considered); implemented in Phase 9.
+  into the ADR (Host control, KRX030 row, Alternatives considered); implemented in the static-behavior rework (7d2fd01).
 
 ### OQ-17: Struct notifications delivered to interface-typed handlers (2026-11-26)
 
@@ -528,7 +528,7 @@ as errors and CI Phase 4 cannot be committed. How the tests behave in that case 
 - **Proposal:** re-enable the skipped tests once the allocation is fixed, and keep the Performance contract at 0 B. Alternative: record
   the measured allocation as a documented exception in the Performance contract and assert that value instead.
 - **Decision:** Moot. The Phase 4 gate passed criterion 1 (OQ-36) and the generated pipelines allocate 0 B, so no test was skipped. The
-  gate must be re-checked after the static-behavior rework (Phase 9); if criterion 1 then fails, this question reopens.
+  gate must be re-checked after the static-behavior rework; if criterion 1 then fails, this question reopens.
 
 ### OQ-23: Hint name of a nested handler class (2026-11-26)
 
@@ -747,7 +747,7 @@ validation rejects the run ("Only Windows and Linux are supported in Disassembly
 - **Proposal:** accept a `DOTNET_JitDisasm` listing as equivalent evidence for criterion 2, and when the gate is re-run in CI, run it on a
   Linux runner so `DisassemblyDiagnoser` output is available too.
 - **Decision:** A `DOTNET_JitDisasm` listing is accepted as equivalent evidence for criterion 2, and the benchmarks CI job re-runs the
-  pipeline prototype on a Linux runner with `DisassemblyDiagnoser` (Phase 9). Folded into the ADR (Phase 4 gate).
+  pipeline prototype on a Linux runner with `DisassemblyDiagnoser` (Phase 8 of the brief). Folded into the ADR (Phase 4 gate).
 
 ### OQ-37: Behavior edge cases (2026-11-26)
 
@@ -809,8 +809,9 @@ code that does not compile:
   classes, `[assembly: Behavior(typeof(X))]` naming a non-behavior reporting nothing, KRX035, KRX036 for `ExcludeBehavior`, behaviors
   narrower than `internal` in a host and file-local behaviors (KRX016), and allocation tests of `async` behaviors on an optimized test host.
   Folded into the ADR (Behavior methods, Three ways to attach a behavior, Ordering, Notifications, Performance contract, KRX016, KRX019,
-  KRX035 and KRX036 rows); implemented in Phase 9. The KRX009 item for a polymorphic notification handler became moot when per-handler
-  notification behaviors were removed ("One notification behavior kind", above): nothing is attached to a notification handler.
+  KRX035 and KRX036 rows); implemented in the static-behavior rework (f54dc49). The KRX009 item for a polymorphic notification
+  handler became moot when per-handler notification behaviors were removed ("One notification behavior kind", above): nothing is
+  attached to a notification handler.
 
 ### OQ-38: Terminal hook calls in a fused segment that throw, and disposing the inner stream (2026-11-26)
 
@@ -857,7 +858,7 @@ may fit some of them and not others. OQ-37 already leaves the constraints out of
   attached to a polymorphic handler, and `[Behavior]` on a notification handler method is KRX042. Decided earlier the same day: the
   host skips an attached behavior for each concrete type it does not fit, and reports KRX009 only when the behavior fits none of the
   concrete types the polymorphic handler receives. The per-type skipping (the interim) was implemented; the KRX009 report never was.
-  Phase 9 removes both with the per-handler behaviors.
+  The static-behavior rework (f54dc49) removed both with the per-handler behaviors.
 
 ### OQ-41: `ConfigureAwait` in generated publish code (2026-11-26)
 
@@ -1065,7 +1066,7 @@ numbers.
 - **Proposal:** confirm, and add the setup rules (shared request shape, default lifetimes, baseline without behaviors, n/a for
   scenarios a library cannot express, `--verify` in CI) to the ADR's Benchmarks section.
 - **Decision:** Accepted as proposed, and the setup rules are in the ADR's Benchmarks section. The Keryx hook-behavior stream variant is
-  dropped with hook behaviors (Phase 9). Folded into the ADR (Benchmarks).
+  dropped with hook behaviors in the static-behavior rework (f54dc49). Folded into the ADR (Benchmarks).
 
 ### OQ-52: C# language floor without the generic ordering attributes (2026-11-26)
 
@@ -1081,7 +1082,7 @@ through attribute named arguments (C# 9). The 2026-11-26 decisions did not say w
   language of the .NET 10 SDK that Keryx already requires. KRX022 reports a language version below C# 14, and the generators emit
   nothing there. `netstandard2.0` stays a supported target for contracts and handler libraries (dropping it was considered and
   rejected); only the language version rises. Folded into the ADR (Status, Package and assemblies, Diagnostics, Alternatives
-  considered, Consequences). Implemented in Phase 9.
+  considered, Consequences). Implemented in the static-behavior rework (7d2fd01).
 
 ### OQ-53: A behavior class with both notification kinds (2026-11-26)
 
@@ -1111,7 +1112,7 @@ did not say what happens when a library or contracts assembly carries it; the KR
   `ExcludeBehavior`) in an assembly without `[assembly: KeryxHost]`. Alternative: keep ignoring them.
 - **Decision:** Accepted as proposed. KRX043 (warning, analyzer) is reported on `[assembly: ExternallyHandled]`,
   `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`. Folded into the ADR
-  (Host control, Diagnostics, Attribute reference, Alternatives considered); implemented in Phase 9.
+  (Host control, Diagnostics, Attribute reference, Alternatives considered); implemented in the static-behavior rework (7d2fd01).
 
 ### OQ-55: An attached behavior on a referenced notification type that does not fit (2026-11-26)
 
@@ -1129,4 +1130,4 @@ longer fits the notification type as the host resolves it. KRX034 covers only ty
   behavior class the behavior rules reject is the library's KRX019 and is not reported again.
 - **Decision:** Accepted as proposed: KRX009 in the host, on `[assembly: KeryxHost]`, naming the notification type and the behavior,
   with the analyzer's reasons; the behavior is skipped and the rest of the publish pipeline is kept. Folded into the ADR (Diagnostics
-  and code fixes). Implemented in Phase 9.
+  and code fixes). Implemented in the static-behavior rework (f54dc49).

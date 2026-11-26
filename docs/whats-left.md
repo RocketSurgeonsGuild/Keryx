@@ -1,74 +1,83 @@
 # What is left
 
-Nov 26, 2026 · written at the end of Phase 8 ([docs/handoff.md](handoff.md)); updated the same day after the design review that
-decided every open question.
+Nov 26, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework.
 
-Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1): abstractions, handlers, the host, request, stream and
-notification pipelines, cross-assembly discovery, the samples with the Native AOT job, and the benchmark suite. The design review
-changed the behavior model, so one more phase is planned. This note lists the next work and what still needs a person.
+Phases 0 to 7 are implemented for the static design on `feature/v1` (draft pull request #1): abstractions, handlers, the host, request,
+stream and notification pipelines, cross-assembly discovery, and the samples with the Native AOT job. Phase 8's benchmark suite exists and
+uses static behaviors; its other static-design items (the README rewrite, the Linux `PipelinePrototype` job, the gate re-run and the
+comparison re-run) are in progress and listed under Before a first release. The design review of 2026-11-26 replaced the behavior model,
+and that rework is implemented in two commits; the brief's phases now describe the static design as what they build, so there is no
+separate rework phase. This note lists what still needs a person and what is left before a release.
 
-## Next: Phase 9, static behaviors
+## Done: the static-behavior rework
 
-[Phase 9 in the brief](handoff.md#phase-9-static-behaviors) reworks the code to the design the ADR now describes (a summary; the
-brief has the full list):
+- **7d2fd01:** the C# 14 floor (KRX022 below it; both generators emit nothing there; `netstandard2.0` stays supported, OQ-52); the
+  `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (OQ-8); `[assembly: ExternallyHandled]`
+  with KRX030 and KRX036 (OQ-10); KRX030 no longer skips request types declared in a referenced host (OQ-16); the host-only assembly
+  attributes outside a host are warning KRX043 (OQ-54).
+- **f54dc49:** behaviors are `static` classes with the three kind attributes (`[RequestBehavior]`, `[StreamBehavior]`,
+  `[NotificationBehavior]`) and static `Handle`/`HandleAsync` behavior methods, replacing the five behavior interfaces; an open behavior
+  method constrains its message type parameter to the kind's message interface (KRX019); the pipeline context holds the behaviors'
+  injected services and `AddKeryx()` registers no behaviors; the generic `RunsAfter<T>`/`RunsBefore<T>` and the closed forms of exclusion
+  and edges are gone, and KRX020 is retired; stream hook behaviors and fused hook segments are removed; per-handler notification behaviors
+  are removed (`[NotificationBehavior]` wraps the whole publish once, handlers are called directly, `[Behavior]` on a notification handler
+  method is KRX042); the host reports KRX009 for a `[Behavior]` on a referenced notification type that no longer fits it (OQ-55) and
+  KRX034 for unresolvable injected parameter types of referenced behavior methods (OQ-47); `ProjectionDataVersion` is 2; the samples, the
+  gate prototype and the Keryx comparison subject use static behaviors, and the hook-behavior stream variant of the comparison benchmarks
+  is gone (OQ-51).
 
-- behaviors become `static` classes with the three kind attributes (`[RequestBehavior]`, `[StreamBehavior]`,
-  `[NotificationBehavior]`) and static `Handle`/`HandleAsync` behavior methods, replacing the five behavior interfaces; an open
-  behavior method constrains its message type parameter to the kind's message interface (KRX019); the pipeline context holds the
-  behaviors' injected services, and nothing is registered for a behavior;
-- per-handler notification behaviors are removed: `[NotificationBehavior]` wraps the whole publish once, handlers are called without
-  per-handler pipelines, and `[Behavior]` on a notification handler method is KRX042;
-- stream hook behaviors and fused hook segments are removed;
-- the generic `RunsAfter<T>`/`RunsBefore<T>` and the closed forms of exclusion and edges are removed; KRX020 is retired, and KRX019,
-  KRX016, KRX013, KRX018, KRX009, KRX042 and KRX034 (OQ-47) are reworked for behavior methods;
-- `[assembly: ExternallyHandled(typeof(X))]` with KRX030 and KRX036 (OQ-10), and KRX030 no longer skips request types declared in a
-  referenced host (OQ-16); the host-only assembly attributes outside a host are the new warning KRX043 (OQ-54);
-- the `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (OQ-8);
-- the samples, benchmarks and README are updated, the Phase 4 gate is re-run with a static prototype (and on Linux in CI with
-  `DisassemblyDiagnoser`, OQ-36), and the comparison benchmarks are re-run without the hook-behavior variant.
+CI on f54dc49 is green (build, lint, the Native AOT publish and the benchmarks Dry job).
 
-## Decisions
+## Decisions for the owner
 
-Nothing is open. Every question in
-[open-questions.md](adr/open-questions.md) was decided on 2026-11-26 and folded into the ADR:
-OQ-8, OQ-9, OQ-10, OQ-15, OQ-16, OQ-17, OQ-36 and OQ-41 by an explicit choice, OQ-11 by the static-behavior design, OQ-21, OQ-38
-and OQ-39 as moot (hook behaviors removed), OQ-22 as moot until the gate is re-run, OQ-37 rewritten for static behaviors, and every
-other entry up to OQ-51 as proposed.
+Three questions were raised while implementing the rework. Each is **Open** in [open-questions.md](adr/open-questions.md), and the code
+follows its interim behavior until it is decided:
 
-The owner's second round of decisions the same day settled the rest:
+- **OQ-56:** the .NET 11 SDK prunes `Microsoft.Extensions.DependencyInjection.Abstractions` for `net11.0`, because the shared framework
+  carries it. Interim: `Keryx.csproj` keeps it, so the `net11.0` dependency group lists it as the ADR says. Decide whether to keep that or
+  let pruning drop it and say so in the ADR.
+- **OQ-57:** (1) a referenced behavior class with several kinds is left out of every pipeline, with KRX034, when any of its behavior
+  methods injects a type the host cannot resolve; (2) a message constraint through an interface that implements the kind's message
+  interface (`where TRequest : ICommand<TResponse>`) counts. Decide whether to keep both or check per kind and require the kind's interface
+  itself.
+- **OQ-58:** an open behavior method that writes `TResponse?` (`TItem?`) in its `next` constraint, return type or message constraint is
+  KRX019, because the generated code would not compile. Decide whether to keep that and say it in the ADR, or make matching substitute the
+  annotation.
 
-- only one notification behavior kind remains, `[NotificationBehavior]` (was `[PublishBehavior]`); per-handler notification
-  behaviors are removed, which makes OQ-40, OQ-53 and the per-handler part of OQ-43 moot;
-- an open behavior method must constrain its message type parameter to the kind's message interface (KRX019);
-- **OQ-52:** the floor rises to C# 14 (KRX022 below it); `netstandard2.0` targets stay supported;
-- **OQ-54:** KRX043 warns about `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` in an assembly that is not a host.
-- **OQ-55:** the host reports KRX009 for a `[Behavior]` on a referenced notification type that no longer fits it.
+Every other entry is decided and folded into the ADR.
 
 ## Gates and checks
 
-- **Phase 4 gate:** passed on all three criteria with the instance behaviors (OQ-36). Criterion 2 (the behavior `Handle` and
-  `next.InvokeAsync` called directly) was judged from a `DOTNET_JitDisasm` listing, which is accepted as equivalent evidence, because
-  BenchmarkDotNet's `DisassemblyDiagnoser` does not run on macOS. Phase 9 re-runs the gate with static behavior methods and adds a Linux
-  run with the diagnoser to the benchmarks CI job.
-- **No other gate failed.** The phase checks (tests, allocation tests, incremental tests, the AOT job) pass.
-- **Benchmarks in CI:** `.github/workflows/benchmarks.yml` (build, `--verify`, every benchmark with `--job Dry`) runs on the pull request
-  and passed its first CI run. Phase 9 adds the Linux `PipelinePrototype` job with `DisassemblyDiagnoser`.
-- **Performance contract against the comparison run** (README, Benchmarks; measured with the instance behaviors, and re-measured in
-  Phase 9): Keryx allocates 0 B per `Send` with a synchronous handler
-  at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1 and 5 handlers; with a yielding `IRequest<T>` handler
-  it allocates what the direct call allocates (the handler's state machine); a `Stream` with no behaviors allocates what the handler's
-  iterator allocates, and with behaviors one iterator per wrap behavior or per fused hook segment (after Phase 9, one iterator per
-  stream behavior). The one generated async path, `UnitAdapter.ToUnit`, is checked by `SendUnitYieldValueTask` and
-  `SendUnitYieldTask` (an `IRequest` whose `async ValueTask`/`async Task` handler awaits `Task.Yield()`): typed and `IMediator` both
-  allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers come from one machine
-  (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting them.
+- **Phase 4 gate, instance behaviors:** passed on all three criteria (OQ-36). Criterion 2 (the behavior method and `next.InvokeAsync`
+  called directly) was judged from a `DOTNET_JitDisasm` listing, accepted as equivalent evidence because BenchmarkDotNet's
+  `DisassemblyDiagnoser` does not run on macOS. Phase 8 adds a Linux `--filter *PipelinePrototype*` job with `DisassemblyDiagnoser` to
+  the benchmarks workflow (OQ-36; see Before a first release).
+- Phase 4 gate re-run on the static design: <GATE-RESULT>
+- **Phase checks:** the tests, allocation tests (now on an optimized test host for `async` behaviors), incremental tests and the AOT job
+  pass.
+- **Benchmarks in CI:** `.github/workflows/benchmarks.yml` builds the suite, runs `--verify` and every benchmark with `--job Dry` on the
+  pull request.
+- **Performance contract against the comparison run** (README, Benchmarks; measured with the instance behaviors, to be re-measured with
+  the static ones): Keryx allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per
+  sequential `Publish` to 1 and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the
+  handler's state machine); a `Stream` with no behaviors allocates what the handler's iterator allocates, and with behaviors one iterator
+  per stream behavior (there are no hook behaviors). The one generated async path, `UnitAdapter.ToUnit`, is checked by
+  `SendUnitYieldValueTask` and `SendUnitYieldTask` (an `IRequest` whose `async ValueTask`/`async Task` handler awaits `Task.Yield()`):
+  typed and `IMediator` both allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers
+  come from one machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting
+  them.
 - **Publish baseline:** the direct call used to be an `async` method, which made it slower than Keryx's typed overload (ratio below 1).
   It is now non-async with an `async` fallback for handlers that do not complete synchronously, and the README's Publish table was
   re-run: 0.00 ns (inlined) and 0.64 ns for 1 and 5 handlers, against Keryx typed at 0.68 ns and 0.74 ns.
 
 ## Before a first release
 
-- Mark pull request #1 ready for review after Phase 9 (the handoff's last step, left to the owner).
+- Finish Phase 8 for the static design: the README rewritten to the ADR (static behaviors, the three kind attributes, no hook or
+  per-handler behaviors, `ExternallyHandled`, KRX043, the DI dependency, the C# 14 floor, the diagnostics table), the Linux
+  `PipelinePrototype` job with `DisassemblyDiagnoser`, the gate re-run recorded in `open-questions.md`, and the comparison benchmarks
+  re-run locally with the README's tables updated.
+- Decide OQ-56, OQ-57 and OQ-58.
+- Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
