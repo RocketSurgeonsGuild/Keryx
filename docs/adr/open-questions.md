@@ -9,44 +9,26 @@ on your own. Every open entry has an **Interim** line; that is what the code doe
 
 Entries that were Open with Interim and Proposal text keep it as a record and end with a **Decision** line; earlier entries state the
 decision directly. Where the two disagree, the Decision line and the ADR win. Entries decided on 2026-11-26 after the review of the
-whole design follow the "Static behaviors" and "Stream hook behaviors removed" entries.
+whole design follow the "Static behaviors" and "Stream hook behaviors removed" entries; the owner's second round of decisions the same
+day added "One notification behavior kind" and "Message constraint on open behavior methods" after those two, and decided OQ-52 to
+OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round.
 
 ## Open
 
-### OQ-52: C# language floor without the generic ordering attributes
+### OQ-55: An attached behavior on a referenced notification type that does not fit (2026-11-26)
 
-OQ-20 set the floor at C# 11 because the generic `RunsAfter<T>`/`RunsBefore<T>` attributes need it. Static behaviors removed those
-attributes (a static class cannot be a type argument), so the only language need the ADR still states is the `init` properties set
-through attribute named arguments (C# 9). The 2026-11-26 decisions do not say whether the floor, and KRX022, should change.
+The host reports KRX009 for a behavior that a referenced request or stream handler's manifest attaches and that no longer fits the target
+as the host resolves it (ADR, Diagnostics and code fixes). Since per-handler notification behaviors were removed ("One notification
+behavior kind", below), the only per-target attachment for a notification is `[Behavior]` on the notification type, which the host reads
+from the type rather than a manifest. The library's analyzer checks it against the types that library compiled against; when the
+behavior class lives in a third assembly that changed since (version skew), the ADR does not say what the host does if the behavior no
+longer fits the notification type as the host resolves it. KRX034 covers only types that do not resolve or are not accessible.
 
-- **Interim:** keep C# 11 and KRX022 as they are. `build/Keryx.props` defaults `LangVersion` to `latest`, so a project that does not set
-  it never sees KRX022.
-- **Proposal:** keep C# 11, which costs nothing for projects that take the default and leaves generated code free to use C# 10 and 11
-  features. Alternative: lower the floor and KRX022 to C# 9, after checking that the generated code compiles there.
-
-### OQ-53: A behavior class with both notification kinds
-
-The publish and notification handler kinds have the same behavior method shape (`next` constrained `struct, INext`, returning
-`ValueTask`), so the method's kind cannot follow from its signature. The 2026-11-26 decisions say that a class declares exactly one
-behavior method per kind attribute it carries, but not how a class that carries both `[PublishBehavior]` and
-`[NotificationHandlerBehavior]` tells its two methods apart, or what a method-level `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` or
-`[GlobalBehavior]` means on a method that serves both kinds.
-
-- **Interim:** in such a class, its one `INext` method is the behavior of both kinds; two `INext` methods are KRX019 (two methods of
-  one kind). A behavior that must differ per kind goes in two classes. A method-level ordering or `[GlobalBehavior]` attribute on that
-  method applies to both kinds.
-- **Proposal:** keep the interim. Alternative: let a behavior method carry the kind attribute itself, so `Handle` and `HandleAsync` can
-  serve one kind each.
-
-### OQ-54: `[assembly: ExternallyHandled]` outside a host
-
-`ExternallyHandled` is a host attribute, and KRX036 covers it only in a host (a handled type or a type that is not a request). The ADR
-does not say what happens when a library or contracts assembly carries it; the KRX040–KRX049 placement range has no entry for it.
-
-- **Interim:** only the host generator reads it, so outside a host it has no effect and nothing is reported (as with `ExcludeHandler` and
-  `ExcludeBehavior`).
-- **Proposal:** add a placement warning (KRX043) for the host-only assembly attributes (`ExternallyHandled`, `ExcludeHandler`,
-  `ExcludeBehavior`) in an assembly without `[assembly: KeryxHost]`. Alternative: keep ignoring them.
+- **Interim:** the host skips the behavior for that notification type silently and keeps the rest of its publish pipeline (what the
+  code does today: the host composes a notification type's behaviors with the same skip rule as assembly and global behaviors).
+- **Proposal:** treat it like a referenced handler's attached behavior: KRX009 (the analyzer's descriptor), with the analyzer's reasons,
+  on `[assembly: KeryxHost]`, naming the notification type; the behavior is skipped and the rest of the publish pipeline is kept. A
+  behavior class the behavior rules reject is the library's KRX019 and is not reported again.
 
 ## Decided
 
@@ -89,7 +71,8 @@ glossary; the source files are named after the interfaces. Folded into the ADR (
 The stream rows were superseded later the same day by "Stream behaviors: wrap model" below: `IStreamPipelineBehavior` changed shape,
 `IStreamWrapPipelineBehavior` was removed, and the hooks moved to `IStreamHookBehavior`.
 **Superseded 2026-11-26** by "Static behaviors" below: the behavior interfaces are removed, and behaviors are static classes marked
-with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[PublishBehavior]`, `[NotificationHandlerBehavior]`).
+with kind attributes, which are `[RequestBehavior]`, `[StreamBehavior]` and `[NotificationBehavior]` since "One notification behavior
+kind" below.
 
 ### Stream allocation exceptions (2026-11-26)
 
@@ -104,6 +87,7 @@ per stream behavior; fused hook segments are gone).
 Start each handler pipeline in handler order on the calling thread without awaiting (no `Task.Run`), catching synchronous throws. 0 B
 when all complete synchronously; otherwise one array plus `AsTask()` per pending `ValueTask`, then `Task.WhenAll`. `AggregateException`
 in handler order from synchronous and asynchronous failures. Folded into the ADR (Notifications, Publish strategy; Performance contract).
+Since "One notification behavior kind" (below) handlers are called directly; there are no per-handler pipelines.
 
 ### OQ-20: C# language version floor (2026-11-26)
 
@@ -119,7 +103,7 @@ with no `LangVersion` that references the package evaluates `LangVersion` to `la
 `[BehaviorOrder(..., Order = n)]`; with `LangVersion` 10 in its `Directory.Build.props` it keeps 10 and fails with CS8936. Folded into
 the ADR (Package and assemblies, Diagnostics, Alternatives considered, Consequences).
 **Note 2026-11-26:** the generic ordering attributes were removed with "Static behaviors" below, so the C# 11 reason given here is
-gone; the floor stays C# 11 until OQ-52 decides otherwise.
+gone; OQ-52 below keeps the floor at C# 11 for other reasons.
 
 ### Generic `RunsAfter<T>`/`RunsBefore<T>` (2026-11-26)
 
@@ -193,20 +177,23 @@ Replaces OQ-11 and the interface-based behavior model of Phases 4 to 8.
   parameters are resolved once per DI scope into the generated pipeline context (which already holds the handler), and the link calls
   `Behavior.Handle(request, next, injected..., cancellationToken)`. A transient service injected into a behavior is therefore cached per
   scope per pipeline, as it was when behaviors were scoped instances.
-- Kind attributes on the class, one per kind: `[RequestBehavior]` (was `IRequestPipelineBehavior`), `[StreamBehavior]` (was
-  `IStreamPipelineBehavior`, the wrap model), `[PublishBehavior]` (per publish; was `INotificationPipelineBehavior`) and
-  `[NotificationHandlerBehavior]` (per handler; was `INotificationHandlerPipelineBehavior`).
+- Kind attributes on the class, one per kind, three kinds: `[RequestBehavior]` (was `IRequestPipelineBehavior`), `[StreamBehavior]`
+  (was `IStreamPipelineBehavior`, the wrap model) and `[NotificationBehavior]` (per publish; was `INotificationPipelineBehavior`). As
+  first decided there were four: the per-publish kind was named `[PublishBehavior]`, and a per-handler kind,
+  `[NotificationHandlerBehavior]` (was `INotificationHandlerPipelineBehavior`), sat beside it; "One notification behavior kind" below
+  removed the per-handler kind and renamed the per-publish one.
 - One class may carry several kind attributes. For each one it declares exactly one behavior method of that kind; a kind attribute with
   no matching method, or two methods of one kind, is a compile error. KRX019 becomes the static-behavior shape rule (class not static,
   kind attribute without a valid method, more than one method per kind, partially open method, and so on).
 - `typeof(X)` in `[Behavior]`, `[ExcludeBehavior]`, `[RunsAfter]` and `[RunsBefore]` names the class and means "the behavior of X whose
   kind fits the target or pipeline".
 - Generics: the method carries the type parameters (non-generic static class). A behavior method is fully open (every message and
-  response or item position is a method type parameter; constraints decide matching) or fully closed (generic only in `TNext`).
-  Partially open methods are rejected.
+  response or item position is a method type parameter; constraints decide matching, and the message type parameter must be
+  constrained to the kind's message interface, per "Message constraint on open behavior methods" below) or fully closed (generic only
+  in `TNext`). Partially open methods are rejected.
 - Signature rules mirror handlers: the message, `next` and an optional `CancellationToken` are found by type, in any order; every other
   parameter is an injected service, with the handler parameter rules (KRX013, KRX018). `next` is a method type parameter constrained
-  `struct, INext<TResponse>` (request), `struct, IStreamNext<TItem>` (stream) or `struct, INext` (publish and notification handler).
+  `struct, INext<TResponse>` (request), `struct, IStreamNext<TItem>` (stream) or `struct, INext` (notification).
   Return `ValueTask<TResponse>`, `IAsyncEnumerable<TItem>` or `ValueTask`, synchronous or `async`.
 - `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` and `[GlobalBehavior]` go on the class and apply to every behavior it holds; the same
   attribute on a behavior method overrides the class's for that kind only.
@@ -218,7 +205,8 @@ Replaces OQ-11 and the interface-based behavior model of Phases 4 to 8.
 - KRX020 (exactly one public behavior constructor) is retired.
 - The Phase 4 gate is re-run after the rework.
 
-Details added while folding these decisions into the ADR, which follow from them but were not stated (to be confirmed by the owner):
+Details added while folding these decisions into the ADR, which follow from them and were confirmed by the owner in the second round
+of decisions the same day:
 
 - A method's `[RunsAfter]` (or `[RunsBefore]`) list replaces the class's list of that attribute for that kind. `[GlobalBehavior]` on a
   method makes only that kind global; on both the class and a method, every kind is global.
@@ -227,12 +215,11 @@ Details added while folding these decisions into the ADR, which follow from them
   class does not carry or that has no valid `next` parameter.
 - KRX042 also covers `[GlobalBehavior]` on a class without a kind attribute or on a method that is not a behavior method.
 - The host's global-behavior scan also finds classes whose `[GlobalBehavior]` is only on a method. Specular.Scanning's type filter has
-  no method-attribute filter, but it can express this: `WithAnyAttribute` on the four kind attributes (then checking the attributes in
+  no method-attribute filter, but it can express this: `WithAnyAttribute` on the three kind attributes (then checking the attributes in
   the transform) or a `CustomTypeFilter` through `Where`.
 - C# does not allow two methods that differ only in their constraints (CS0111), so a class holding two kinds with the same parameter
   list names one method `Handle` and the other `HandleAsync`.
 - `ExternallyHandledAttribute` exposes the type as a property named `RequestType`.
-- How a class with both notification kinds declares them is OQ-53.
 
 Folded into the ADR (Status, Handlers, Injected parameters, Diagnostics and code fixes, Behaviors, Ordering, Streaming, Notifications,
 Generated host, Cross-assembly discovery, Attribute reference, Performance contract, Phase 4 gate, Alternatives considered,
@@ -247,6 +234,36 @@ when two distinct cancellable tokens are supplied; with no behaviors the handler
 benchmarks drop the Keryx hook-behavior stream variant. Folded into the ADR (Streaming, Performance contract, Benchmarks, Alternatives
 considered) and the glossary. Implemented in Phase 9 of the brief.
 
+### One notification behavior kind (2026-11-26)
+
+Decided by the owner in the second round of decisions, on top of "Static behaviors" above.
+
+- Only one notification behavior kind remains: the per-publish kind, renamed `[NotificationBehavior]` (was `[PublishBehavior]`, and
+  before that `INotificationPipelineBehavior`). It wraps the whole `Publish` call once (`next` constrained `struct, INext`, returning
+  `ValueTask`) and runs even with zero handlers (OQ-18).
+- Per-handler notification behaviors (`[NotificationHandlerBehavior]`, formerly `INotificationHandlerPipelineBehavior`) are removed
+  entirely. The handlers of a publish are called without per-handler pipelines.
+- A notification behavior is attached with `[Behavior]` on the notification type, with `[assembly: Behavior]` in the notification
+  type's assembly (OQ-3), or with `[GlobalBehavior]`. `[Behavior]` on a notification handler method has no effect and is KRX042 (the
+  no-effect placement warning).
+- The behavior kinds are therefore `[RequestBehavior]`, `[StreamBehavior]` and `[NotificationBehavior]`. A method's kind is fully
+  determined by its signature (`next` constraint and message type), so a class may still carry several kind attributes, with one method
+  per kind.
+- Why: one notification kind keeps a method's kind inferred purely from its signature; publish-wide concerns run once per publish; a
+  handler that needs a retry can do it itself.
+
+This makes OQ-53 moot, OQ-40 moot, and the per-handler part of OQ-43 moot. Folded into the ADR (Status, Behavior kinds, Behavior
+methods, Three ways to attach a behavior, Matching, Ordering, Notifications, Manifest, Attribute reference, Performance contract,
+KRX009 and KRX042 rows, Alternatives considered, Consequences) and the glossary. Implemented in Phase 9 of the brief.
+
+### Message constraint on open behavior methods (2026-11-26)
+
+Decided by the owner in the second round of decisions. An open behavior method must constrain its message type parameter to the kind's
+message interface: `TRequest : IRequest<TResponse>` for `[RequestBehavior]`, `TRequest : IStreamRequest<TItem>` for `[StreamBehavior]`
+and `TNotification : INotification` for `[NotificationBehavior]`. An open method without it is KRX019. A closed method names a concrete
+message type, so the rule does not apply to it. Folded into the ADR (Behavior kinds, Behavior methods, KRX019 row, the examples).
+Implemented in Phase 9 of the brief.
+
 ### OQ-3: Assembly scope for notification behaviors (2026-11-26)
 
 "Per assembly" was defined for request handlers only. The ADR applies `[assembly: Behavior]` to per-handler notification behaviors in the
@@ -255,7 +272,9 @@ considered) and the glossary. Implemented in Phase 9 of the brief.
 - **Interim:** as the ADR says (handler's assembly for per-handler behaviors, notification type's assembly for per-publish behaviors).
 - **Proposal:** confirm.
 - **Decision:** Accepted as proposed. `[assembly: Behavior]` applies notification handler behaviors in the handler's assembly and publish
-  behaviors in the notification type's assembly. Folded into the ADR (Notifications, Behaviors).
+  behaviors in the notification type's assembly. Folded into the ADR (Notifications, Behaviors). Per-handler notification behaviors
+  were removed later the same day ("One notification behavior kind", above), so only the notification type's assembly remains: it is
+  where `[assembly: Behavior]` applies `[NotificationBehavior]`s.
 
 ### OQ-4: Notification behavior signature (2026-11-26)
 
@@ -266,7 +285,8 @@ The ADR adds a non-generic `INext` (`ValueTask InvokeAsync(CancellationToken)`) 
 - **Proposal:** confirm. The alternative (`INext<Unit>`, `ValueTask<Unit>`) reuses one interface but makes every notification behavior
   return `Unit`.
 - **Decision:** Accepted as proposed. Publish and notification handler behaviors take the non-generic `INext` and return plain `ValueTask`.
-  Folded into the ADR (Behavior kinds, Notifications).
+  Folded into the ADR (Behavior kinds, Notifications). Since "One notification behavior kind" (above) this is the one
+  `[NotificationBehavior]` kind.
 
 ### OQ-5: `IPublisher.Publish` shape (2026-11-26)
 
@@ -423,6 +443,7 @@ verification pass picked one reading.
   immediately only when there are neither handlers nor per-publish behaviors, or when the runtime type is unknown.
 - **Proposal:** confirm (logging and outbox behaviors then see every publish).
 - **Decision:** Accepted as proposed: the publish pipeline runs even with zero handlers. Folded into the ADR (Notifications, Zero handlers).
+  The per-publish behavior is now `[NotificationBehavior]` ("One notification behavior kind", above).
 
 ### OQ-19: Shapes of the attributes the ADR lists only in the Attribute reference table (2026-11-26)
 
@@ -748,11 +769,11 @@ code that does not compile:
   constructors), and the `#nullable disable` note on the manifest attribute (behavior classes are not generic, so `typeof` names no
   closing). Still apply, restated for behavior methods: the constraint items (`Nullable<T>` and interface constraints, annotated reference
   types, `new()` and `required`, constraint types nested in generic types), closed methods and nullability, KRX008 per pair of behavior
-  classes, KRX009 for a polymorphic notification handler (kind only in the analyzer; the host side is OQ-40), `[assembly:
-  Behavior(typeof(X))]` naming a non-behavior reporting nothing, KRX035, KRX036 for `ExcludeBehavior`, behaviors narrower than `internal` in
-  a host and file-local behaviors (KRX016), and allocation tests of `async` behaviors on an optimized test host. Folded into the ADR
-  (Behavior methods, Three ways to attach a behavior, Ordering, Notifications, Performance contract, KRX016, KRX019, KRX035 and KRX036
-  rows); implemented in Phase 9.
+  classes, `[assembly: Behavior(typeof(X))]` naming a non-behavior reporting nothing, KRX035, KRX036 for `ExcludeBehavior`, behaviors
+  narrower than `internal` in a host and file-local behaviors (KRX016), and allocation tests of `async` behaviors on an optimized test host.
+  Folded into the ADR (Behavior methods, Three ways to attach a behavior, Ordering, Notifications, Performance contract, KRX016, KRX019,
+  KRX035 and KRX036 rows); implemented in Phase 9. The KRX009 item for a polymorphic notification handler became moot when per-handler
+  notification behaviors were removed ("One notification behavior kind", above): nothing is attached to a notification handler.
 
 ### OQ-38: Terminal hook calls in a fused segment that throw, and disposing the inner stream (2026-11-26)
 
@@ -795,8 +816,11 @@ may fit some of them and not others. OQ-37 already leaves the constraints out of
   diagnostic, also when it fits none of them.
 - **Proposal:** keep skipping per concrete type, and have the host report KRX009 (or a new warning) only when an attached behavior fits
   none of the concrete types the handler receives, which is almost certainly a mistake.
-- **Decision:** The host skips an attached behavior for each concrete type it does not fit, and reports KRX009 only when the behavior fits
-  none of the concrete types the polymorphic handler receives. Folded into the ADR (Notifications, KRX009 row); implemented in Phase 9.
+- **Decision:** Moot. Per-handler notification behaviors were removed ("One notification behavior kind", above), so no behavior is
+  attached to a polymorphic handler, and `[Behavior]` on a notification handler method is KRX042. Decided earlier the same day: the
+  host skips an attached behavior for each concrete type it does not fit, and reports KRX009 only when the behavior fits none of the
+  concrete types the polymorphic handler receives. The per-type skipping (the interim) was implemented; the KRX009 report never was.
+  Phase 9 removes both with the per-handler behaviors.
 
 ### OQ-41: `ConfigureAwait` in generated publish code (2026-11-26)
 
@@ -809,7 +833,8 @@ whether later handlers run on it.
   however they choose, and the caller's own `await Publish(...)` still resumes on its context.
 - **Proposal:** confirm together with OQ-39 and state it in the ADR's Notifications section. The alternative keeps thread-affine handlers
   on the caller's context at the cost of a context switch per yielding handler.
-- **Decision:** Keep `ConfigureAwait(false)` in generated publish code. Folded into the ADR (Notifications).
+- **Decision:** Keep `ConfigureAwait(false)` in generated publish code. Folded into the ADR (Notifications). Since "One notification
+  behavior kind" (above) handlers are called directly; there are no per-handler pipelines.
 
 ### OQ-42: Which notification types the host knows before cross-assembly discovery (2026-11-26)
 
@@ -827,7 +852,7 @@ assembly (typically a contracts assembly).
   (Phase 7 does so: the public concrete notification types of every referenced assembly that references Keryx, from the third scan, and
   the concrete notification types referenced handlers take, are known too, each with a typed `Publish` overload.)
 - **Decision:** Accepted as proposed, with the scanned referenced notification types Phase 7 added. Folded into the ADR (Notifications,
-  Known notification types).
+  Known notification types). The per-publish behavior is now `[NotificationBehavior]` ("One notification behavior kind", above).
 
 ### OQ-43: Exceptions from per-publish behaviors, and derived notifications of unknown types (2026-11-26)
 
@@ -842,7 +867,9 @@ a known type but is itself unknown.
   when it derives from a known type with handlers: the typed overload of a non-sealed type checks the runtime type and redispatches, as
   typed `Send` does for requests (OQ-31).
 - **Proposal:** confirm and add both to the ADR's Notifications section.
-- **Decision:** Accepted as proposed. Folded into the ADR (Notifications).
+- **Decision:** Accepted as proposed. Folded into the ADR (Notifications). The part about failures of per-handler behaviors is moot:
+  per-handler notification behaviors were removed ("One notification behavior kind", above). A per-publish behavior is now a
+  `[NotificationBehavior]`.
 
 ### OQ-44: File-local types in a host (2026-11-26)
 
@@ -961,7 +988,8 @@ fitting when the host resolves the target or the behavior to another version tha
   handlers (the error fails the build either way). Assembly and global behaviors that do not fit are skipped silently, as the ADR says.
 - **Proposal:** confirm, and say in the Diagnostics section where the host reports KRX009 and how it names the target.
 - **Decision:** Accepted as proposed; a behavior class the rules reject is the library's KRX019 (KRX020 is retired). Folded into the ADR
-  (Diagnostics and code fixes, KRX009 row).
+  (Diagnostics and code fixes, KRX009 row). The polymorphic notification handler part is moot (OQ-40): a notification handler's
+  manifest attaches no behaviors.
 
 ### OQ-51: How the comparison benchmarks set up each library (2026-11-26)
 
@@ -1001,3 +1029,46 @@ numbers.
   scenarios a library cannot express, `--verify` in CI) to the ADR's Benchmarks section.
 - **Decision:** Accepted as proposed, and the setup rules are in the ADR's Benchmarks section. The Keryx hook-behavior stream variant is
   dropped with hook behaviors (Phase 9). Folded into the ADR (Benchmarks).
+
+### OQ-52: C# language floor without the generic ordering attributes (2026-11-26)
+
+OQ-20 set the floor at C# 11 because the generic `RunsAfter<T>`/`RunsBefore<T>` attributes need it. Static behaviors removed those
+attributes (a static class cannot be a type argument), so the only language need the ADR still states is the `init` properties set
+through attribute named arguments (C# 9). The 2026-11-26 decisions did not say whether the floor, and KRX022, should change.
+
+- **Interim:** keep C# 11 and KRX022 as they are. `build/Keryx.props` defaults `LangVersion` to `latest`, so a project that does not set
+  it never sees KRX022.
+- **Proposal:** keep C# 11, which costs nothing for projects that take the default and leaves generated code free to use C# 10 and 11
+  features. Alternative: lower the floor and KRX022 to C# 9, after checking that the generated code compiles there.
+- **Decision:** Keep the C# 11 floor and KRX022 unchanged: it costs nothing with the `LangVersion=latest` default and leaves generated
+  code free to use C# 10 and 11 features. Folded into the ADR (Package and assemblies, Alternatives considered).
+
+### OQ-53: A behavior class with both notification kinds (2026-11-26)
+
+The publish and notification handler kinds had the same behavior method shape (`next` constrained `struct, INext`, returning
+`ValueTask`), so the method's kind could not follow from its signature. The 2026-11-26 decisions said that a class declares exactly one
+behavior method per kind attribute it carries, but not how a class that carries both `[PublishBehavior]` and
+`[NotificationHandlerBehavior]` tells its two methods apart, or what a method-level `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` or
+`[GlobalBehavior]` means on a method that serves both kinds.
+
+- **Interim:** in such a class, its one `INext` method is the behavior of both kinds; two `INext` methods are KRX019 (two methods of
+  one kind). A behavior that must differ per kind goes in two classes. A method-level ordering or `[GlobalBehavior]` attribute on that
+  method applies to both kinds.
+- **Proposal:** keep the interim. Alternative: let a behavior method carry the kind attribute itself, so `Handle` and `HandleAsync` can
+  serve one kind each.
+- **Decision:** Moot. Only one notification kind remains, `[NotificationBehavior]` ("One notification behavior kind", above), so every
+  kind has its own method shape and a method's kind follows from its signature. Folded into the ADR (Behavior methods, Ordering,
+  Alternatives considered).
+
+### OQ-54: `[assembly: ExternallyHandled]` outside a host (2026-11-26)
+
+`ExternallyHandled` is a host attribute, and KRX036 covers it only in a host (a handled type or a type that is not a request). The ADR
+did not say what happens when a library or contracts assembly carries it; the KRX040–KRX049 placement range had no entry for it.
+
+- **Interim:** only the host generator reads it, so outside a host it has no effect and nothing is reported (as with `ExcludeHandler` and
+  `ExcludeBehavior`).
+- **Proposal:** add a placement warning (KRX043) for the host-only assembly attributes (`ExternallyHandled`, `ExcludeHandler`,
+  `ExcludeBehavior`) in an assembly without `[assembly: KeryxHost]`. Alternative: keep ignoring them.
+- **Decision:** Accepted as proposed. KRX043 (warning, analyzer) is reported on `[assembly: ExternallyHandled]`,
+  `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]`. Folded into the ADR
+  (Host control, Diagnostics, Attribute reference, Alternatives considered); implemented in Phase 9.

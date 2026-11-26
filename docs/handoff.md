@@ -10,7 +10,8 @@ single phase from this file plus the ADR.
 1. [docs/adr/0001-keryx-mediator.md](adr/0001-keryx-mediator.md): the authoritative design. If this brief and the ADR disagree, the ADR
    wins.
 2. [CONTEXT.md](../CONTEXT.md): the glossary. Use its terms.
-3. [docs/adr/open-questions.md](adr/open-questions.md): undecided points and their interim behavior.
+3. [docs/adr/open-questions.md](adr/open-questions.md): decided points and their history, and the open ones with their interim
+   behavior. Add new questions under Open with an interim behavior.
 
 If the ADR is ambiguous, or you believe part of it is wrong, do not deviate silently. Add an entry to `open-questions.md` with the
 question, the interim behavior you are using and a proposal, continue with the safest option, and say so in your phase summary.
@@ -27,16 +28,17 @@ question, the interim behavior you are using and a proposal, continue with the s
   attribute.
 - `[assembly: KeryxHost]` (net10.0+) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers everything with generated factory lambdas.
-- Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[PublishBehavior]`,
-  `[NotificationHandlerBehavior]`); for each kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open or
-  fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally; ordered by `Phase` (with
-  `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore` (`typeof` form, naming the class), type name. No behavior instance exists:
-  pipelines are flat link structs over a per-scope pipeline context that holds the handler and the behaviors' injected services.
+- Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
+  kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
+  kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
+  ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore` (`typeof` form, naming the class), type name. No behavior
+  instance exists: pipelines are flat link structs over a per-scope pipeline context that holds the handler and the behaviors' injected
+  services.
 - Streams: a `[StreamBehavior]` wraps the stream (Immediate.Handlers `StreamingBehavior` model with a struct `IStreamNext<TItem>` link:
   get the inner stream from `next`, re-yield it with `await foreach`).
 - Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
-  then `AggregateException`, publish behaviors (`[PublishBehavior]`, per publish) and notification handler behaviors
-  (`[NotificationHandlerBehavior]`, per handler).
+  then `AggregateException`, notification behaviors (`[NotificationBehavior]`, once per publish); handlers are called without
+  per-handler pipelines.
 - Cross-assembly: the host reads `[KeryxHandler]` types, global behavior classes and request types from references with
   `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache. A host marks request types handled
   outside it with `[assembly: ExternallyHandled(typeof(X))]`.
@@ -224,8 +226,8 @@ handlers) and `INotificationHandlerPipelineBehavior` (per handler) with all thre
 notifications, KRX037. Parallel publish exactly as the ADR's Publish strategy section defines it. Follow `open-questions.md` interim
 behavior for OQ-3, OQ-4, OQ-5, OQ-17 and OQ-18.
 
-_Note (2026-11-26): the two notification behavior interfaces become static `[PublishBehavior]` and `[NotificationHandlerBehavior]`
-behaviors in Phase 9._
+_Note (2026-11-26): in Phase 9, `INotificationPipelineBehavior` becomes the static `[NotificationBehavior]` and
+`INotificationHandlerPipelineBehavior` (per-handler pipelines) is removed._
 
 **Done when:** tests cover zero/one/many handlers, polymorphic handlers, ordering, both strategies, failures in several handlers,
 cancellation, and both behavior kinds; allocation tests show 0 B for a sequential publish and for a parallel publish with synchronous
@@ -264,69 +266,100 @@ draft until Phase 9._
 
 ### Phase 9: static behaviors
 
-Rework the behaviors built in Phases 4 to 6 into the static-behavior design the ADR now describes (open-questions "Static behaviors"
-and "Stream hook behaviors removed", 2026-11-26), and fold in the other decisions of that day. Read the ADR's Behaviors, Ordering,
-Streaming, Notifications, Host control and Performance contract sections first; they are written for this design.
+Rework the behaviors built in Phases 4 to 6 into the static-behavior design the ADR now describes (open-questions "Static behaviors",
+"Stream hook behaviors removed", "One notification behavior kind" and "Message constraint on open behavior methods", 2026-11-26), and
+fold in the other decisions of that day (OQ-8 to OQ-54; OQ-55 is open, so implement its interim). Read the ADR's Behaviors,
+Ordering, Streaming, Notifications, Host control and Performance contract sections first; they are written for this design.
 
 - **Public API.** Remove `IRequestPipelineBehavior`, `IStreamPipelineBehavior`, `IStreamHookBehavior`, `INotificationPipelineBehavior`,
   `INotificationHandlerPipelineBehavior` and the generic `RunsAfterAttribute<T>`/`RunsBeforeAttribute<T>`. Keep `INext<T>`,
-  `IStreamNext<T>`, `INext` and `Phase`. Add the kind attributes `RequestBehaviorAttribute`, `StreamBehaviorAttribute`,
-  `PublishBehaviorAttribute`, `NotificationHandlerBehaviorAttribute` and the host attribute `ExternallyHandledAttribute`
+  `IStreamNext<T>`, `INext` and `Phase`. Add the three kind attributes `RequestBehaviorAttribute`, `StreamBehaviorAttribute` and
+  `NotificationBehaviorAttribute` (no per-handler notification kind) and the host attribute `ExternallyHandledAttribute`
   (`[assembly: ExternallyHandled(typeof(X))]`, `AllowMultiple`). `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and `RunsBefore` also
   target methods. Update the public API snapshot and `KnownTypeNames`.
 - **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
   for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8).
 - **Behavior discovery and shapes.** A behavior is a non-generic `static` class with kind attributes, declaring one `static`
-  `Handle`/`HandleAsync` behavior method per kind, fully open or fully closed, with the message, `next` and an optional
-  `CancellationToken` found by type and every other parameter injected. KRX019 becomes the static-behavior shape rule; KRX013 and KRX018
-  cover behavior method parameters; KRX016 covers behavior classes and methods (public outside a host, at least `internal` and not
-  file-local in a host). Retire KRX020 (descriptor, analyzer and `AnalyzerReleases.Unshipped.md`) the way KRX010 was retired, and
-  update the `AnalyzerReleases.Unshipped.md` descriptions of KRX019 (static-behavior shape), KRX034 (injected behavior-method parameter
-  types instead of behavior constructor parameters) and KRX036 (`ExternallyHandled`).
-  KRX042 covers `[GlobalBehavior]` on a class without a kind attribute or a method that is not a behavior method.
+  `Handle`/`HandleAsync` behavior method per kind, fully open or fully closed, with the message, `next` and an optional `CancellationToken`
+  found by type and every other parameter injected. A method's kind follows from its signature (`next` constraint and message type). An open
+  method's message type parameter must be constrained to the kind's message interface (`TRequest : IRequest<TResponse>`,
+  `TRequest : IStreamRequest<TItem>`, `TNotification : INotification`); without it the method is KRX019. KRX019 becomes the static-behavior
+  shape rule; KRX013 and KRX018 cover behavior method parameters; KRX016 covers behavior classes and methods (public outside a host, at
+  least `internal` and not file-local in a host). Retire KRX020 (descriptor, analyzer and `AnalyzerReleases.Unshipped.md`) the way KRX010
+  was retired, and update the `AnalyzerReleases.Unshipped.md` descriptions of KRX019 (static-behavior shape), KRX034 (injected
+  behavior-method parameter types instead of behavior constructor parameters) and KRX036 (`ExternallyHandled`). KRX042 covers
+  `[GlobalBehavior]` on a class without a kind attribute or a method that is not a behavior method, and `[Behavior]` on a notification
+  handler method (no effect). Add KRX043 (warning, analyzer): `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` or
+  `[assembly: ExcludeBehavior]` in an assembly without `[assembly: KeryxHost]` (OQ-54), with its descriptor, help link and
+  `AnalyzerReleases.Unshipped.md` entry; update the KRX042 description there too.
 - **Matching and ordering.** `typeof(X)` names the class and resolves to its method of the target's kind; constraints are checked on the
   method's type parameters (`IMethodSymbol.Construct` does not validate them). `ExcludeBehavior` removes a class from every kind.
   The closed forms of exclusion and edges are gone. A method's `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` list and
-  `[GlobalBehavior]` override the class's for that kind (a class with both notification kinds: OQ-53, interim). KRX008 is reported once
-  per pair of behavior classes, and once per kind where a method overrides the class's ordering.
+  `[GlobalBehavior]` override the class's for that kind. KRX008 is reported once per pair of behavior classes, and once per kind where
+  a method overrides the class's ordering.
 - **Generation.** The pipeline context resolves each behavior method's injected services (with the handler parameter rules, keyed and
   optional forms included) in its constructor and holds them beside the handler; links call the static method with explicit type
   arguments and the arguments in declared order. `AddKeryx()` registers no behaviors.
 - **Streams.** Remove hook behaviors: fused hook segments, hook semantics, their emitter code and tests. Stream behaviors are
   `[StreamBehavior]` wrap behaviors only.
-- **Notifications.** `[PublishBehavior]` and `[NotificationHandlerBehavior]` replace the two interfaces. For a behavior attached to a
-  polymorphic handler, the host skips it per concrete type it does not fit and reports KRX009 only when it fits none (OQ-40).
+- **Notifications.** `[NotificationBehavior]` replaces `INotificationPipelineBehavior`: it wraps the whole publish once, also with
+  zero handlers, and is attached with `[Behavior]` on the notification type, `[assembly: Behavior]` in the notification type's assembly
+  or `[GlobalBehavior]`. Remove per-handler notification behaviors entirely: `INotificationHandlerPipelineBehavior`, the per-handler
+  pipelines and links the host emits for notification handlers, attaching behaviors from a notification handler method or from
+  `[assembly: Behavior]` in the handler's assembly, the polymorphic-handler skipping of attached behaviors, and their tests. Handlers
+  in a publish are called directly under both strategies. The handler generator writes no `Behaviors` for a notification handler, and
+  the analyzer reports KRX042 for `[Behavior]` on one (OQ-40 is moot).
 - **Host.** `ExternallyHandled` turns KRX030 off for the named type; a type the host handles or that is not a request or stream request
-  is KRX036 (OQ-10); outside a host it has no effect and nothing is reported (OQ-54, interim). KRX030 no longer skips request types
-  declared in a referenced host (OQ-16). The scan also finds behavior classes whose `[GlobalBehavior]` is on a method only, and KRX035
-  is reported for them too. KRX034 covers the injected parameter types of a referenced behavior method instead of behavior constructor
-  parameters (OQ-47). Bump `ProjectionDataVersion` for the changed projection.
+  is KRX036 (OQ-10). Outside a host, `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` have no effect and are KRX043
+  (OQ-54). KRX030 no longer skips request types declared in a referenced host (OQ-16). The scan also finds behavior classes whose
+  `[GlobalBehavior]` is on a method only, and KRX035 is reported for them too. KRX034 covers the injected parameter types of a
+  referenced behavior method instead of behavior constructor parameters (OQ-47). A `[Behavior]` on a referenced notification type that
+  does not fit the type as the host resolves it follows OQ-55's interim (skipped silently) until OQ-55 is decided. Bump
+  `ProjectionDataVersion` for the changed projection.
 - **Samples, benchmarks and README.** Rewrite the sample behaviors as static behaviors, and update `samples/hosts/README.md` and
   `samples/libraries/README.md`, which name the generic `LoggingBehavior<,>`, to the new behavior class names and descriptions. Rewrite
   the prototype in `test/Keryx.Benchmarks/Prototype` and the Keryx comparison subject with static behavior methods; drop the Keryx
   hook-behavior stream variant (OQ-51). The benchmarks workflow also runs `--filter *PipelinePrototype*` on a Linux runner with
-  `DisassemblyDiagnoser` (OQ-36). Rewrite the README to the ADR: the quick start's `AddKeryx()` sentence (it no longer registers
-  behaviors), behaviors, streaming (no hook behaviors), notifications, hosts (a host referenced by another host no longer keeps its
-  requests out of KRX030), the diagnostics table (KRX020 retired; KRX009, KRX013, KRX016, KRX018, KRX019, KRX030, KRX034, KRX036 and
-  KRX042 rewritten for static behaviors and `ExternallyHandled`), the benchmark notes about hook behaviors, and the DI dependency; then
-  grep it for the removed names (`PipelineBehavior`, `IStreamHookBehavior`, `RunsAfter<`, hook). Update `docs/whats-left.md`.
+  `DisassemblyDiagnoser` (OQ-36). Every open behavior method in the samples, the prototype and the comparison subject constrains its
+  message type parameter (KRX019). The samples and benchmarks use no notification behaviors today; if any are added, they are
+  `[NotificationBehavior]`s (attached to the notification type, per assembly or globally), never per handler. Rewrite the README to the
+  ADR: the quick start's `AddKeryx()` sentence (it no longer registers behaviors), behaviors (its table of one interface per pipeline
+  becomes the three kind attributes, with `[NotificationBehavior]` wrapping the whole publish and no row for
+  `INotificationHandlerPipelineBehavior`; examples with the message constraint; the Attaching bullet's per-target scope becomes a
+  request or stream handler method, or the notification type for a `[NotificationBehavior]`, and `[Behavior]` on a notification handler
+  method is KRX042), streaming (no hook behaviors), notifications (the bullet that says `INotificationPipelineBehavior` wraps the whole
+  publish and `INotificationHandlerPipelineBehavior` wraps each handler becomes: `[NotificationBehavior]` wraps the whole publish, also
+  with zero handlers, and handlers have no behaviors of their own), hosts (the `AddKeryx()` bullet registers no behavior types, and the
+  scoped-mediator paragraph creates only handler instances, never behavior instances; a host referenced by another host no longer keeps
+  its requests out of KRX030; the host-only attributes outside a host are KRX043), the diagnostics table (KRX020 retired; KRX009,
+  KRX013, KRX016, KRX018, KRX019, KRX030, KRX034, KRX036 and KRX042 rewritten for static behaviors, the message constraint,
+  `[Behavior]` on a notification handler and `ExternallyHandled`; KRX043 added), the benchmark notes about hook behaviors, and the DI
+  dependency; then grep it for the removed names (`PipelineBehavior`, `IStreamHookBehavior`, `PublishBehavior`,
+  `NotificationHandlerBehavior`, per-handler, per-publish, `RunsAfter<`, hook). Update `docs/whats-left.md`.
 
 **Done when:**
 
 - the five behavior interfaces and the generic ordering attributes are gone from `src/Keryx`, the public API snapshot and
-  `KnownTypeNames`; the kind attributes and `ExternallyHandledAttribute` exist, and the `KnownTypeNames` test passes;
+  `KnownTypeNames`; the three kind attributes (`RequestBehaviorAttribute`, `StreamBehaviorAttribute`, `NotificationBehaviorAttribute`)
+  and `ExternallyHandledAttribute` exist, no `PublishBehaviorAttribute` or `NotificationHandlerBehaviorAttribute` exists, and the
+  `KnownTypeNames` test passes;
 - the packed `Keryx` package lists `Microsoft.Extensions.DependencyInjection.Abstractions` in each TFM's dependency group with the
   version above;
 - KRX019 has a positive test for each shape case (class not `static`, generic class, kind attribute without a method, two methods of one
-  kind, partially open method, extra type parameter, `next` without the `struct` constraint, wrong return type, closed method whose
-  `next` does not carry the request's response) and negative tests (one class with several kinds; `Handle` and `HandleAsync` side by
-  side; a class with both notification kinds and one `INext` method, per the OQ-53 interim); KRX013, KRX016 and KRX018 have positive
-  and negative tests on behavior methods; KRX020 is no longer reported anywhere;
-- KRX009 (analyzer), KRX035 (including a global behavior marked only on a method), KRX036 for `ExcludeBehavior` and KRX042 (both new
-  cases) have positive and negative tests against static behaviors, and `[assembly: Behavior(typeof(X))]` naming a non-behavior
-  reports nothing;
-- snapshot tests of request, stream, publish and notification handler pipelines at depths 0, 1, 3 and 8 show static calls with
-  explicit type arguments, injected services held by the pipeline context, and no behavior registrations in `AddKeryx()`;
+  kind, partially open method, extra type parameter, `next` without the `struct` constraint, wrong return type, closed method whose `next`
+  does not carry the request's response, a method whose `next` constraint and message type belong to different kinds, and an open method of
+  each kind whose message type parameter lacks the kind's message constraint) and negative tests (one class with all three kinds; `Handle`
+  and `HandleAsync` side by side; an open method of each kind with the message constraint plus further constraints; a closed method, which
+  needs no message constraint); KRX013, KRX016 and KRX018 have positive and negative tests on behavior methods; KRX020 is no longer reported
+  anywhere;
+- KRX009 (analyzer), KRX035 (including a global behavior marked only on a method), KRX036 for `ExcludeBehavior` and KRX042 (the
+  `[GlobalBehavior]` cases and `[Behavior]` on a notification handler method, exact-type and polymorphic) have positive and negative
+  tests against static behaviors, and `[assembly: Behavior(typeof(X))]` naming a non-behavior reports nothing;
+- KRX043 is reported for each of `[assembly: ExternallyHandled]`, `[assembly: ExcludeHandler]` and `[assembly: ExcludeBehavior]` in
+  a library and in a contracts assembly, and not in a host;
+- snapshot tests of request, stream and publish pipelines at depths 0, 1, 3 and 8 show static calls with explicit type arguments,
+  injected services held by the pipeline context, and no behavior registrations in `AddKeryx()`; publish snapshots show the handlers
+  called directly, with no per-handler pipelines or links, under both strategies;
 - matching tests cover open and closed methods of every kind, each constraint kind and nullable annotations; ordering tests cover every
   sort rule and every KRX008 case with `typeof` edges, a method-level `[BehaviorOrder]` and `[RunsAfter]` overriding the class's for one
   kind, a two-kind class whose method overrides `[RunsAfter]` (KRX008 reported per kind), and `[GlobalBehavior]` on a method only;
@@ -335,10 +368,15 @@ Streaming, Notifications, Host control and Performance contract sections first; 
 - the Phase 5 wrap-behavior tests still pass against `[StreamBehavior]`s (re-yield, filter, map, calling `next` twice, not calling it,
   exceptions, a synchronous throw from an outermost non-iterator behavior, cancellation through both tokens with a stream behavior
   outermost); no hook code, test or benchmark variant is left (including `test/benchmark-subjects`);
+- the Phase 6 per-publish behavior tests pass against `[NotificationBehavior]`s (all three scopes, zero handlers, both strategies, an
+  exception propagating unwrapped, a synchronous throw from the outermost behavior); an `[assembly: Behavior]` naming a
+  `[NotificationBehavior]` applies in the notification type's assembly, and in an assembly that declares notification handlers but not
+  the notification type it changes no publish pipeline; no per-handler notification behavior code, test,
+  snapshot or attribute is left (`git grep` finds no `INotificationHandlerPipelineBehavior`, `NotificationHandlerBehavior` or
+  `PublishBehavior` outside `docs/`), and `[Behavior]` on a notification handler method changes no generated code;
 - host tests: `ExternallyHandled` silences KRX030 for the named type only, and is KRX036 on a handled type and on a non-request; a test
   host that references an app host reports KRX030 for an app request whose handler is internal and nothing for one whose handler is
-  public; the host reports KRX009 for a behavior attached to a polymorphic handler that fits none of its concrete types and nothing when
-  it fits some; a referenced global behavior marked only on a method is found; KRX034 reports a missing injected parameter type of a
+  public; a referenced global behavior marked only on a method is found; KRX034 reports a missing injected parameter type of a
   referenced behavior method;
 - allocation tests show 0 B per `Send` at depths 1, 3 and 8 (typed and generic) and per sequential publish, with behaviors that take
   injected services and with `async` behaviors whose work completes synchronously, on an optimized (Release) test host; stream
@@ -350,8 +388,10 @@ Streaming, Notifications, Host control and Performance contract sections first; 
 - `.github/workflows/benchmarks.yml` has a Linux job that runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser`; its output
   shows the static behavior method and `next.InvokeAsync` called directly (criterion 2), and is recorded in the new gate entry in
   `open-questions.md`;
-- the README's behavior, streaming, notification and host sections show only static behaviors, with no interfaces or hooks; its
-  diagnostics table matches the ADR (KRX020 retired; KRX009, KRX030, KRX034, KRX036 and KRX042 text updated); it mentions the
+- the README's behavior, streaming, notification and host sections show only static behaviors with the three kind attributes, open
+  methods with the message constraint, and no interfaces, hooks or per-handler notification behaviors (every hit of the grep for the
+  removed names, per-handler and per-publish included, is checked against the ADR); its diagnostics table matches the ADR (KRX020
+  retired; KRX009, KRX013, KRX016, KRX018, KRX019, KRX030, KRX034, KRX036 and KRX042 text updated; KRX043 added); it mentions the
   `Microsoft.Extensions.DependencyInjection.Abstractions` dependency; `docs/whats-left.md` is updated;
 - the samples build and run end to end, the AOT job passes, and the incremental test still passes;
 - `ProjectionDataVersion` is bumped and the incremental test shows the cache invalidated;

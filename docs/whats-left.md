@@ -12,31 +12,37 @@ changed the behavior model, so one more phase is planned. This note lists the ne
 [Phase 9 in the brief](handoff.md#phase-9-static-behaviors) reworks the code to the design the ADR now describes (a summary; the
 brief has the full list):
 
-- behaviors become `static` classes with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[PublishBehavior]`,
-  `[NotificationHandlerBehavior]`) and static `Handle`/`HandleAsync` behavior methods, replacing the five behavior interfaces; the
-  pipeline context holds the behaviors' injected services, and nothing is registered for a behavior;
+- behaviors become `static` classes with the three kind attributes (`[RequestBehavior]`, `[StreamBehavior]`,
+  `[NotificationBehavior]`) and static `Handle`/`HandleAsync` behavior methods, replacing the five behavior interfaces; an open
+  behavior method constrains its message type parameter to the kind's message interface (KRX019); the pipeline context holds the
+  behaviors' injected services, and nothing is registered for a behavior;
+- per-handler notification behaviors are removed: `[NotificationBehavior]` wraps the whole publish once, handlers are called without
+  per-handler pipelines, and `[Behavior]` on a notification handler method is KRX042;
 - stream hook behaviors and fused hook segments are removed;
 - the generic `RunsAfter<T>`/`RunsBefore<T>` and the closed forms of exclusion and edges are removed; KRX020 is retired, and KRX019,
-  KRX016, KRX013, KRX018, KRX009 (in the host per OQ-40), KRX042 and KRX034 (OQ-47) are reworked for behavior methods;
+  KRX016, KRX013, KRX018, KRX009, KRX042 and KRX034 (OQ-47) are reworked for behavior methods;
 - `[assembly: ExternallyHandled(typeof(X))]` with KRX030 and KRX036 (OQ-10), and KRX030 no longer skips request types declared in a
-  referenced host (OQ-16);
+  referenced host (OQ-16); the host-only assembly attributes outside a host are the new warning KRX043 (OQ-54);
 - the `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (OQ-8);
 - the samples, benchmarks and README are updated, the Phase 4 gate is re-run with a static prototype (and on Linux in CI with
   `DisassemblyDiagnoser`, OQ-36), and the comparison benchmarks are re-run without the hook-behavior variant.
 
 ## Decisions
 
-Every question still open in [open-questions.md](adr/open-questions.md) up to OQ-51 was decided on 2026-11-26 and folded into the ADR:
-OQ-8, OQ-9, OQ-10, OQ-15, OQ-16, OQ-17, OQ-36, OQ-40 and OQ-41 by an explicit choice, OQ-11 by the static-behavior design, OQ-21, OQ-38
+One question is open: **OQ-55** (what the host does when a `[Behavior]` on a referenced notification type no longer fits the type as the
+host resolves it; until it is decided the behavior is skipped silently). Every other question in
+[open-questions.md](adr/open-questions.md) was decided on 2026-11-26 and folded into the ADR:
+OQ-8, OQ-9, OQ-10, OQ-15, OQ-16, OQ-17, OQ-36 and OQ-41 by an explicit choice, OQ-11 by the static-behavior design, OQ-21, OQ-38
 and OQ-39 as moot (hook behaviors removed), OQ-22 as moot until the gate is re-run, OQ-37 rewritten for static behaviors, and every
-other entry as proposed.
+other entry up to OQ-51 as proposed.
 
-Three questions are left, raised while folding those decisions in:
+The owner's second round of decisions the same day settled the rest:
 
-- **OQ-52:** whether the C# 11 floor (KRX022) stays now that the generic ordering attributes, its original reason, are gone. Interim:
-  keep C# 11.
-- **OQ-53:** how a behavior class with both notification kinds declares them. Interim: its one `INext` method serves both kinds.
-- **OQ-54:** `[assembly: ExternallyHandled]` outside a host. Interim: no effect, nothing reported.
+- only one notification behavior kind remains, `[NotificationBehavior]` (was `[PublishBehavior]`); per-handler notification
+  behaviors are removed, which makes OQ-40, OQ-53 and the per-handler part of OQ-43 moot;
+- an open behavior method must constrain its message type parameter to the kind's message interface (KRX019);
+- **OQ-52:** the C# 11 floor and KRX022 stay;
+- **OQ-54:** KRX043 warns about `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` in an assembly that is not a host.
 
 ## Gates and checks
 
