@@ -32,14 +32,36 @@
     </ItemGroup>
 
     <!--
-        .NET 11's shared framework carries Microsoft.Extensions.DependencyInjection.Abstractions, so package pruning drops the reference for
-        net11.0 and the package would list no dependency there. Keep it, so every target framework's dependency group lists the package
-        (OQ-8; OQ-56 is open on whether net11.0 should list it).
+        Checks the packed dependency groups (OQ-8, OQ-56): net10.0 lists Microsoft.Extensions.DependencyInjection.Abstractions 10.0.x,
+        netstandard2.0 lists 8.0.x, and net11.0 lists nothing, because the .NET 11 shared framework carries the assembly and package pruning
+        drops the reference. Fails the pack if a later SDK prunes differently or a workaround brings the net11.0 dependency back.
     -->
-    <Target Name="_KeryxKeepDependencyInjectionAbstractions" BeforeTargets="CollectPrunePackageReferences" DependsOnTargets="AddPrunePackageReferences">
-        <ItemGroup>
-            <PrunePackageReference Remove="Microsoft.Extensions.DependencyInjection.Abstractions" />
-        </ItemGroup>
+    <Target Name="_KeryxCheckPackedDependencies" AfterTargets="GenerateNuspec" DependsOnTargets="_GetOutputItemsFromPack">
+        <PropertyGroup>
+            <_KeryxNuspec>@(_OutputPackItems->WithMetadataValue('Extension', '.nuspec')->Distinct())</_KeryxNuspec>
+            <_KeryxNuspec>$(_KeryxNuspec.Split(';')[0])</_KeryxNuspec>
+            <_KeryxDependencyGroup>//*[local-name()='dependencies']/*[local-name()='group']</_KeryxDependencyGroup>
+            <_KeryxAbstractions>*[local-name()='dependency'][@id='Microsoft.Extensions.DependencyInjection.Abstractions']/@version</_KeryxAbstractions>
+        </PropertyGroup>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net10.0']/$(_KeryxAbstractions)">
+            <Output TaskParameter="Result" PropertyName="_KeryxNet10Version" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='.NETStandard2.0']/$(_KeryxAbstractions)">
+            <Output TaskParameter="Result" PropertyName="_KeryxNetStandardVersion" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net11.0']/@targetFramework">
+            <Output TaskParameter="Result" PropertyName="_KeryxNet11Group" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net11.0']/*[local-name()='dependency']/@id">
+            <Output TaskParameter="Result" ItemName="_KeryxNet11Dependency" />
+        </XmlPeek>
+        <Error Condition="'$(_KeryxNuspec)' == '' Or !Exists('$(_KeryxNuspec)')" Text="Keryx package check: no nuspec found after GenerateNuspec." />
+        <Error Condition="!$(_KeryxNet10Version.StartsWith('10.0.'))"
+               Text="Keryx package check: the net10.0 dependency group must list Microsoft.Extensions.DependencyInjection.Abstractions 10.0.x (found '$(_KeryxNet10Version)') in $(_KeryxNuspec) (OQ-8)." />
+        <Error Condition="!$(_KeryxNetStandardVersion.StartsWith('8.0.'))"
+               Text="Keryx package check: the netstandard2.0 dependency group must list Microsoft.Extensions.DependencyInjection.Abstractions 8.0.x (found '$(_KeryxNetStandardVersion)') in $(_KeryxNuspec) (OQ-8)." />
+        <Error Condition="'$(_KeryxNet11Group)' != 'net11.0' Or '@(_KeryxNet11Dependency)' != ''"
+               Text="Keryx package check: the net11.0 dependency group must exist and be empty (found '@(_KeryxNet11Dependency)') in $(_KeryxNuspec) (OQ-56)." />
     </Target>
 
     <!--

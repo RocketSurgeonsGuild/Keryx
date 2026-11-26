@@ -34,21 +34,21 @@ CI on f54dc49 is green (build, lint, the Native AOT publish and the benchmarks D
 
 ## Decisions for the owner
 
-Three questions were raised while implementing the rework. Each is **Open** in [open-questions.md](adr/open-questions.md), and the code
-follows its interim behavior until it is decided:
+None open. The three questions raised while implementing the rework were decided by the owner on 2026-11-26 and are implemented;
+[open-questions.md](adr/open-questions.md) records them under **Decided**, folded into the ADR and the
+brief:
 
-- **OQ-56:** the .NET 11 SDK prunes `Microsoft.Extensions.DependencyInjection.Abstractions` for `net11.0`, because the shared framework
-  carries it. Interim: `Keryx.csproj` keeps it, so the `net11.0` dependency group lists it as the ADR says. Decide whether to keep that or
-  let pruning drop it and say so in the ADR.
-- **OQ-57:** (1) a referenced behavior class with several kinds is left out of every pipeline, with KRX034, when any of its behavior
-  methods injects a type the host cannot resolve; (2) a message constraint through an interface that implements the kind's message
-  interface (`where TRequest : ICommand<TResponse>`) counts. Decide whether to keep both or check per kind and require the kind's interface
-  itself.
-- **OQ-58:** an open behavior method that writes `TResponse?` (`TItem?`) in its `next` constraint, return type or message constraint is
-  KRX019, because the generated code would not compile. Decide whether to keep that and say it in the ADR, or make matching substitute the
-  annotation.
+- **OQ-56:** the `net11.0` dependency group is empty: the .NET 11 shared framework carries
+  `Microsoft.Extensions.DependencyInjection.Abstractions`, so `Keryx.csproj` lets package pruning drop it (`net10.0` and
+  `netstandard2.0` keep the package dependency); a target in `Keryx.csproj` fails the pack if the packed groups change.
+- **OQ-57:** KRX034 for a referenced behavior method that injects an unresolvable type is per kind, naming the method and its kind; the
+  class stays in the pipelines of its other kinds, and KRX035 lists a global behavior per class and kind. A message constraint through a
+  derived interface (`where TRequest : ICommand<TResponse>`) counts; one to an unrelated interface is KRX019.
+- **OQ-58:** an open behavior method may write `TResponse?` (`TItem?`): matching substitutes the annotation and checks it with
+  nullability, so it fits annotated, oblivious and value type responses and not a non-annotated reference one (skipped as a global
+  behavior, KRX009 when attached). A closed method's `next` and return type are checked with nullability the same way.
 
-Every other entry is decided and folded into the ADR.
+Every entry is decided and folded into the ADR.
 
 ## Gates and checks
 
@@ -80,7 +80,6 @@ Every other entry is decided and folded into the ADR.
 ## Before a first release
 
 - Add the `DisassemblyDiagnoser` findings from the first CI run of the `prototype-disassembly` job to OQ-36.
-- Decide OQ-56, OQ-57 and OQ-58.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.

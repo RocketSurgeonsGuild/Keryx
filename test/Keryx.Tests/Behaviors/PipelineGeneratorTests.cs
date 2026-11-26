@@ -106,12 +106,12 @@ public class PipelineGeneratorTests : HostTest
     }
 
     [Test]
-    public async Task Should_Skip_Behaviors_The_Analyzer_Rejects_For_Reach_Or_An_Annotated_Response(CancellationToken cancellationToken)
+    public async Task Should_Skip_Behaviors_Out_Of_Reach_Or_Annotated_Against_A_Non_Annotated_Response(CancellationToken cancellationToken)
     {
         // File-local behaviors (KRX016: generated code in another file cannot name them), attached, assembly and global; and open behaviors
-        // that carry 'TResponse?' in their message constraint or 'next' (KRX019), which used to reach generated code as CS8631 against
-        // a request that responds with string. None of them may appear in the mediator or the handler's manifest, and the host still
-        // compiles.
+        // that carry 'TResponse?' in their message constraint or 'next' (OQ-58), which do not fit a request that responds with a
+        // non-annotated string (the analyzer reports KRX009 for the attached one; the assembly and global ones are skipped silently) and used
+        // to reach generated code as CS8631. None of them may appear in the mediator or the handler's manifest, and the host still compiles.
         var result = await HostBuilder.AddSources(
                                            Usings
                                          + """

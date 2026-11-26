@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -22,7 +21,12 @@ internal readonly record struct BehaviorTarget(BehaviorKind Kind, ITypeSymbol Me
 ///     The method's type arguments, in declared order, with <see langword="null" /> in place of <c>TNext</c> (the generated link).
 /// </param>
 /// <param name="Services">The injected parameter types, in declared order, with the target's types substituted.</param>
-internal sealed record BehaviorMatch(BehaviorMethod Method, ImmutableArray<ITypeSymbol?> TypeArguments, ImmutableArray<ITypeSymbol> Services);
+/// <param name="ObliviousFit">
+///     Whether the method fits only because the target's response (or item) type is nullable-oblivious where the method writes it annotated
+///     (<c>TResponse?</c> against a <c>string</c> declared under <c>#nullable disable</c>, OQ-58). Generated code, which enables nullable,
+///     names that type without the annotation, so the call is emitted with nullable warnings disabled, as the oblivious declaration has them.
+/// </param>
+internal sealed record BehaviorMatch(BehaviorMethod Method, ImmutableArray<ITypeSymbol?> TypeArguments, ImmutableArray<ITypeSymbol> Services, bool ObliviousFit);
 
 /// <summary>
 ///     Decides whether a behavior class fits a target and matches its behavior method of the target's kind (ADR 0001, Matching). Keryx checks
@@ -33,7 +37,8 @@ internal static class BehaviorMatching
     /// <summary>
     ///     Matches the behavior method of <paramref name="shape" /> whose kind fits <paramref name="target" />: an open method has its message
     ///     and response (or item) type parameters substituted with the target's types and every constraint checked; a closed method's message
-    ///     and response (or item) types must be identical to the target's.
+    ///     and response (or item) types must be identical to the target's, and its <c>next</c> and return type must carry the target's response
+    ///     (or item) type with its nullability, as an open method's do after substitution.
     /// </summary>
     /// <param name="shape">The behavior class's shape (<see cref="BehaviorShapes.Analyze" />).</param>
     /// <param name="target">The target.</param>
@@ -50,37 +55,30 @@ internal static class BehaviorMatching
         }
 
         var map = new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
+        var oblivious = false;
         if (method.IsOpen)
         {
-            var parameters = ImmutableArray.CreateBuilder<ITypeParameterSymbol>();
-            var arguments = ImmutableArray.CreateBuilder<ITypeSymbol>();
-            parameters.Add((ITypeParameterSymbol)method.Message);
-            arguments.Add(target.Message);
-            if (method.Response is ITypeParameterSymbol response && target.Response is { } targetResponse)
-            {
-                parameters.Add(response);
-                arguments.Add(targetResponse);
-            }
-
-            if (!ConstraintsHold(parameters.ToImmutable(), arguments.ToImmutable(), compilation, out reason))
+            if (!TryMatchOpen(method, target, compilation, map, out oblivious, out reason))
             {
                 return false;
-            }
-
-            for (var i = 0; i < parameters.Count; i++)
-            {
-                map[parameters[i]] = arguments[i];
             }
         }
         else if (!SymbolEqualityComparer.Default.Equals(method.Message, target.Message)
               || ( method.Response is { } closedResponse
                 && target.Response is { } expectedResponse
-                && ( !SymbolEqualityComparer.Default.Equals(closedResponse, expectedResponse) || HandlerAnalysis.DiffersInNullabilityOnly(closedResponse, expectedResponse) ) ))
+                && !SymbolEqualityComparer.Default.Equals(closedResponse, expectedResponse) ))
         {
-            // Closed: identical types; assignable is not enough, and nullable annotations count when both sides are annotated.
+            // Closed: identical types; assignable is not enough.
             reason = target.Response is null
                 ? $"its {BehaviorShapes.KindName(target.Kind)} behavior method is closed over '{Display(method.Message)}', but the target needs exactly '{Display(target.Message)}'"
                 : $"its {BehaviorShapes.KindName(target.Kind)} behavior method is closed over '{Display(method.Message)}' and '{Display(method.Response)}', but the target needs exactly '{Display(target.Message)}' and '{Display(target.Response)}'";
+            return false;
+        }
+        else if (method.Response is not null
+              && target.Response is { } closedTarget
+              && !PositionsFit(method, closedTarget, map, compilation, target.Kind == BehaviorKind.Stream ? "item" : "response", out oblivious, out reason))
+        {
+            // Closed: 'next' and the return type must carry the target's response with its nullability, as for an open method (OQ-58).
             return false;
         }
 
@@ -96,9 +94,187 @@ internal static class BehaviorMatching
             }
         }
 
-        match = new(method, typeArguments, services.ToImmutable());
+        match = new(method, typeArguments, services.ToImmutable(), oblivious);
         reason = "";
         return true;
+    }
+
+    /// <summary>
+    ///     Matches an open method (ADR 0001, Matching): substitutes its message type parameter with the target's message and its response (or
+    ///     item) type parameter with the type that makes its <c>next</c> carry exactly the target's response (OQ-58): the response itself for
+    ///     a bare <c>TResponse</c>; for <c>TResponse?</c>, the response without its annotation (as C# infers it), else the response itself;
+    ///     for <c>Nullable&lt;TResponse&gt;</c>, the underlying type of a nullable value type response. Then every constraint must hold, and
+    ///     <c>next</c> and the return type, substituted with their annotations, must be the target's response with the same nullability.
+    /// </summary>
+    private static bool TryMatchOpen(
+        BehaviorMethod method,
+        BehaviorTarget target,
+        Compilation compilation,
+        Dictionary<ITypeParameterSymbol, ITypeSymbol> map,
+        out bool oblivious,
+        out string reason
+    )
+    {
+        var messageParameter = (ITypeParameterSymbol)method.Message;
+        oblivious = false;
+        if (method.ResponseParameter is not { } responseParameter || target.Response is not { } targetResponse || method.Response is not { } carried)
+        {
+            map[messageParameter] = target.Message;
+            return ConstraintsHold([messageParameter], [target.Message], compilation, out reason);
+        }
+
+        var candidates = new List<ITypeSymbol>(2);
+        if (carried is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
+        {
+            if (targetResponse is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableResponse)
+            {
+                candidates.Add(nullableResponse.TypeArguments[0]);
+            }
+        }
+        else
+        {
+            if (carried.NullableAnnotation == NullableAnnotation.Annotated && !targetResponse.IsValueType && targetResponse.NullableAnnotation == NullableAnnotation.Annotated)
+            {
+                candidates.Add(targetResponse.WithNullableAnnotation(NullableAnnotation.NotAnnotated));
+            }
+
+            candidates.Add(targetResponse);
+        }
+
+        var what = target.Kind == BehaviorKind.Stream ? "item" : "response";
+        if (candidates.Count == 0)
+        {
+            reason = $"its {BehaviorShapes.KindName(target.Kind)} behavior method's 'next' carries '{Display(carried)}', which is never the {what} type '{Display(targetResponse)}'";
+            return false;
+        }
+
+        string? firstReason = null;
+        foreach (var candidate in candidates)
+        {
+            map.Clear();
+            map[messageParameter] = target.Message;
+            map[responseParameter] = candidate;
+            if (ConstraintsHold([messageParameter, responseParameter], [target.Message, candidate], compilation, out reason)
+             && PositionsFit(method, targetResponse, map, compilation, what, out oblivious, out reason))
+            {
+                return true;
+            }
+
+            firstReason ??= reason;
+        }
+
+        map.Clear();
+        reason = firstReason!;
+        return false;
+    }
+
+    /// <summary>
+    ///     Whether the method's <c>next</c> and return type, substituted (unchanged for a closed method, whose map is empty), carry exactly
+    ///     <paramref name="response" />, nullability included (the generated link implements <c>INext&lt;TResponse&gt;</c> over it, and the
+    ///     pipeline returns it). An annotated position over an oblivious response fits with <paramref name="oblivious" /> set.
+    /// </summary>
+    private static bool PositionsFit(
+        BehaviorMethod method,
+        ITypeSymbol response,
+        IReadOnlyDictionary<ITypeParameterSymbol, ITypeSymbol> map,
+        Compilation compilation,
+        string what,
+        out bool oblivious,
+        out string reason
+    )
+    {
+        oblivious = false;
+        var positions = new List<(string Position, ITypeSymbol Type)>(2) { ("'next' carries", method.Response!) };
+        if (method.Method.ReturnType is INamedTypeSymbol { TypeArguments: [var returned] })
+        {
+            positions.Add(("return type carries", returned));
+        }
+
+        foreach (var (position, type) in positions)
+        {
+            var substituted = Substitute(type, map, compilation);
+            switch (CompareNullability(substituted, response))
+            {
+                case NullabilityFit.Exact:
+                    continue;
+                case NullabilityFit.Oblivious:
+                    oblivious = true;
+                    continue;
+                case NullabilityFit.Mismatch:
+                default:
+                    reason = map.Count == 0
+                        ? $"its {BehaviorShapes.KindName(method.Kind)} behavior method's {position} '{Display(type)}', but the target's {what} type is '{Display(response)}'"
+                        : $"its {BehaviorShapes.KindName(method.Kind)} behavior method's {position} '{Display(type)}', which is '{Display(substituted)}' for this target, but the target's {what} type is '{Display(response)}'";
+                    return false;
+            }
+        }
+
+        reason = "";
+        return true;
+    }
+
+    /// <summary>How a type the method writes, substituted, compares with the target's type, nullability included.</summary>
+    private enum NullabilityFit
+    {
+        /// <summary>Different types, or the same type with a nullability the compiler warns about.</summary>
+        Mismatch,
+
+        /// <summary>The same type and nullability (or the method's side is oblivious).</summary>
+        Exact,
+
+        /// <summary>
+        ///     The same type, but only because the target's side is oblivious where the method's is annotated: generated code, which names the
+        ///     target's type without an annotation, needs nullable warnings disabled at the call.
+        /// </summary>
+        Oblivious,
+    }
+
+    /// <summary>
+    ///     Compares <paramref name="written" /> (from the method, substituted) with <paramref name="target" /> as an identity conversion with
+    ///     nullability: every reference type position must have the same annotation, unless one side is oblivious.
+    /// </summary>
+    private static NullabilityFit CompareNullability(ITypeSymbol written, ITypeSymbol target)
+    {
+        return !SymbolEqualityComparer.Default.Equals(written, target) ? NullabilityFit.Mismatch : Compare(written, target);
+
+        static NullabilityFit Compare(ITypeSymbol written, ITypeSymbol target)
+        {
+            var result = NullabilityFit.Exact;
+            if (!written.IsValueType && written.NullableAnnotation != NullableAnnotation.None && written.NullableAnnotation != target.NullableAnnotation)
+            {
+                if (target.NullableAnnotation != NullableAnnotation.None)
+                {
+                    return NullabilityFit.Mismatch;
+                }
+
+                if (written.NullableAnnotation == NullableAnnotation.Annotated)
+                {
+                    result = NullabilityFit.Oblivious;
+                }
+            }
+
+            var (writtenArguments, targetArguments) = (written, target) switch
+            {
+                (IArrayTypeSymbol w, IArrayTypeSymbol t) => (ImmutableArray.Create(w.ElementType), ImmutableArray.Create(t.ElementType)),
+                (INamedTypeSymbol w, INamedTypeSymbol t) => (w.TypeArguments, t.TypeArguments),
+                _ => (ImmutableArray<ITypeSymbol>.Empty, ImmutableArray<ITypeSymbol>.Empty),
+            };
+            for (var i = 0; i < writtenArguments.Length && i < targetArguments.Length; i++)
+            {
+                var nested = Compare(writtenArguments[i], targetArguments[i]);
+                if (nested == NullabilityFit.Mismatch)
+                {
+                    return NullabilityFit.Mismatch;
+                }
+
+                if (nested == NullabilityFit.Oblivious)
+                {
+                    result = NullabilityFit.Oblivious;
+                }
+            }
+
+            return result;
+        }
     }
 
     /// <summary>
@@ -161,12 +337,15 @@ internal static class BehaviorMatching
                     // reference type satisfies a non-annotated type constraint only with a nullability warning (CS8631), an error in generated
                     // code; ClassifyConversion ignores nullability. A constraint that is a type parameter takes its argument's annotation; an
                     // oblivious constraint accepts anything.
+                    // The type arguments of the constraint, substituted with their annotations ('IRequest<TResponse?>' is 'IRequest<string?>'),
+                    // must match the argument's own base type or interface with nullability too (CS8631; OQ-58).
                     var constraintAnnotation = constraint is ITypeParameterSymbol ? substituted.NullableAnnotation : constraint.NullableAnnotation;
                     if (!ConvertsForConstraint(argument, substituted, compilation)
                      || ( isNullableValueType && substituted.TypeKind == TypeKind.Interface )
-                     || ( isAnnotated && argument.IsReferenceType && constraintAnnotation == NullableAnnotation.NotAnnotated ))
+                     || ( isAnnotated && argument.IsReferenceType && constraintAnnotation == NullableAnnotation.NotAnnotated )
+                     || !NestedNullabilityHolds(argument, substituted))
                     {
-                        failed = substituted.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
+                        failed = Display(substituted);
                         break;
                     }
                 }
@@ -181,6 +360,85 @@ internal static class BehaviorMatching
 
         reason = "";
         return true;
+    }
+
+    /// <summary>
+    ///     Whether the type arguments of <paramref name="constraint" /> match, with nullability, those of the base type or interface of
+    ///     <paramref name="argument" /> it converts through (the argument itself on an identity conversion), honoring <c>out</c> and <c>in</c>
+    ///     variance. An oblivious side matches anything, as the compiler treats it.
+    /// </summary>
+    private static bool NestedNullabilityHolds(ITypeSymbol argument, ITypeSymbol constraint)
+    {
+        if (constraint is not INamedTypeSymbol { IsGenericType: true } named)
+        {
+            return true;
+        }
+
+        var through = argument is INamedTypeSymbol self && SymbolEqualityComparer.Default.Equals(self.OriginalDefinition, named.OriginalDefinition)
+            ? self
+            : BaseTypesAndInterfaces(argument).FirstOrDefault(t => SymbolEqualityComparer.Default.Equals(t.OriginalDefinition, named.OriginalDefinition));
+        return through is null || ArgumentsHold(through, named);
+
+        static IEnumerable<INamedTypeSymbol> BaseTypesAndInterfaces(ITypeSymbol type)
+        {
+            for (var current = type.BaseType; current is not null; current = current.BaseType)
+            {
+                yield return current;
+            }
+
+            foreach (var @interface in type.AllInterfaces)
+            {
+                yield return @interface;
+            }
+
+            if (type is ITypeParameterSymbol parameter)
+            {
+                foreach (var constraintType in parameter.ConstraintTypes.OfType<INamedTypeSymbol>())
+                {
+                    yield return constraintType;
+                }
+            }
+        }
+
+        static bool ArgumentsHold(INamedTypeSymbol have, INamedTypeSymbol want)
+        {
+            var parameters = want.OriginalDefinition.TypeParameters;
+            for (var i = 0; i < want.TypeArguments.Length && i < have.TypeArguments.Length; i++)
+            {
+                // The compiler treats IEquatable<T> as contravariant for nullability ('string' implements IEquatable<string?>).
+                var variance = IsEquatable(want) ? VarianceKind.In : i < parameters.Length ? parameters[i].Variance : VarianceKind.None;
+                if (!Holds(have.TypeArguments[i], want.TypeArguments[i], variance))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        static bool IsEquatable(INamedTypeSymbol type) =>
+            type is { Name: "IEquatable", Arity: 1, ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } };
+
+        static bool Holds(ITypeSymbol have, ITypeSymbol want, VarianceKind variance)
+        {
+            if (!have.IsValueType
+             && have.NullableAnnotation != NullableAnnotation.None
+             && want.NullableAnnotation != NullableAnnotation.None
+             && have.NullableAnnotation != want.NullableAnnotation)
+            {
+                // Covariant: a non-annotated argument converts to an annotated one; contravariant: the reverse.
+                var widening = have.NullableAnnotation == NullableAnnotation.NotAnnotated;
+                if (!( variance == VarianceKind.Out && widening ) && !( variance == VarianceKind.In && !widening ))
+                {
+                    return false;
+                }
+            }
+
+            return have is not INamedTypeSymbol { IsGenericType: true } haveNamed
+                || want is not INamedTypeSymbol { IsGenericType: true } wantNamed
+                || !SymbolEqualityComparer.Default.Equals(haveNamed.OriginalDefinition, wantNamed.OriginalDefinition)
+                || ArgumentsHold(haveNamed, wantNamed);
+        }
     }
 
     /// <summary>
@@ -235,13 +493,18 @@ internal static class BehaviorMatching
     }
 
     /// <summary>
-    ///     Replaces type parameters in a constraint type with the target's types, keeping nullable annotations. A type nested in a generic type
-    ///     (<c>Outer&lt;T&gt;.Inner</c>) is rebuilt from its substituted containing type.
+    ///     Replaces type parameters in a constraint type with the target's types, keeping nullable annotations: where the method writes
+    ///     <c>T?</c> on an unconstrained or reference type parameter, the substituted reference type is annotated (<c>string?</c>), and a
+    ///     value type stays as it is (<c>int</c>; OQ-58). A type nested in a generic type (<c>Outer&lt;T&gt;.Inner</c>) is rebuilt from its
+    ///     substituted containing type.
     /// </summary>
     internal static ITypeSymbol Substitute(ITypeSymbol type, IReadOnlyDictionary<ITypeParameterSymbol, ITypeSymbol> map, Compilation compilation) =>
         type switch
         {
-            ITypeParameterSymbol parameter when map.TryGetValue(parameter, out var argument) => argument,
+            ITypeParameterSymbol parameter when map.TryGetValue(parameter, out var argument) =>
+                parameter.NullableAnnotation == NullableAnnotation.Annotated && !argument.IsValueType
+                    ? argument.WithNullableAnnotation(NullableAnnotation.Annotated)
+                    : argument,
             IArrayTypeSymbol array => ( array.Rank == 1
                     ? compilation.CreateArrayTypeSymbol(Substitute(array.ElementType, map, compilation))
                     : compilation.CreateArrayTypeSymbol(Substitute(array.ElementType, map, compilation), array.Rank) )

@@ -200,7 +200,7 @@ public class CrossAssemblyTests : HostTest
         var result = await GenerateAsync(Host, cancellationToken);
 
         await Assert.That(Diagnostics(result))
-                    .IsEquivalentTo(["KRX035: Global behavior 'Journaled' from assembly 'Orders' applies in this host"]);
+                    .IsEquivalentTo(["KRX035: Global request behavior 'Journaled' from assembly 'Orders' applies in this host"]);
         // The referenced global has no source location, so it is reported on [assembly: KeryxHost].
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
     }
@@ -629,7 +629,7 @@ public class CrossAssemblyTests : HostTest
     public async Task KRX034_For_A_Referenced_Global_Behavior_Whose_Method_Injects_An_Unreferenced_Type(CancellationToken cancellationToken)
     {
         // The behavior itself resolves, but the pipeline context would name its behavior method's injected parameter type (OQ-47): it is
-        // left out, so the generated code compiles, and KRX035 does not list it.
+        // left out of the request pipelines, the kind of that method (OQ-57), so the generated code compiles, and KRX035 does not list it.
         var infra = TestLibraries.Reference("Infra", "namespace Infra; public interface ILog { }");
         var library = TestLibraries.Reference(
             "Lib",
@@ -666,12 +666,239 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(
                          [
-                             "KRX034: Type 'Infra.ILog', which the Keryx manifest of 'Lib' needs, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
+                             "KRX034: Type 'Infra.ILog', which the request behavior method 'Logged.Handle' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
                          ]
                      );
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Logged");
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).Contains("Send(global::Lib.Ping request");
+    }
+
+    [Test]
+    public async Task KRX034_Is_Per_Kind_And_The_Other_Kinds_Of_The_Class_Still_Apply(CancellationToken cancellationToken)
+    {
+        // OQ-57: a referenced global behavior with a request and a stream behavior method, where only the request method injects a type the
+        // host cannot resolve. KRX034 names that method and its kind; the class stays in the stream pipelines, and KRX035 lists it for the
+        // stream kind only.
+        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
+        const string librarySource = """
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Keryx;
+
+            namespace Lib;
+
+            public static class Log
+            {
+                public static readonly List<string> Entries = [];
+            }
+
+            public sealed record Ping : IRequest<int>;
+
+            public static partial class PingHandler
+            {
+                private static int Handle(Ping request) => 1;
+            }
+
+            public sealed record Numbers : IStreamRequest<int>;
+
+            public static partial class NumbersHandler
+            {
+                private static async IAsyncEnumerable<int> Handle(Numbers request)
+                {
+                    await Task.Yield();
+                    yield return 7;
+                }
+            }
+
+            [RequestBehavior]
+            [StreamBehavior]
+            [GlobalBehavior]
+            public static class Split
+            {
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, Infra.ILog log, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
+                    next.InvokeAsync(cancellationToken);
+
+                public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem>
+                {
+                    Log.Entries.Add("split " + typeof(TRequest).Name);
+                    return next.InvokeAsync(cancellationToken);
+                }
+            }
+            """;
+        var library = TestLibraries.Image("Lib", librarySource, [MetadataReference.CreateFromImage(infra)]);
+
+        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
+        await Assert.That(Diagnostics(result).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX034: Type 'Infra.ILog', which the request behavior method 'Split.Handle' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
+                             "KRX035: Global stream behavior 'Split' from assembly 'Lib' applies in this host",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+        await AssertOnHostAttributeAsync(HostDiagnostics(result));
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).DoesNotContain("global::Lib.Split.Handle<");
+        await Assert.That(mediator).Contains("global::Lib.Split.HandleAsync<global::Lib.Numbers, int, ");
+
+        // The generated code compiles (KRX034 is the generator's error, not the compiler's), and the stream kind runs.
+        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        await using var provider = BuildProvider(host);
+        await using var scope = provider.CreateAsyncScope();
+        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
+        await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
+        var items = new List<int>();
+        await foreach (var item in mediatorService.Stream((IStreamRequest<int>)Create(lib, "Lib.Numbers"), cancellationToken))
+        {
+            items.Add(item);
+        }
+
+        await Assert.That(items).IsEquivalentTo([7]);
+        var entries = (List<string>)lib.GetType("Lib.Log", throwOnError: true)!.GetField("Entries")!.GetValue(null)!;
+        await Assert.That(entries).IsEquivalentTo(["split Numbers"]);
+    }
+
+    /// <summary>
+    ///     A library whose two-kind behavior class <c>Split</c> injects <c>Infra.ILog</c> only in its stream behavior method, with a request
+    ///     handler and a stream handler. <paramref name="attach" /> goes before both handlers; <paramref name="assemblyAttributes" /> before
+    ///     the namespace.
+    /// </summary>
+    private static string SplitLibrary(string assemblyAttributes, string attach) =>
+        $$"""
+        using System.Collections.Generic;
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Keryx;
+
+        {{assemblyAttributes}}
+
+        namespace Lib;
+
+        public static class Log
+        {
+            public static readonly List<string> Entries = [];
+        }
+
+        public sealed record Ping : IRequest<int>;
+
+        public static partial class PingHandler
+        {
+            {{attach}}
+            private static int Handle(Ping request) => 1;
+        }
+
+        public sealed record Numbers : IStreamRequest<int>;
+
+        public static partial class NumbersHandler
+        {
+            {{attach}}
+            private static async IAsyncEnumerable<int> Handle(Numbers request)
+            {
+                await Task.Yield();
+                yield return 7;
+            }
+        }
+
+        [RequestBehavior]
+        [StreamBehavior]
+        public static class Split
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Log.Entries.Add("split " + typeof(TRequest).Name);
+                return next.InvokeAsync(cancellationToken);
+            }
+
+            public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next, Infra.ILog log, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem> =>
+                next.InvokeAsync(cancellationToken);
+        }
+        """;
+
+    private const string SplitKrx034 =
+        "KRX034: Type 'Infra.ILog', which the stream behavior method 'Split.HandleAsync' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'";
+
+    [Test]
+    public async Task KRX034_For_An_Attached_Two_Kind_Behavior_Leaves_Out_Only_The_Handler_Of_The_Unresolvable_Kind(CancellationToken cancellationToken)
+    {
+        // OQ-57: an attached behavior is checked for the kind of the handler it is attached to. The request handler keeps Split (its request
+        // method resolves); the stream handler, whose Split method injects a type the host cannot resolve, is left out, with one KRX034.
+        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
+        var library = TestLibraries.Image("Lib", SplitLibrary("", "[Behavior(typeof(Split))]"), [MetadataReference.CreateFromImage(infra)]);
+
+        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
+        await Assert.That(Diagnostics(result).Where(static d => d.StartsWith("KRX034", StringComparison.Ordinal))).IsEquivalentTo([SplitKrx034]);
+        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Lib.Split.Handle<global::Lib.Ping, int, ");
+        await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
+        await Assert.That(mediator).DoesNotContain("global::Lib.Numbers");
+
+        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        await using var provider = BuildProvider(host);
+        await using var scope = provider.CreateAsyncScope();
+        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
+        await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
+        var entries = (List<string>)lib.GetType("Lib.Log", throwOnError: true)!.GetField("Entries")!.GetValue(null)!;
+        await Assert.That(entries).IsEquivalentTo(["split Ping"]);
+    }
+
+    [Test]
+    public async Task KRX034_For_A_Referenced_Assembly_Behavior_Is_Per_Kind_And_Reported_Once(CancellationToken cancellationToken)
+    {
+        // OQ-57: an [assembly: Behavior] class is checked for every kind it carries, once (the manifest loop and the catalog's skipped methods
+        // both see it). Its request kind stays in the library's request pipelines; the stream handler runs without it.
+        var infra = TestLibraries.Image("Infra", "namespace Infra; public interface ILog { }");
+        var library = TestLibraries.Image("Lib", SplitLibrary("[assembly: Behavior(typeof(Lib.Split))]", ""), [MetadataReference.CreateFromImage(infra)]);
+
+        var result = await HostBuilder.AddReferences(MetadataReference.CreateFromImage(library))
+                                      .AddSources(Usings + "[assembly: KeryxHost]\nnamespace Sample;")
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
+        await Assert.That(Diagnostics(result).Where(static d => d.StartsWith("KRX034", StringComparison.Ordinal))).IsEquivalentTo([SplitKrx034]);
+        await AssertOnHostAttributeAsync(HostDiagnostics(result).Where(static d => d.Id == "KRX034"));
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Lib.Split.Handle<global::Lib.Ping, int, ");
+        await Assert.That(mediator).DoesNotContain("global::Lib.Split.HandleAsync<");
+
+        var host = LoadHost(result, new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["Lib"] = library, ["Infra"] = infra }, cancellationToken);
+        await using var provider = BuildProvider(host);
+        await using var scope = provider.CreateAsyncScope();
+        var lib = AssemblyLoadContext.GetLoadContext(host)!.LoadFromAssemblyName(new("Lib"));
+        var mediatorService = scope.ServiceProvider.GetRequiredService<IMediator>();
+        await Assert.That(await mediatorService.Send((IRequest<int>)Create(lib, "Lib.Ping"), cancellationToken)).IsEqualTo(1);
+        var items = new List<int>();
+        await foreach (var item in mediatorService.Stream((IStreamRequest<int>)Create(lib, "Lib.Numbers"), cancellationToken))
+        {
+            items.Add(item);
+        }
+
+        await Assert.That(items).IsEquivalentTo([7]);
+        var entries = (List<string>)lib.GetType("Lib.Log", throwOnError: true)!.GetField("Entries")!.GetValue(null)!;
+        await Assert.That(entries).IsEquivalentTo(["split Ping"]);
     }
 
     [Test]
@@ -710,7 +937,7 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(Diagnostics(result))
                     .IsEquivalentTo(
                          [
-                             "KRX034: Type 'Infra.ILog', which the Keryx manifest of 'Lib' needs, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
+                             "KRX034: Type 'Infra.ILog', which the notification behavior method 'Audited.Handle' from assembly 'Lib' injects, cannot be resolved or is not accessible from this host; reference assembly 'Infra'",
                          ]
                      );
         await AssertOnHostAttributeAsync(HostDiagnostics(result));
@@ -986,7 +1213,7 @@ public class CrossAssemblyTests : HostTest
                                       .GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
-        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX035: Global behavior 'MethodOnly' from assembly 'Lib' applies in this host"]);
+        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX035: Global request behavior 'MethodOnly' from assembly 'Lib' applies in this host"]);
         var mediator = Source(result, HostEmitter.MediatorHintName);
         // Only its request kind is global: the host's stream request does not get its stream behavior method.
         await Assert.That(mediator).Contains("global::Lib.MethodOnly.Handle<global::Lib.Ping, int, ");

@@ -10,7 +10,9 @@ namespace Keryx.Tests.Behaviors;
 ///     <c>unmanaged</c>, <c>new()</c> (including <c>required</c> members), <c>notnull</c>, interface and base-class type constraints (identity, implicit reference and boxing
 ///     conversions count; user-defined conversions, nullable value types and annotated reference types against a non-annotated constraint do
 ///     not), constraint types nested in generic types, a constraint that mentions another type parameter, all checked on the type parameters
-///     of an open behavior method; and closed behavior methods, which must be closed over exactly the target's types.
+///     of an open behavior method; and closed behavior methods, which must be closed over exactly the target's types. Open methods that write
+///     the response or item type parameter annotated (<c>TResponse?</c>, OQ-58) fit annotated, oblivious and value type responses, with the
+///     substituted nullability checked against the target, and not a non-annotated reference response.
 /// </summary>
 public class BehaviorMatchingTests
 {
@@ -83,6 +85,21 @@ public class BehaviorMatchingTests
         [RequestBehavior] public static class AnnotatedConstraint { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }
         [RequestBehavior] public static class AnnotatedNext { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }
         [StreamBehavior] public static class AnnotatedStreamNext { public static System.Collections.Generic.IAsyncEnumerable<TItem?> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem> where TNext : struct, IStreamNext<TItem?> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class MaybeB { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class MaybeClassB { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TResponse : class where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class MaybeStructB { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TResponse : struct where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }
+        [StreamBehavior] public static class MaybeStreamB { public static System.Collections.Generic.IAsyncEnumerable<TItem?> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem?> where TNext : struct, IStreamNext<TItem?> => n.InvokeAsync(c); }
+        public sealed record SString : IStreamRequest<string>;
+        public sealed record SNullableString : IStreamRequest<string?>;
+        public sealed record SInt : IStreamRequest<int>;
+        #nullable disable
+        public sealed record ROblivious : IRequest<string>;
+        public sealed record SOblivious : IStreamRequest<string>;
+        #nullable enable
+        [RequestBehavior] public static class ClosedObliviousB { public static ValueTask<string?> Handle<TNext>(ROblivious r, TNext n, CancellationToken c) where TNext : struct, INext<string?> => n.InvokeAsync(c); }
+        [RequestBehavior] public static class ClosedReturnB { public static async ValueTask<string?> Handle<TNext>(RString r, TNext n, CancellationToken c) where TNext : struct, INext<string> => await n.InvokeAsync(c); }
+        [StreamBehavior] public static class ClosedStreamObliviousB { public static System.Collections.Generic.IAsyncEnumerable<string?> Handle<TNext>(SOblivious r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string?> => n.InvokeAsync(c); }
+        [StreamBehavior] public static class ClosedStreamReturnB { public static System.Collections.Generic.IAsyncEnumerable<string?> Handle<TNext>(SString r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); }
         [StreamBehavior] public static class StreamOnly { public static System.Collections.Generic.IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem> where TNext : struct, IStreamNext<TItem> => n.InvokeAsync(c); }
         """;
 
@@ -173,19 +190,98 @@ public class BehaviorMatchingTests
     }
 
     [Test]
-    [Arguments("AnnotatedConstraint")]
-    [Arguments("AnnotatedNext")]
-    [Arguments("AnnotatedStreamNext")]
-    public async Task An_Open_Method_That_Annotates_Its_Response_Type_Parameter_Is_Rejected(string behaviorName)
+    [Arguments("MaybeB", "RString", false, "", false)]
+    [Arguments("MaybeB", "RNullableString", true, "string", false)]
+    [Arguments("MaybeB", "ROblivious", true, "string", true)]
+    [Arguments("MaybeB", "RInt", true, "int", false)]
+    [Arguments("MaybeB", "RNullableInt", true, "int?", false)]
+    [Arguments("MaybeClassB", "RString", false, "", false)]
+    [Arguments("MaybeClassB", "RNullableString", true, "string", false)]
+    [Arguments("MaybeClassB", "ROblivious", true, "string", true)]
+    [Arguments("MaybeClassB", "RInt", false, "", false)]
+    [Arguments("MaybeStructB", "RNullableInt", true, "int", false)]
+    [Arguments("MaybeStructB", "RInt", false, "", false)]
+    [Arguments("MaybeStructB", "RNullableString", false, "", false)]
+    [Arguments("AnnotatedConstraint", "RString", false, "", false)]
+    [Arguments("AnnotatedConstraint", "RNullableString", true, "string?", false)]
+    [Arguments("AnnotatedConstraint", "ROblivious", true, "string", false)]
+    [Arguments("AnnotatedConstraint", "RInt", true, "int", false)]
+    [Arguments("AnnotatedNext", "RString", false, "", false)]
+    [Arguments("AnnotatedNext", "RNullableString", true, "string?", false)]
+    [Arguments("AnnotatedNext", "ROblivious", true, "string", true)]
+    [Arguments("AnnotatedNext", "RInt", true, "int", false)]
+    [Arguments("MaybeStreamB", "SString", false, "", false)]
+    [Arguments("MaybeStreamB", "SNullableString", true, "string", false)]
+    [Arguments("MaybeStreamB", "SOblivious", true, "string", true)]
+    [Arguments("MaybeStreamB", "SInt", true, "int", false)]
+    [Arguments("AnnotatedStreamNext", "SString", false, "", false)]
+    [Arguments("AnnotatedStreamNext", "SNullableString", true, "string?", false)]
+    public async Task An_Open_Method_That_Annotates_Its_Response_Type_Parameter_Matches_With_Nullability(
+        string behavior,
+        string request,
+        bool fits,
+        string responseArgument,
+        bool oblivious
+    )
     {
-        // IRequest<TResponse?> or INext<TResponse?> (IStreamNext<TItem?>) for a request that responds with string would be a nullability error
-        // in generated code (IRequest<> and INext<> are invariant), so the shape is KRX019 and never matches.
-        var compilation = DirectCompilation.Create(Source);
-        var symbols = KeryxSymbols.Create(compilation)!;
-        var issues = new IssueCollector();
+        // OQ-58: 'TResponse?' is substituted where the method writes it and checked, with its nullability, against the target: an annotated,
+        // oblivious or value type response fits; a non-annotated reference response does not (IRequest<> and INext<> are invariant).
+        var (fitted, reason, typeArguments, obliviousFit) = MatchWithFlags(behavior, request);
 
-        await Assert.That(BehaviorShapes.Analyze(compilation.GetTypeByMetadataName("Sample." + behaviorName)!, symbols, issues)).IsNull();
-        await Assert.That(issues.Issues.Select(static i => i.Descriptor.Id)).IsEquivalentTo(["KRX019"]);
+        await Assert.That(fitted).IsEqualTo(fits).Because(reason);
+        if (fits)
+        {
+            await Assert.That(typeArguments).IsEqualTo($"global::Sample.{request}, {responseArgument}, ");
+            await Assert.That(obliviousFit).IsEqualTo(oblivious);
+        }
+        else
+        {
+            await Assert.That(reason).IsNotEmpty();
+        }
+    }
+
+    [Test]
+    [Arguments("ClosedB", "RString", true, false)]
+    [Arguments("ClosedObliviousB", "ROblivious", true, true)]
+    [Arguments("ClosedReturnB", "RString", false, false)]
+    [Arguments("ClosedStreamObliviousB", "SOblivious", true, true)]
+    [Arguments("ClosedStreamReturnB", "SString", false, false)]
+    public async Task A_Closed_Method_Matches_Its_Next_And_Return_Type_With_Nullability(string behavior, string request, bool fits, bool oblivious)
+    {
+        // A closed method's 'next' and return type are checked with nullability against the target, as an open method's are after
+        // substitution (OQ-58): an annotated position over an oblivious response fits (called with nullable warnings disabled), and an
+        // annotated return type over a non-annotated reference response does not (CS8619 in the generated entry point).
+        var (fitted, reason, _, obliviousFit) = MatchWithFlags(behavior, request);
+
+        await Assert.That(fitted).IsEqualTo(fits).Because(reason);
+        await Assert.That(obliviousFit).IsEqualTo(oblivious);
+        if (!fits)
+        {
+            await Assert.That(reason)
+                        .IsEqualTo(
+                             request.StartsWith('S')
+                                 ? "its stream behavior method's return type carries 'string?', but the target's item type is 'string'"
+                                 : "its request behavior method's return type carries 'string?', but the target's response type is 'string'"
+                         );
+        }
+    }
+
+    [Test]
+    public async Task A_Non_Annotated_Reference_Response_Names_The_Annotated_Position()
+    {
+        // The message constraint is checked first, with its substituted nullability; then 'next' and the return type.
+        var (fitted, reason, _, _) = MatchWithFlags("MaybeClassB", "RString");
+        await Assert.That(fitted).IsFalse();
+        await Assert.That(reason).IsEqualTo("'RString' does not satisfy the constraint 'TRequest : IRequest<string?>'");
+
+        (fitted, reason, _, _) = MatchWithFlags("AnnotatedNext", "RString");
+        await Assert.That(fitted).IsFalse();
+        await Assert.That(reason)
+                    .IsEqualTo("its request behavior method's 'next' carries 'TResponse?', which is 'string?' for this target, but the target's response type is 'string'");
+
+        (fitted, reason, _, _) = MatchWithFlags("MaybeStructB", "RInt");
+        await Assert.That(fitted).IsFalse();
+        await Assert.That(reason).IsEqualTo("its request behavior method's 'next' carries 'TResponse?', which is never the response type 'int'");
     }
 
     [Test]
@@ -208,6 +304,12 @@ public class BehaviorMatchingTests
 
     private static (bool Fits, string Reason, string TypeArguments) Match(string behaviorName, string requestName)
     {
+        var (fits, reason, typeArguments, _) = MatchWithFlags(behaviorName, requestName);
+        return (fits, reason, typeArguments);
+    }
+
+    private static (bool Fits, string Reason, string TypeArguments, bool Oblivious) MatchWithFlags(string behaviorName, string requestName)
+    {
         var compilation = DirectCompilation.Create(Source);
         var errors = compilation.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Error).ToArray();
         if (errors.Length > 0)
@@ -219,9 +321,10 @@ public class BehaviorMatchingTests
         var behavior = compilation.GetTypeByMetadataName("Sample." + behaviorName)!;
         var shape = BehaviorShapes.Analyze(behavior, symbols, new IssueCollector()) ?? throw new InvalidOperationException(behaviorName + " is not a valid behavior");
         var request = compilation.GetTypeByMetadataName("Sample." + requestName)!;
-        var response = MessageType.Classify(request, symbols).ResponseType!;
+        var classified = MessageType.Classify(request, symbols);
+        var target = classified.IsStream ? new BehaviorTarget(BehaviorKind.Stream, request, classified.ItemType) : new BehaviorTarget(BehaviorKind.Request, request, classified.ResponseType);
 
-        var fits = BehaviorMatching.TryMatch(shape, new(BehaviorKind.Request, request, response), compilation, out var match, out var reason);
-        return (fits, reason, fits ? string.Concat(match.TypeArguments.Select(static t => t is null ? "" : CSharpText.Type(t) + ", ")) : "");
+        var fits = BehaviorMatching.TryMatch(shape, target, compilation, out var match, out var reason);
+        return (fits, reason, fits ? string.Concat(match.TypeArguments.Select(static t => t is null ? "" : CSharpText.Type(t) + ", ")) : "", fits && match.ObliviousFit);
     }
 }

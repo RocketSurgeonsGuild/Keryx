@@ -43,8 +43,13 @@ internal enum BehaviorParameterRole
 /// <param name="Next">The <c>TNext</c> type parameter.</param>
 /// <param name="Message">The message type: the message type parameter of an open method, the concrete type of a closed one.</param>
 /// <param name="Response">
-///     The response (request) or item (stream) type: a type parameter of an open method, the concrete type of a closed one;
-///     <see langword="null" /> for a notification behavior method.
+///     The response (request) or item (stream) type as its <c>next</c> carries it: for an open method, its response type parameter, bare
+///     (<c>TResponse</c>), annotated (<c>TResponse?</c>, OQ-58) or, when it is constrained to <c>struct</c>, <c>Nullable&lt;TResponse&gt;</c>;
+///     the concrete type of a closed one; <see langword="null" /> for a notification behavior method.
+/// </param>
+/// <param name="ResponseParameter">
+///     The response (or item) type parameter of an open request or stream method, which <paramref name="Response" /> carries; otherwise
+///     <see langword="null" />.
 /// </param>
 /// <param name="Roles">What each parameter receives, in declared order.</param>
 internal sealed record BehaviorMethod(
@@ -53,6 +58,7 @@ internal sealed record BehaviorMethod(
     ITypeParameterSymbol Next,
     ITypeSymbol Message,
     ITypeSymbol? Response,
+    ITypeParameterSymbol? ResponseParameter,
     ImmutableArray<BehaviorParameterRole> Roles
 )
 {
@@ -417,13 +423,15 @@ internal static class BehaviorShapes
         var response = next.Argument;
         var others = method.TypeParameters.Where(t => !SymbolEqualityComparer.Default.Equals(t, nextParameter)).ToList();
         ITypeSymbol? responseType;
+        ITypeParameterSymbol? openResponse = null;
         if (message.Type is ITypeParameterSymbol messageParameter)
         {
-            // Fully open: the message and the response (or item) are type parameters of the method, and nothing else is.
+            // Fully open: the message and the response (or item) are type parameters of the method, and nothing else is. 'next' may carry
+            // the response type parameter annotated, 'TResponse?' (OQ-58), which is Nullable<TResponse> when it is constrained to struct.
             others.Remove(messageParameter);
             if (methodKind != BehaviorKind.Notification)
             {
-                if (response is not ITypeParameterSymbol { TypeParameterKind: TypeParameterKind.Method } responseParameter
+                if (ResponseParameterOf(response) is not { } responseParameter
                  || SymbolEqualityComparer.Default.Equals(responseParameter, messageParameter))
                 {
                     problems.Add(
@@ -433,6 +441,7 @@ internal static class BehaviorShapes
                 }
 
                 others.Remove(responseParameter);
+                openResponse = responseParameter;
             }
 
             if (others.Count > 0)
@@ -447,22 +456,14 @@ internal static class BehaviorShapes
             {
                 problems.Add(
                     constrainedTo == methodKind
-                        ? $"has an open message type parameter '{messageParameter.Name}' without the {KindName(methodKind)} message constraint; add '{MessageConstraint(methodKind, messageParameter.Name, response?.Name)}'"
+                        ? $"has an open message type parameter '{messageParameter.Name}' without the {KindName(methodKind)} message constraint; add '{MessageConstraint(methodKind, messageParameter.Name, response is null ? null : Display(response))}'"
                         : $"has a 'next' constraint and a message type of different kinds: '{messageParameter.Name}' is constrained to a {KindName(constrainedTo)} message, but its 'next' is {NextName(methodKind)}"
                 );
                 valid = false;
             }
 
-            // The generated link implements INext<TResponse> over the target's exact response, and IRequest<> and INext<> are invariant, so an
-            // annotated 'TResponse?' in 'next', the return type or the message constraint would be a nullability error in generated code.
-            if (response is ITypeParameterSymbol responseTypeParameter && AnnotatesResponse(method, messageParameter, responseTypeParameter, methodKind, symbols))
-            {
-                problems.Add(
-                    $"carries its {( methodKind == BehaviorKind.Stream ? "item" : "response" )} type parameter as '{responseTypeParameter.Name}?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter '{responseTypeParameter.Name}', not '{responseTypeParameter.Name}?'"
-                );
-                valid = false;
-            }
-
+            // 'TResponse?' in 'next', the return type or the message constraint is allowed (OQ-58): matching substitutes the annotated type
+            // there and checks it, with its nullability, against the target.
             responseType = response;
         }
         else
@@ -596,7 +597,7 @@ internal static class BehaviorShapes
             }
         }
 
-        return valid ? new(method, methodKind, nextParameter, message.Type, responseType, roles.MoveToImmutable()) : null;
+        return valid ? new(method, methodKind, nextParameter, message.Type, responseType, openResponse, roles.MoveToImmutable()) : null;
     }
 
     /// <summary>
@@ -633,38 +634,16 @@ internal static class BehaviorShapes
     }
 
     /// <summary>
-    ///     Whether an open request or stream method carries its response (or item) type parameter annotated (<c>TResponse?</c>) in its
-    ///     <c>next</c> constraint, its return type or its message constraint.
+    ///     The response (or item) type parameter a <c>next</c> argument carries: a method type parameter, bare or annotated, or
+    ///     <c>Nullable&lt;T&gt;</c> of one (<c>TResponse?</c> on a type parameter constrained to <c>struct</c>, OQ-58).
     /// </summary>
-    private static bool AnnotatesResponse(IMethodSymbol method, ITypeParameterSymbol message, ITypeParameterSymbol response, BehaviorKind kind, KeryxSymbols symbols)
-    {
-        if (kind == BehaviorKind.Notification)
+    internal static ITypeParameterSymbol? ResponseParameterOf(ITypeSymbol? response) =>
+        response switch
         {
-            return false;
-        }
-
-        if (response.NullableAnnotation == NullableAnnotation.Annotated
-         || ( method.ReturnType is INamedTypeSymbol { TypeArguments: [var returned] } && IsAnnotated(returned) ))
-        {
-            return true;
-        }
-
-        foreach (var constraint in message.ConstraintTypes)
-        {
-            foreach (var candidate in constraint.AllInterfaces.Prepend(constraint as INamedTypeSymbol).OfType<INamedTypeSymbol>())
-            {
-                if (( KeryxSymbols.Is(candidate, symbols.RequestOfT) || KeryxSymbols.Is(candidate, symbols.StreamRequest) ) && IsAnnotated(candidate.TypeArguments[0]))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-
-        bool IsAnnotated(ITypeSymbol type) =>
-            type.NullableAnnotation == NullableAnnotation.Annotated && SymbolEqualityComparer.Default.Equals(type, response);
-    }
+            ITypeParameterSymbol { TypeParameterKind: TypeParameterKind.Method } parameter => parameter,
+            INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T, TypeArguments: [ITypeParameterSymbol { TypeParameterKind: TypeParameterKind.Method } parameter] } => parameter,
+            _ => null,
+        };
 
     private static bool ReturnsKindType(ITypeSymbol returnType, BehaviorKind kind, ITypeSymbol? response, KeryxSymbols symbols) =>
         kind switch

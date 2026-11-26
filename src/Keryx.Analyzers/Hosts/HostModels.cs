@@ -94,6 +94,10 @@ internal sealed record HostNotificationModel(
 /// <param name="Services">Its injected parameters, in declared order, resolved like a handler's injected parameters.</param>
 /// <param name="Assembly">The assembly that declares it.</param>
 /// <param name="InSource">Whether it is declared in the host's own source (KRX008 for in-source pairs is the analyzer's).</param>
+/// <param name="ObliviousFit">
+///     Whether the method fits only through a nullable-oblivious response (or item) type where it writes <c>TResponse?</c> (OQ-58), so its
+///     call is emitted with nullable warnings disabled.
+/// </param>
 internal sealed record PipelineBehaviorModel(
     string Class,
     string Identity,
@@ -107,7 +111,8 @@ internal sealed record PipelineBehaviorModel(
     EquatableArray<BehaviorEdgeModel> Edges,
     EquatableArray<ServiceParameterModel> Services,
     string Assembly,
-    bool InSource
+    bool InSource,
+    bool ObliviousFit
 )
 {
     /// <summary>What the sort compares.</summary>
@@ -121,11 +126,12 @@ internal sealed record PipelineBehaviorModel(
 /// <param name="Location">The attribute that declared it, when it is in source.</param>
 internal sealed record BehaviorEdgeModel(OrderingEdge Edge, LocationInfo? Location);
 
-/// <summary>A <c>[GlobalBehavior]</c> the host applies, for KRX035.</summary>
+/// <summary>A <c>[GlobalBehavior]</c> the host applies, for KRX035: one per behavior class and kind it makes global.</summary>
 /// <param name="Name">The behavior's display name.</param>
+/// <param name="Kind">The kind it is global for.</param>
 /// <param name="Assembly">The assembly that declares it.</param>
 /// <param name="Location">The <c>[GlobalBehavior]</c> attribute, when it is in source.</param>
-internal sealed record GlobalBehaviorModel(string Name, string Assembly, LocationInfo? Location);
+internal sealed record GlobalBehaviorModel(string Name, BehaviorKind Kind, string Assembly, LocationInfo? Location);
 
 /// <summary>An <c>[assembly: ExcludeBehavior(typeof(X))]</c> or <c>[assembly: ExcludeHandler(typeof(X))]</c> entry of the host, for KRX036.</summary>
 /// <param name="Operand">The excluded type's <c>typeof</c> operand, as <see cref="HostHandlerModel.UsedExclusions" /> lists it.</param>

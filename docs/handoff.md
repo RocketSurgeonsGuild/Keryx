@@ -21,7 +21,8 @@ question, the interim behavior you are using and a proposal, continue with the s
 - Library name **Keryx**; namespace `Keryx`; generated-code-only types in `Keryx.Internal`; diagnostics `KRX001`+.
 - One NuGet package `Keryx`: `Keryx.dll` (`netstandard2.0;net10.0;net11.0`) plus `Keryx.Analyzers.dll` (`netstandard2.0`; generators,
   analyzers and code fixes in one assembly) and `System.Text.Json.dll` under `analyzers/dotnet/cs`. `Keryx.dll` depends on
-  `Microsoft.Extensions.DependencyInjection.Abstractions` (10.0.x for `net10.0`, 11.0.x for `net11.0`, 8.0.x for `netstandard2.0`).
+  `Microsoft.Extensions.DependencyInjection.Abstractions` (10.0.x for `net10.0`, 8.0.x for `netstandard2.0`); `net11.0` gets it from the
+  shared framework, so that dependency group is empty (OQ-56).
   `build/Keryx.props` defaults `LangVersion` to `latest`; Keryx needs C# 14 or later in every project that references it (KRX022, OQ-52);
   `netstandard2.0` targets stay supported.
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
@@ -146,15 +147,16 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
 - **Host attributes.** `KeryxHost`, `KeryxContracts`, `ExcludeBehavior`, `ExcludeHandler` and `ExternallyHandledAttribute`
   (`[assembly: ExternallyHandled(typeof(X))]`, `AllowMultiple`, property `RequestType`).
 - **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
-  for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8). The .NET 11 SDK prunes it for `net11.0`; follow
-  `open-questions.md` OQ-56 (open) for keeping it in that dependency group. The comment in `src/Keryx/build/Keryx.props` gives the C# 14
-  floor as the reason for the `LangVersion` default.
+  for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8). The .NET 11 shared framework carries the
+  assembly, so the SDK's package pruning drops the reference for `net11.0` and nothing keeps it (OQ-56). The comment in
+  `src/Keryx/build/Keryx.props` gives the C# 14 floor as the reason for the `LangVersion` default.
 
 **Done when:** the abstractions compile for all three TFMs; unit tests cover `Unit` equality and `UnitAdapter` (including a zero-allocation
 test on net10+); the public API snapshot lists the three kind attributes and `ExternallyHandledAttribute` and no behavior interface,
 generic `RunsAfter<T>`/`RunsBefore<T>`, `PublishBehaviorAttribute` or `NotificationHandlerBehaviorAttribute`; the `KnownTypeNames` test
-passes; the packed `Keryx` package lists `Microsoft.Extensions.DependencyInjection.Abstractions` in each TFM's dependency group with the
-version above.
+passes; the packed `Keryx` package lists `Microsoft.Extensions.DependencyInjection.Abstractions` in the `net10.0` and `netstandard2.0`
+dependency groups with the versions above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.csproj` checks
+that in the packed nuspec after every pack.
 
 ### Phase 2: handlers, diagnostics, code fixes
 
@@ -200,21 +202,27 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   behavior method per kind, fully open or fully closed, with the message, `next` and an optional `CancellationToken` found by type and every
   other parameter injected. A method's kind follows from its signature (`next` constraint and message type). An open method's message
   type parameter must be constrained to the kind's message interface (`TRequest : IRequest<TResponse>`, `TRequest : IStreamRequest<TItem>`,
-  `TNotification : INotification`). KRX019 is the static-behavior shape rule (ADR, Behavior methods); follow `open-questions.md` OQ-57
-  (a constraint through an interface that implements the kind's interface counts) and OQ-58 (`TResponse?` in an open position is KRX019),
-  both open. KRX013 and KRX018 cover behavior method parameters; KRX016 covers behavior classes and methods (public outside a host, at
+  `TNotification : INotification`), directly or through an interface that derives from it (`TRequest : ICommand<TResponse>`,
+  `TNotification : IDomainEvent`; OQ-57); a constraint to an unrelated interface is KRX019. The response or item type parameter may be
+  written annotated, `TResponse?` (`TItem?`), in `next`, the return type and the message constraint (OQ-58). KRX019 is the
+  static-behavior shape rule (ADR, Behavior methods). KRX013 and KRX018 cover behavior method parameters; KRX016 covers behavior classes and methods (public outside a host, at
   least `internal` and not file-local in a host). KRX020 is retired the way KRX010 was (no descriptor, analyzer or release entry). The
   `AnalyzerReleases.Unshipped.md` descriptions of KRX019 and KRX042 match the ADR's rows.
 - **Scopes and matching.** Three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` on the class or on a behavior method, from
   the host's own compilation). `typeof(X)` names the class and resolves to its method of the target's kind; constraints are checked on the
-  method's type parameters after substitution (`IMethodSymbol.Construct` does not validate them), closed methods match exactly, with
-  nullable annotations (ADR, Matching). KRX009 for an attached behavior that does not fit its target. KRX042 for `[Behavior]` or
+  method's type parameters after substitution (`IMethodSymbol.Construct` does not validate them), with the nullability of their type
+  arguments; closed methods match exactly, with nullable annotations in `next` and the return type (ADR, Matching). An open method that writes `TResponse?` has the
+  annotated type substituted there, and `next` and the return type must carry exactly the target's response with its nullability: it fits
+  an annotated, oblivious or value type response and not a non-annotated reference one; `struct`-constrained, it fits only a nullable
+  value type (OQ-58). A fit through an oblivious response is called with nullable warnings disabled, so generated code never warns.
+  KRX009 for an attached behavior that does not fit its target. KRX042 for `[Behavior]` or
   `[GlobalBehavior]` where it has no effect, including `[GlobalBehavior]` on a class without a kind attribute or on a method that is not a
   behavior method.
 - **Ordering.** `Phase`, `Order`, `typeof` `RunsAfter`/`RunsBefore` edges and the class name, read through the one helper (a method's
   `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` list and `[GlobalBehavior]` override the class's for that kind). KRX008 is reported once
   per pair of behavior classes, and once per kind where a method overrides the class's ordering.
-- **Host control.** `ExcludeBehavior` removes a class from pipelines of every kind; KRX035 lists every applied global; KRX036 for an
+- **Host control.** `ExcludeBehavior` removes a class from pipelines of every kind; KRX035 lists every applied global, once per class and
+  kind it makes global (OQ-57); KRX036 for an
   `ExcludeBehavior` that names nothing in any pipeline.
 - **Generation.** Flat link structs for request/response pipelines. The pipeline context resolves each behavior method's injected services
   (keyed and optional forms included) in its constructor and holds them beside the handler; links call the static method with explicit type
@@ -227,11 +235,16 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
 - KRX019 has a positive test for each shape case (class not `static`, generic class, kind attribute without a method, two methods of one
   kind, partially open method, extra type parameter, `next` without the `struct` constraint, wrong return type, closed method whose `next`
   does not carry the request's response, a method whose `next` constraint and message type belong to different kinds, and an open method of
-  each kind whose message type parameter lacks the kind's message constraint) and negative tests (one class with all three kinds; `Handle`
-  and `HandleAsync` side by side; an open method of each kind with the message constraint plus further constraints; a closed method, which
-  needs no message constraint); KRX013, KRX016 and KRX018 have positive and negative tests on behavior methods; KRX020 is not reported
+  each kind whose message type parameter lacks the kind's message constraint or is constrained to an unrelated interface) and negative
+  tests (one class with all three kinds; `Handle` and `HandleAsync` side by side; an open method of each kind with the message constraint
+  plus further constraints; a closed method, which needs no message constraint); a message constraint through a derived interface of
+  each kind is accepted, matched to the targets of that interface only, and its generated code compiles and runs (OQ-57); an open method
+  that writes `TResponse?` (`TItem?`) is not KRX019 and has snapshot and compile-and-run tests for `string?`, an oblivious `string`, `int`
+  and `int?`, with the non-annotated `string` case skipped as a global behavior and KRX009 as an attached one, for requests and streams
+  (OQ-58), and partially annotated methods (only the message constraint, only `next` and the return type, `class`-constrained) and
+  closed methods with an annotated `next` or return type compile without warnings for every fit; KRX013, KRX016 and KRX018 have positive and negative tests on behavior methods; KRX020 is not reported
   anywhere;
-- KRX009, KRX035 (including a global behavior marked only on a method), KRX036 for `ExcludeBehavior` and KRX042 (the `[GlobalBehavior]`
+- KRX009, KRX035 (including a global behavior marked only on a method, and one class global for three kinds listed once per kind), KRX036 for `ExcludeBehavior` and KRX042 (the `[GlobalBehavior]`
   cases) have positive and negative tests, and `[assembly: Behavior(typeof(X))]` naming a non-behavior reports nothing;
 - matching tests cover open and closed methods of every kind, each constraint kind and nullable annotations; ordering tests cover every
   sort rule and every KRX008 case with `typeof` edges, a method-level `[BehaviorOrder]` and `[RunsAfter]` overriding the class's for one
@@ -296,8 +309,8 @@ into the Phase 3 model.
 
 - The scan finds global behavior classes whose `[GlobalBehavior]` is on the class or only on a behavior method; KRX035 lists both.
 - Host rules KRX005 (cross-assembly), KRX030 for referenced request types, including those declared in another host (OQ-16), KRX032,
-  KRX033, and KRX034, which also covers the injected parameter types of a referenced behavior method (OQ-47; follow OQ-57 for a class with
-  several kinds). `ExcludeHandler` with KRX036 for `ExcludeHandler`.
+  KRX033, and KRX034, which also covers the injected parameter types of a referenced behavior method (OQ-47), per kind: KRX034 names the
+  behavior method and its kind, and the class stays in the pipelines of the kinds whose methods resolve (OQ-57). `ExcludeHandler` with KRX036 for `ExcludeHandler`.
 - `[assembly: ExternallyHandled(typeof(X))]` turns KRX030 off for the named type; a type the host handles or that is not a request or
   stream request is KRX036 (OQ-10). Outside a host, `ExternallyHandled`, `ExcludeHandler` and `ExcludeBehavior` have no effect and the
   analyzer reports warning KRX043 on each (OQ-54). KRX043 has a descriptor, help link and `AnalyzerReleases.Unshipped.md` entry, and the
@@ -312,7 +325,8 @@ into the Phase 3 model.
   IL2xxx/IL3xxx, run it.
 
 **Done when:** the samples build and run end to end; tests cover a host with project and metadata references, a missing reference
-(KRX034), a missing injected parameter type of a referenced behavior method (KRX034), a newer format version (KRX032), a Keryx reference
+(KRX034), a missing injected parameter type of a referenced behavior method (KRX034; a two-kind class whose other kind still runs and is
+the only kind KRX035 lists, as a global, attached and `[assembly: Behavior]` behavior, reported once), a referenced global behavior that writes `TResponse?` (fits and runs for the same targets as in source), a newer format version (KRX032), a Keryx reference
 without a manifest (KRX033), duplicate handlers (KRX005), exclusion (including KRX036 for `ExcludeHandler`), a referenced global behavior
 marked only on a method, `ExternallyHandled` silencing KRX030 for the named type only and being KRX036 on a handled type and on a
 non-request, KRX043 for each of the three attributes in a library and in a contracts assembly (and not in a host), host KRX009 for a

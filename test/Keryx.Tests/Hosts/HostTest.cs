@@ -82,6 +82,15 @@ public abstract class HostTest : GeneratorTest
                                       .Build()
                                       .GenerateAsync(cancellationToken);
         result.AssertCompilationWasSuccessful();
+        return LoadHost(result, libraries, cancellationToken);
+    }
+
+    /// <summary>
+    ///     Emits a generated host's final compilation, whatever its generators reported (a host whose generator reported an error such as
+    ///     KRX034 still compiles), and loads it with the referenced libraries (by assembly name) into a load context of its own.
+    /// </summary>
+    protected Assembly LoadHost(GeneratorTestResults result, IReadOnlyDictionary<string, byte[]> libraries, CancellationToken cancellationToken)
+    {
         using var image = new MemoryStream();
         var emit = result.FinalCompilation.Emit(image, cancellationToken: cancellationToken);
         if (!emit.Success)

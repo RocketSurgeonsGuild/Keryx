@@ -65,11 +65,14 @@ internal static class HostComposer
                 continue;
             }
 
+            // Assembly and global behaviors are resolved before the host knows which of their kinds any pipeline uses, so each behavior
+            // method of the kinds they apply to is checked here (KRX034 per kind, OQ-57); the class stays in the pipelines of the other kinds.
             var attached = ImmutableArray.CreateBuilder<ITypeSymbol>(assembly.AssemblyBehaviors.Count);
             foreach (var behavior in assembly.AssemblyBehaviors)
             {
-                if (context.ResolveBehavior(behavior, assembly.Name) is { } type)
+                if (context.Resolve(behavior, assembly.Name) is { } type)
                 {
+                    context.ReportServiceErrors(type, null);
                     attached.Add(type);
                 }
             }
@@ -78,8 +81,13 @@ internal static class HostComposer
 
             foreach (var global in assembly.GlobalBehaviors)
             {
-                if (context.ResolveBehavior(global, assembly.Name) is { } type)
+                if (context.Resolve(global, assembly.Name) is { } type)
                 {
+                    if (GlobalBehavior.Of(type, symbols) is { } globalBehavior)
+                    {
+                        context.ReportServiceErrors(type, globalBehavior);
+                    }
+
                     referencedGlobals.Add(type);
                 }
             }
@@ -243,17 +251,12 @@ internal static class HostComposer
             );
         }
 
-        // Behaviors the catalog skipped because generated code would name an injected parameter type the host cannot resolve (OQ-47):
-        // notification behaviors of referenced notification types, and assembly behaviors read from metadata.
-        foreach (var (behavior, error) in catalog.UnresolvedServices)
+        // Behavior methods the catalog skipped because generated code would name an injected parameter type the host cannot resolve (OQ-47),
+        // per kind (OQ-57): notification behaviors of referenced notification types, and assembly behaviors read from metadata. Those the
+        // manifests name were reported above, with the same arguments, so they are not reported twice.
+        foreach (var (behavior, kind, error) in catalog.UnresolvedServices)
         {
-            context.Report(
-                Descriptors.UnresolvedManifestType,
-                null,
-                error.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                behavior.ContainingAssembly?.Name ?? "",
-                error.ContainingAssembly?.Identity.Name ?? behavior.ContainingAssembly?.Name ?? ""
-            );
+            context.ReportServiceError(behavior, kind, error);
         }
 
         return new(
@@ -377,7 +380,8 @@ internal static class HostComposer
 
     /// <summary>
     ///     The global behaviors the host applies, for KRX035: every <c>[GlobalBehavior]</c>, own or referenced, on a class or a behavior
-    ///     method, that the behavior rules accept and no <c>ExcludeBehavior</c> removes.
+    ///     method, that the behavior rules accept and no <c>ExcludeBehavior</c> removes, once per kind it makes global, except a kind whose
+    ///     behavior method injects a type the host cannot resolve (KRX034, OQ-57).
     /// </summary>
     private static ImmutableArray<GlobalBehaviorModel> GlobalBehaviors(BehaviorCatalog catalog)
     {
@@ -390,13 +394,22 @@ internal static class HostComposer
                 continue;
             }
 
-            globals.Add(
-                new(
-                    global.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
-                    global.Type.ContainingAssembly?.Name ?? "",
-                    LocationInfo.From(HandlerAnalysis.AttributeLocation(global.Attribute) ?? global.Type.Locations.FirstOrDefault())
-                )
-            );
+            foreach (var (kind, _) in BehaviorShapes.Kinds(global.Type, catalog.Symbols))
+            {
+                if (!global.Kinds.Contains(kind) || !catalog.CanCall(global.Type, kind))
+                {
+                    continue;
+                }
+
+                globals.Add(
+                    new(
+                        global.Type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                        kind,
+                        global.Type.ContainingAssembly?.Name ?? "",
+                        LocationInfo.From(HandlerAnalysis.AttributeLocation(global.Attribute) ?? global.Type.Locations.FirstOrDefault())
+                    )
+                );
+            }
         }
 
         return globals.ToImmutable();
@@ -485,32 +498,37 @@ internal static class HostComposer
         }
 
         /// <summary>
-        ///     A behavior a manifest names (a global behavior, an <c>[assembly: Behavior]</c> type or a handler's attached behavior), or
-        ///     <see langword="null" /> after reporting KRX034 when it does not resolve, or when an injected parameter type of one of its behavior
-        ///     methods, which the generated pipeline context names, does not (OQ-47).
+        ///     Reports KRX034 for each kind whose behavior method of <paramref name="type" /> injects a type that does not resolve, which the
+        ///     generated pipeline context would name (OQ-47, per kind since OQ-57): every kind the class carries, or only the kinds
+        ///     <paramref name="global" /> makes global.
         /// </summary>
-        public INamedTypeSymbol? ResolveBehavior(KeryxTypeReference reference, string manifestAssembly) =>
-            Resolve(reference, manifestAssembly) is { } type && ReportServiceError(type, manifestAssembly) ? type : null;
+        public void ReportServiceErrors(INamedTypeSymbol type, GlobalBehavior? global)
+        {
+            foreach (var (kind, _) in BehaviorShapes.Kinds(type, symbols))
+            {
+                if (( global is null || global.Kinds.Contains(kind) ) && ServiceError(type, kind, symbols) is { } error)
+                {
+                    ReportServiceError(type, kind, error);
+                }
+            }
+        }
 
         /// <summary>
-        ///     Reports KRX034 for the first injected parameter type of a behavior method of <paramref name="type" /> that does not resolve;
-        ///     <see langword="true" /> when there is none.
+        ///     Reports KRX034 for the behavior method of <paramref name="kind" /> of <paramref name="type" />, whose injected parameter type
+        ///     <paramref name="error" /> does not resolve.
         /// </summary>
-        private bool ReportServiceError(INamedTypeSymbol type, string manifestAssembly)
+        public void ReportServiceError(INamedTypeSymbol type, BehaviorKind kind, ITypeSymbol error)
         {
-            if (ServiceError(type, symbols) is not { } error)
-            {
-                return true;
-            }
-
+            var declaring = type.ContainingAssembly?.Name ?? "";
             Report(
-                Descriptors.UnresolvedManifestType,
+                Descriptors.UnresolvedBehaviorService,
                 null,
                 error.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                manifestAssembly,
-                error.ContainingAssembly?.Identity.Name ?? manifestAssembly
+                BehaviorShapes.KindName(kind),
+                BehaviorShapes.CandidateOfKind(type, kind, symbols) is { } method ? BehaviorShapes.Owner(method) : type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                declaring,
+                error.ContainingAssembly?.Identity.Name ?? declaring
             );
-            return false;
         }
 
         /// <summary>
@@ -524,17 +542,32 @@ internal static class HostComposer
             target = handler.TargetType is { } targetType ? Resolve(targetType, manifestAssembly) : null;
             var behaviors = ImmutableArray.CreateBuilder<ITypeSymbol>(handler.Behaviors.Count);
             var resolved = handlerClass is not null && target is not null;
+            BehaviorKind? behaviorKind = handler.Kind switch
+            {
+                HandlerKind.Request => BehaviorKind.Request,
+                HandlerKind.Stream => BehaviorKind.Stream,
+                _ => null,
+            };
             foreach (var behavior in handler.Behaviors)
             {
-                // An attached behavior the host cannot construct leaves the handler out, so its pipeline does not change silently.
-                if (ResolveBehavior(behavior, manifestAssembly) is { } behaviorType)
-                {
-                    behaviors.Add(behaviorType);
-                }
-                else
+                // An attached behavior the host cannot resolve, or whose behavior method of the handler's kind injects a type the host cannot
+                // resolve (OQ-47, OQ-57), leaves the handler out, so its pipeline does not change silently. Its methods of other kinds do not
+                // matter here.
+                if (Resolve(behavior, manifestAssembly) is not { } behaviorType)
                 {
                     resolved = false;
+                    continue;
                 }
+
+                // Checked only while the entry resolves: otherwise its message type may be what does not resolve, already reported.
+                if (resolved && behaviorKind is { } kind && ServiceError(behaviorType, kind, symbols) is { } error)
+                {
+                    ReportServiceError(behaviorType, kind, error);
+                    resolved = false;
+                    continue;
+                }
+
+                behaviors.Add(behaviorType);
             }
 
             if (!resolved)
@@ -611,15 +644,16 @@ internal static class HostComposer
         };
 
     /// <summary>
-    ///     The first injected parameter type of a behavior method of a behavior class that does not resolve, or <see langword="null" />: the
-    ///     generated pipeline context names these types, so one the host cannot resolve breaks the generated code (OQ-47). Every parameter
-    ///     other than the message, <c>next</c> and the token is injected; those three always resolve when the method's kind can be told.
+    ///     The first injected parameter type of the behavior method of <paramref name="kind" /> of a behavior class that does not resolve, or
+    ///     <see langword="null" />: the generated pipeline context names these types, so one the host cannot resolve breaks the generated code
+    ///     (OQ-47). Checked per kind (OQ-57): the class stays in the pipelines of its other kinds. Every parameter other than the message,
+    ///     <c>next</c> and the token is injected; those three always resolve when the method's kind can be told.
     /// </summary>
-    internal static ITypeSymbol? ServiceError(INamedTypeSymbol type, KeryxSymbols symbols) =>
-        BehaviorShapes.Candidates(type)
-                      .Where(m => BehaviorShapes.BehaviorMethodKind(m, symbols) is not null)
-                      .SelectMany(static m => m.Parameters)
-                      .Where(p => !symbols.IsCancellationToken(p.Type) && p.Type is not ITypeParameterSymbol && !MessageType.Classify(p.Type, symbols).IsMessage)
-                      .Select(static p => FirstError(p.Type))
-                      .FirstOrDefault(static e => e is not null);
+    internal static ITypeSymbol? ServiceError(INamedTypeSymbol type, BehaviorKind kind, KeryxSymbols symbols) =>
+        BehaviorShapes.CandidateOfKind(type, kind, symbols) is { } method
+            ? method.Parameters
+                    .Where(p => !symbols.IsCancellationToken(p.Type) && p.Type is not ITypeParameterSymbol && !MessageType.Classify(p.Type, symbols).IsMessage)
+                    .Select(static p => FirstError(p.Type))
+                    .FirstOrDefault(static e => e is not null)
+            : null;
 }

@@ -445,6 +445,117 @@ public class BehaviorAnalyzerTests : AnalyzerTest
     }
 
     [Test]
+    public async Task KRX009_Annotated_Response_Type_Parameters_Fit_With_Nullability(CancellationToken cancellationToken)
+    {
+        // OQ-58: 'TResponse?' ('TItem?') fits an annotated, oblivious or value type response, and not a non-annotated reference one; on a
+        // type parameter constrained to struct it is Nullable<T>, which fits only a nullable value type response.
+        var diagnostics = await AnalyzeAsync<BehaviorAnalyzer>(
+            Requests
+          + """
+            public sealed record Find : IRequest<string?>;
+            public sealed record FindAll : IStreamRequest<string?>;
+            public sealed record Maybe : IRequest<int?>;
+            #nullable disable
+            public sealed record Legacy : IRequest<string>;
+            #nullable enable
+
+            [RequestBehavior]
+            [StreamBehavior]
+            public static class Nullable
+            {
+                public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse?>
+                    where TNext : struct, INext<TResponse?> =>
+                    next.InvokeAsync(cancellationToken);
+
+                public static IAsyncEnumerable<TItem?> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IStreamRequest<TItem?>
+                    where TNext : struct, IStreamNext<TItem?> =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            [RequestBehavior]
+            public static class NullableNext
+            {
+                public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse?> =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            [RequestBehavior]
+            public static class NullableValue
+            {
+                public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse?>
+                    where TResponse : struct
+                    where TNext : struct, INext<TResponse?> =>
+                    next.InvokeAsync(cancellationToken);
+            }
+
+            public static partial class PingHandler
+            {
+                [Behavior(typeof(Nullable))]
+                [Behavior(typeof(NullableNext))]
+                private static string Handle(Ping request) => "";
+            }
+
+            public static partial class FindHandler
+            {
+                [Behavior(typeof(Nullable))]
+                [Behavior(typeof(NullableNext))]
+                private static string? Handle(Find request) => null;
+            }
+
+            public static partial class LegacyHandler
+            {
+                [Behavior(typeof(Nullable))]
+                [Behavior(typeof(NullableNext))]
+                private static string Handle(Legacy request) => "";
+            }
+
+            public static partial class CountHandler
+            {
+                [Behavior(typeof(Nullable))]
+                [Behavior(typeof(NullableValue))]
+                private static int Handle(Count request) => 1;
+            }
+
+            public static partial class MaybeHandler
+            {
+                [Behavior(typeof(Nullable))]
+                [Behavior(typeof(NullableValue))]
+                private static int? Handle(Maybe request) => null;
+            }
+
+            public static partial class NamesHandler
+            {
+                [Behavior(typeof(Nullable))]
+                private static IAsyncEnumerable<string> Handle(Names request) => null!;
+            }
+
+            public static partial class FindAllHandler
+            {
+                [Behavior(typeof(Nullable))]
+                private static IAsyncEnumerable<string?> Handle(FindAll request) => null!;
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX009"))
+                    .IsEquivalentTo(
+                         [
+                             "Behavior 'Nullable' does not fit 'NamesHandler.Handle(Names)': 'Names' does not satisfy the constraint 'TRequest : IStreamRequest<string?>'",
+                             "Behavior 'Nullable' does not fit 'PingHandler.Handle(Ping)': 'Ping' does not satisfy the constraint 'TRequest : IRequest<string?>'",
+                             "Behavior 'NullableNext' does not fit 'PingHandler.Handle(Ping)': its request behavior method's 'next' carries 'TResponse?', which is 'string?' for this target, but the target's response type is 'string'",
+                             "Behavior 'NullableValue' does not fit 'CountHandler.Handle(Count)': its request behavior method's 'next' carries 'TResponse?', which is never the response type 'int'",
+                         ]
+                     );
+        await Assert.That(Ids(diagnostics).Distinct()).IsEquivalentTo(["KRX009"]);
+    }
+
+    [Test]
     public async Task Assembly_Behavior_Naming_A_Non_Behavior_Reports_Nothing(CancellationToken cancellationToken)
     {
         // An [assembly: Behavior] that is not a behavior class matches no target (ADR 0001, Matching).
@@ -521,6 +632,24 @@ public class BehaviorAnalyzerTests : AnalyzerTest
         "[NotificationBehavior] public static class X { public static ValueTask Handle<TNotification, TNext>(TNotification m, TNext n, CancellationToken c) where TNext : struct, INext => n.InvokeAsync(c); }",
         "has an open message type parameter 'TNotification' without the notification message constraint; add 'where TNotification : INotification'"
     )]
+    // A constraint to an interface that does not derive from the kind's message interface does not count (OQ-57).
+    [Arguments(
+        "[RequestBehavior] public static class X { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : ICommand where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }",
+        "has an open message type parameter 'TRequest' without the request message constraint; add 'where TRequest : IRequest<TResponse>'"
+    )]
+    [Arguments(
+        "[StreamBehavior] public static class X { public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : ICommand where TNext : struct, IStreamNext<TItem> => n.InvokeAsync(c); }",
+        "has an open message type parameter 'TRequest' without the stream message constraint; add 'where TRequest : IStreamRequest<TItem>'"
+    )]
+    [Arguments(
+        "[NotificationBehavior] public static class X { public static ValueTask Handle<TNotification, TNext>(TNotification m, TNext n, CancellationToken c) where TNotification : ICommand where TNext : struct, INext => n.InvokeAsync(c); }",
+        "has an open message type parameter 'TNotification' without the notification message constraint; add 'where TNotification : INotification'"
+    )]
+    // Through a derived interface, the response or item type parameter must be the one the interface passes on.
+    [Arguments(
+        "public interface ICommand<T> : IRequest<T> { } [RequestBehavior] public static class X { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : ICommand<int> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }",
+        "has an open message type parameter 'TRequest' without the request message constraint; add 'where TRequest : IRequest<TResponse>'"
+    )]
     [Arguments(
         "[RequestBehavior] public static class X { public static ValueTask<string> Handle<TNext>(Ping r, TNext n, CancellationToken c) where TNext : struct, INext<string> => n.InvokeAsync(c); public static IAsyncEnumerable<string> HandleAsync<TNext>(Names r, TNext n, CancellationToken c) where TNext : struct, IStreamNext<string> => n.InvokeAsync(c); }",
         "is a stream behavior method (its 'next' is IStreamNext<TItem>), but the class does not carry [StreamBehavior]"
@@ -532,26 +661,6 @@ public class BehaviorAnalyzerTests : AnalyzerTest
     [Arguments(
         "[RequestBehavior] public static class X { public static ValueTask<string> Handle(Ping r, INext<string> n, CancellationToken c) => n.InvokeAsync(c); }",
         "takes 'next' as 'INext<string>'; 'next' is a method type parameter constrained 'struct, INext<TResponse>'"
-    )]
-    [Arguments(
-        "[RequestBehavior] public static class X { public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse?> where TNext : struct, INext<TResponse> => n.InvokeAsync(c); }",
-        "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'"
-    )]
-    [Arguments(
-        "[RequestBehavior] public static class X { public static ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TNext : struct, INext<TResponse?> => n.InvokeAsync(c); }",
-        "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'"
-    )]
-    [Arguments(
-        "[RequestBehavior] public static class X { public static async ValueTask<TResponse?> Handle<TRequest, TResponse, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IRequest<TResponse> where TNext : struct, INext<TResponse> => await n.InvokeAsync(c); }",
-        "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'"
-    )]
-    [Arguments(
-        "[StreamBehavior] public static class X { public static IAsyncEnumerable<TItem?> HandleAsync<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem> where TNext : struct, IStreamNext<TItem?> => n.InvokeAsync(c); }",
-        "carries its item type parameter as 'TItem?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter 'TItem', not 'TItem?'"
-    )]
-    [Arguments(
-        "[StreamBehavior] public static class X { public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest r, TNext n, CancellationToken c) where TRequest : IStreamRequest<TItem?> where TNext : struct, IStreamNext<TItem> => n.InvokeAsync(c); }",
-        "carries its item type parameter as 'TItem?'; an open behavior method's 'next', return type and message constraint carry the bare type parameter 'TItem', not 'TItem?'"
     )]
     public async Task KRX019_Unsupported_Behavior_Shapes(string behavior, string reason, CancellationToken cancellationToken)
     {

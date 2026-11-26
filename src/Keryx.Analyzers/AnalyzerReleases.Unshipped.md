@@ -29,8 +29,8 @@ KRX030  | Keryx    | Error    | HostGenerator, request without a handler in the 
 KRX031  | Keryx    | Error    | HostGenerator, host targets a framework older than net10.0
 KRX032  | Keryx    | Error    | HostGenerator, referenced assembly has a newer manifest format version
 KRX033  | Keryx    | Warning  | HostGenerator, referenced assembly uses Keryx but has no manifest
-KRX034  | Keryx    | Error    | HostGenerator, type named in a referenced manifest (or an injected parameter type of a referenced behavior method) cannot be resolved, or a manifest entry does not fit the types the host resolves
-KRX035  | Keryx    | Info     | HostGenerator, global behavior applied in the host
+KRX034  | Keryx    | Error    | HostGenerator, type named in a referenced manifest (or an injected parameter type of a referenced behavior method) cannot be resolved (per behavior method and kind), or a manifest entry does not fit the types the host resolves
+KRX035  | Keryx    | Info     | HostGenerator, global behavior applied in the host, per kind
 KRX036  | Keryx    | Warning  | HostGenerator, ExcludeHandler or ExcludeBehavior names a type that is not part of any pipeline, or ExternallyHandled names a handled type or a type that is not a request
 KRX037  | Keryx    | Info     | HostGenerator, struct notification boxed for handlers typed as an interface
 KRX040  | Keryx    | Warning  | HandlerAnalyzer, [HandlerOrder] on a method that is not a notification handler

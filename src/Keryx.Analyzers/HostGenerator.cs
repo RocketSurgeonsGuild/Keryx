@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Diagnostics;
 using Keryx.Analyzers.Handlers;
 using Keryx.Analyzers.Hosts;
@@ -178,7 +179,7 @@ public sealed class HostGenerator : IIncrementalGenerator
 
         foreach (var global in model.GlobalBehaviors)
         {
-            diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(global.Name, global.Assembly)));
+            diagnostics.Add(new(Descriptors.GlobalBehaviorApplied, global.Location ?? settings.HostAttribute, ImmutableArray.Create(BehaviorShapes.KindName(global.Kind), global.Name, global.Assembly)));
         }
 
         var used = new HashSet<string>(

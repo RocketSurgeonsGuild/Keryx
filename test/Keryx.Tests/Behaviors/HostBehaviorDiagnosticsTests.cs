@@ -95,8 +95,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
                     .IsEquivalentTo(
                          [
                              // Trace is excluded, so only Audit and the global marked only on its method are listed.
-                             "KRX035: Global behavior 'Audit' from assembly 'TestProject' applies in this host",
-                             "KRX035: Global behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
+                             "KRX035: Global request behavior 'Audit' from assembly 'TestProject' applies in this host",
+                             "KRX035: Global request behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(OnPublish))] has no effect, because 'OnPublish' is not part of any pipeline in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(Unused))] has no effect, because 'Unused' is not part of any pipeline in this host",
                              "KRX036: [assembly: ExcludeBehavior(typeof(string))] has no effect, because 'string' is not part of any pipeline in this host",
@@ -114,6 +114,78 @@ public class HostBehaviorDiagnosticsTests : HostTest
     }
 
     [Test]
+    public async Task KRX035_Lists_A_Global_Behavior_Once_Per_Kind(CancellationToken cancellationToken)
+    {
+        // OQ-57: one class global for all three kinds is listed once per kind, each on the class's [GlobalBehavior].
+        const string source = """
+            [assembly: KeryxHost]
+
+            namespace Sample;
+
+            public sealed record Ping : IRequest<string>;
+            public static partial class PingHandler { private static string Handle(Ping request) => ""; }
+
+            public sealed record Numbers : IStreamRequest<int>;
+            public static partial class NumbersHandler
+            {
+                private static async IAsyncEnumerable<int> Handle(Numbers request)
+                {
+                    await Task.Yield();
+                    yield return 1;
+                }
+            }
+
+            public sealed record Placed : INotification;
+            public static partial class PlacedHandler { private static ValueTask Handle(Placed notification) => default; }
+
+            [RequestBehavior]
+            [StreamBehavior]
+            [NotificationBehavior]
+            [GlobalBehavior]
+            public static class Everywhere
+            {
+                public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IRequest<TResponse>
+                    where TNext : struct, INext<TResponse> =>
+                    next.InvokeAsync(cancellationToken);
+
+                public static IAsyncEnumerable<TItem> HandleAsync<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> =>
+                    next.InvokeAsync(cancellationToken);
+
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                    where TNotification : INotification
+                    where TNext : struct, INext =>
+                    next.InvokeAsync(cancellationToken);
+            }
+            """;
+        var result = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        var diagnostics = result.Results[typeof(HostGenerator)].Diagnostics;
+        await Assert.That(diagnostics.Select(static d => $"{d.Id}: {d.GetMessage(CultureInfo.InvariantCulture)}").Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX035: Global notification behavior 'Everywhere' from assembly 'TestProject' applies in this host",
+                             "KRX035: Global request behavior 'Everywhere' from assembly 'TestProject' applies in this host",
+                             "KRX035: Global stream behavior 'Everywhere' from assembly 'TestProject' applies in this host",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+
+        // Each on the class's [GlobalBehavior]: the attribute that directly precedes the class declaration.
+        foreach (var diagnostic in diagnostics)
+        {
+            var tree = diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString();
+            var span = diagnostic.Location.SourceSpan;
+            await Assert.That(tree.Substring(span.Start, span.Length)).StartsWith("GlobalBehavior");
+            await Assert.That(tree[span.End..].TrimStart().StartsWith(']')).IsTrue();
+            await Assert.That(tree[span.End..].TrimStart()[1..].TrimStart().StartsWith("public static class Everywhere", StringComparison.Ordinal)).IsTrue();
+        }
+    }
+
+    [Test]
     public async Task KRX036_Is_Not_Reported_For_An_Exclusion_That_Removes_A_Behavior(CancellationToken cancellationToken)
     {
         var result = await HostBuilder.AddSources(Usings + "[assembly: KeryxHost]\n[assembly: ExcludeBehavior(typeof(Sample.Audit))]\nnamespace Sample;\n" + Behaviors)
@@ -124,8 +196,8 @@ public class HostBehaviorDiagnosticsTests : HostTest
         await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)).Order(StringComparer.Ordinal))
                     .IsEquivalentTo(
                          [
-                             "Global behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
-                             "Global behavior 'Trace' from assembly 'TestProject' applies in this host",
+                             "Global request behavior 'MethodGlobal' from assembly 'TestProject' applies in this host",
+                             "Global request behavior 'Trace' from assembly 'TestProject' applies in this host",
                          ],
                          TUnit.Assertions.Enums.CollectionOrdering.Matching
                      );

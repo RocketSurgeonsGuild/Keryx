@@ -65,7 +65,7 @@ internal sealed class BehaviorCatalog
     private readonly ConcurrentDictionary<INamedTypeSymbol, BehaviorShape?> _shapes = new(SymbolEqualityComparer.Default);
     private readonly ConcurrentDictionary<INamedTypeSymbol, HostNotificationModel?> _notifications = new(SymbolEqualityComparer.Default);
     private readonly ConcurrentDictionary<IAssemblySymbol, ImmutableArray<ITypeSymbol>> _assemblyBehaviors = new(SymbolEqualityComparer.Default);
-    private readonly ConcurrentDictionary<INamedTypeSymbol, ITypeSymbol?> _serviceErrors = new(SymbolEqualityComparer.Default);
+    private readonly ConcurrentDictionary<(INamedTypeSymbol Type, BehaviorKind Kind), ITypeSymbol?> _serviceErrors = new(ServiceKeyComparer.Instance);
     private readonly ConcurrentQueue<(INamedTypeSymbol Notification, ITypeSymbol Behavior, string Reason)> _unfitNotificationBehaviors = new();
     private readonly ConcurrentQueue<(ITypeSymbol Error, string Assembly)> _unresolvedNotificationBehaviors = new();
 
@@ -291,21 +291,35 @@ internal sealed class BehaviorCatalog
     }
 
     /// <summary>
-    ///     Whether generated code can call a behavior class's methods: <see langword="false" /> for a behavior from another assembly whose
-    ///     behavior methods inject a type the host cannot resolve (OQ-47). Those are listed in <see cref="UnresolvedServices" />.
+    ///     Whether generated code can call a behavior class's behavior method of <paramref name="kind" />: <see langword="false" /> for a
+    ///     behavior from another assembly whose behavior method of that kind injects a type the host cannot resolve (OQ-47; per kind, OQ-57).
+    ///     Those are listed in <see cref="UnresolvedServices" />.
     /// </summary>
-    public bool CanCall(INamedTypeSymbol type) =>
+    public bool CanCall(INamedTypeSymbol type, BehaviorKind kind) =>
         SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, Compilation.Assembly)
-     || _serviceErrors.GetOrAdd(type, d => HostComposer.ServiceError(d, Symbols)) is null;
+     || _serviceErrors.GetOrAdd((type, kind), key => HostComposer.ServiceError(key.Type, key.Kind, Symbols)) is null;
 
     /// <summary>
-    ///     The behaviors <see cref="CanCall" /> rejected so far, each with the first type that does not resolve, in name order, for KRX034.
+    ///     The behavior methods <see cref="CanCall" /> rejected so far, each with its class, kind and the first type that does not resolve, in
+    ///     name and kind order, for KRX034.
     /// </summary>
-    public IEnumerable<(INamedTypeSymbol Behavior, ITypeSymbol Error)> UnresolvedServices =>
+    public IEnumerable<(INamedTypeSymbol Behavior, BehaviorKind Kind, ITypeSymbol Error)> UnresolvedServices =>
         _serviceErrors
            .Where(static pair => pair.Value is not null)
-           .Select(static pair => (pair.Key, pair.Value!))
-           .OrderBy(static pair => pair.Key.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), StringComparer.Ordinal);
+           .Select(static pair => (pair.Key.Type, pair.Key.Kind, pair.Value!))
+           .OrderBy(static entry => entry.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), StringComparer.Ordinal)
+           .ThenBy(static entry => entry.Kind);
+
+    /// <summary>Compares (behavior class, kind) keys by symbol.</summary>
+    private sealed class ServiceKeyComparer : IEqualityComparer<(INamedTypeSymbol Type, BehaviorKind Kind)>
+    {
+        public static readonly ServiceKeyComparer Instance = new();
+
+        public bool Equals((INamedTypeSymbol Type, BehaviorKind Kind) x, (INamedTypeSymbol Type, BehaviorKind Kind) y) =>
+            x.Kind == y.Kind && SymbolEqualityComparer.Default.Equals(x.Type, y.Type);
+
+        public int GetHashCode((INamedTypeSymbol Type, BehaviorKind Kind) obj) => SymbolEqualityComparer.Default.GetHashCode(obj.Type) * 3 + (int)obj.Kind;
+    }
 
     /// <summary>The shape of a behavior class, or <see langword="null" /> when the behavior rules reject it or it is not one.</summary>
     public BehaviorShape? Shape(INamedTypeSymbol type) =>
@@ -352,7 +366,8 @@ internal static class PipelineBehaviors
     ///     then the global ones, each kept when its behavior method of the target's kind fits; de-duplicated by behavior class; minus the
     ///     host's exclusions. A behavior that does not fit is skipped (KRX009 for one attached to the method: the analyzer reports it for the
     ///     host's own handlers, the host for referenced ones), as is one the behavior rules reject (KRX019), one generated code cannot reach
-    ///     (narrower than <c>internal</c>, or not accessible from the host) or one that injects a type the host cannot resolve (KRX034).
+    ///     (narrower than <c>internal</c>, or not accessible from the host) or one whose behavior method of the target's kind injects a type the
+    ///     host cannot resolve (KRX034).
     /// </summary>
     public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<string> UsedExclusions) For(
         ImmutableArray<ITypeSymbol> attached,
@@ -407,7 +422,7 @@ internal static class PipelineBehaviors
                 return;
             }
 
-            if (catalog.Shape(named) is not { } shape || !catalog.CanCall(named))
+            if (catalog.Shape(named) is not { } shape || !catalog.CanCall(named, target.Kind))
             {
                 return;
             }
@@ -493,7 +508,8 @@ internal static class PipelineBehaviors
             edges,
             services.MoveToImmutable(),
             type.ContainingAssembly?.Name ?? "",
-            SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, catalog.Compilation.Assembly)
+            SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, catalog.Compilation.Assembly),
+            match.ObliviousFit
         );
     }
 }

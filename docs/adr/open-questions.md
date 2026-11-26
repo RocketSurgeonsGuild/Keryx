@@ -11,61 +11,12 @@ Entries that were Open with Interim and Proposal text keep it as a record and en
 decision directly. Where the two disagree, the Decision line and the ADR win. Entries decided on 2026-11-26 after the review of the
 whole design follow the "Static behaviors" and "Stream hook behaviors removed" entries; the owner's second round of decisions the same
 day added "One notification behavior kind" and "Message constraint on open behavior methods" after those two, and decided OQ-52 to
-OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end).
+OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end). OQ-56 to OQ-58 were
+raised while implementing the static-behavior rework and decided by the owner the same day (at the end).
 
 ## Open
 
-### OQ-56: The `net11.0` dependency on `Microsoft.Extensions.DependencyInjection.Abstractions` (2026-11-26)
-
-OQ-8 makes the `Keryx` package depend on `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.x for `net11.0`. The .NET 11 shared
-framework (`Microsoft.NETCore.App`) now carries `Microsoft.Extensions.DependencyInjection.Abstractions.dll`, so the SDK's package pruning
-drops the `PackageReference` for `net11.0`, and `dotnet pack` writes an empty `net11.0` dependency group. The ADR and the brief's Phase 1
-"Done when" list expect the package in every TFM's group.
-
-- **Interim:** `Keryx.csproj` removes the package from `PrunePackageReference` (target `_KeryxKeepDependencyInjectionAbstractions`), so
-  the `net11.0` group lists `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.0 as the ADR says. A `net11.0` consumer's own
-  restore prunes it again (the framework already provides the assembly), so it changes nothing at run time.
-- **Proposal:** keep the interim (the package lists the dependency for every TFM, as decided), or let pruning drop it for `net11.0` and
-  say in the ADR (Package and assemblies) that `net11.0` gets the assembly from the shared framework. Needs a decision.
-
-### OQ-57: Which behavior methods KRX034 checks, and message constraints implied through another interface (2026-11-26)
-
-Two details of the static-behavior rework that the ADR does not settle:
-
-1. **KRX034 for a referenced behavior class with several kinds.** The ADR (How the host reads it; KRX034) says the host checks "the
-   injected parameter types of a referenced behavior method the host calls". A global or `[assembly: Behavior]` class is resolved before
-   the host knows which of its kinds any pipeline uses, and KRX035 lists a global behavior per class, so checking only the methods a
-   pipeline calls would make KRX035 and KRX034 depend on which targets exist.
-2. **Message constraint through a derived interface.** An open behavior method's message type parameter "must be constrained to the
-   kind's message interface" (Behavior methods; KRX019). The ADR does not say whether a constraint to an interface that itself implements
-   it (`where TRequest : ICommand<TResponse>` with `ICommand<T> : IRequest<T>`, `where TNotification : IDomainEvent` with
-   `IDomainEvent : INotification`) counts.
-
-- **Interim:** (1) a referenced behavior class is left out of every pipeline, with KRX034, when an injected parameter type of any of its
-  behavior methods (any kind it carries) cannot be resolved; a global one is then not listed by KRX035. (2) The constraint counts when
-  the constraint type is the kind's message interface or implements it (with the response or item type parameter for requests and
-  streams); the compiler guarantees the same conversion either way.
-- **Proposal:** keep both. Alternative for (1): check per kind, leaving the class in the pipelines of the kinds whose methods resolve.
-  Alternative for (2): require the kind's message interface itself in the constraint list.
-
-### OQ-58: An open behavior method that annotates its response type parameter (2026-11-26)
-
-A fully open behavior method has its message and response (or item) positions as method type parameters (Behavior methods, Generic
-shape). The ADR does not say whether `TResponse?` counts as that type parameter: `where TRequest : IRequest<TResponse?>`,
-`where TNext : struct, INext<TResponse?>` (`IStreamNext<TItem?>`) or a return type of `ValueTask<TResponse?>`
-(`IAsyncEnumerable<TItem?>`). Matching substitutes the bare type parameter and ignores the annotation, but `IRequest<>` and `INext<>` are
-invariant, so for a request that responds with `string` the generated code fails with CS8631 (`Ping` does not satisfy
-`IRequest<string?>`; the link is `INext<string>`, not `INext<string?>`) or CS8619, and nothing reports it. As a global or assembly
-behavior, it breaks every host it reaches.
-
-- **Interim:** KRX019. An open request or stream behavior method whose `next` constraint, return type or message constraint carries
-  `TResponse?` (`TItem?`) is rejected: "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return
-  type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'". The host skips the class, so generated code
-  never names it.
-- **Proposal:** keep the interim and say in the ADR (Behavior methods, Generic shape; KRX019) that the open positions are the bare type
-  parameters. Alternative: accept the annotation and make matching substitute `string?` where the method writes `TResponse?`, then
-  check each substituted constraint with its nullability against the target (a `TResponse?` method would then fit only requests that
-  respond with an annotated or oblivious type).
+None.
 
 ## Decided
 
@@ -349,6 +300,8 @@ Generated host code uses `IServiceCollection`, `IServiceProvider` extensions and
 - **Decision:** The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions`, per TFM: 10.0.x for `net10.0`,
   11.0.x for `net11.0` and 8.0.x for `netstandard2.0` (the oldest version with keyed services). No host error is added. Folded into the ADR
   (Package and assemblies, Injected parameters, Consequences); implemented in the static-behavior rework (7d2fd01).
+  **Revised 2026-11-26** by OQ-56 (below): the `net11.0` dependency group is empty, because the .NET 11 shared framework carries the
+  assembly.
 
 ### OQ-9: Analyzer packing folder and Roslyn pin (2026-11-26)
 
@@ -1164,3 +1117,78 @@ longer fits the notification type as the host resolves it. KRX034 covers only ty
 - **Decision:** Accepted as proposed: KRX009 in the host, on `[assembly: KeryxHost]`, naming the notification type and the behavior,
   with the analyzer's reasons; the behavior is skipped and the rest of the publish pipeline is kept. Folded into the ADR (Diagnostics
   and code fixes). Implemented in the static-behavior rework (f54dc49).
+
+### OQ-56: The `net11.0` dependency on `Microsoft.Extensions.DependencyInjection.Abstractions` (2026-11-26)
+
+OQ-8 makes the `Keryx` package depend on `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.x for `net11.0`. The .NET 11 shared
+framework (`Microsoft.NETCore.App`) now carries `Microsoft.Extensions.DependencyInjection.Abstractions.dll`, so the SDK's package pruning
+drops the `PackageReference` for `net11.0`, and `dotnet pack` writes an empty `net11.0` dependency group. The ADR and the brief's Phase 1
+"Done when" list expect the package in every TFM's group.
+
+- **Interim:** `Keryx.csproj` removes the package from `PrunePackageReference` (target `_KeryxKeepDependencyInjectionAbstractions`), so
+  the `net11.0` group lists `Microsoft.Extensions.DependencyInjection.Abstractions` 11.0.0 as the ADR says. A `net11.0` consumer's own
+  restore prunes it again (the framework already provides the assembly), so it changes nothing at run time.
+- **Proposal:** keep the interim (the package lists the dependency for every TFM, as decided), or let pruning drop it for `net11.0` and
+  say in the ADR (Package and assemblies) that `net11.0` gets the assembly from the shared framework. Needs a decision.
+- **Decision (2026-11-26):** drop the `net11.0` dependency. `Microsoft.NETCore.App` 11.0.0 (runtime and reference pack) ships
+  `Microsoft.Extensions.DependencyInjection.Abstractions.dll`, so `Keryx.csproj` no longer keeps the package out of pruning (the
+  `_KeryxKeepDependencyInjectionAbstractions` target is gone) and the packed `net11.0` dependency group is empty; `net10.0` (10.0.x) and
+  `netstandard2.0` (8.0.x) keep the package dependency. Verified with `dotnet pack` and the nuspec; a target in `Keryx.csproj` checks
+  the packed nuspec after every pack. Folded into the ADR (Package and assemblies; Injected parameters; Consequences), the brief (Phase 1)
+  and the README.
+
+### OQ-57: Which behavior methods KRX034 checks, and message constraints implied through another interface (2026-11-26)
+
+Two details of the static-behavior rework that the ADR does not settle:
+
+1. **KRX034 for a referenced behavior class with several kinds.** The ADR (How the host reads it; KRX034) says the host checks "the
+   injected parameter types of a referenced behavior method the host calls". A global or `[assembly: Behavior]` class is resolved before
+   the host knows which of its kinds any pipeline uses, and KRX035 lists a global behavior per class, so checking only the methods a
+   pipeline calls would make KRX035 and KRX034 depend on which targets exist.
+2. **Message constraint through a derived interface.** An open behavior method's message type parameter "must be constrained to the
+   kind's message interface" (Behavior methods; KRX019). The ADR does not say whether a constraint to an interface that itself implements
+   it (`where TRequest : ICommand<TResponse>` with `ICommand<T> : IRequest<T>`, `where TNotification : IDomainEvent` with
+   `IDomainEvent : INotification`) counts.
+
+- **Interim:** (1) a referenced behavior class is left out of every pipeline, with KRX034, when an injected parameter type of any of its
+  behavior methods (any kind it carries) cannot be resolved; a global one is then not listed by KRX035. (2) The constraint counts when
+  the constraint type is the kind's message interface or implements it (with the response or item type parameter for requests and
+  streams); the compiler guarantees the same conversion either way.
+- **Proposal:** keep both. Alternative for (1): check per kind, leaving the class in the pipelines of the kinds whose methods resolve.
+  Alternative for (2): require the kind's message interface itself in the constraint list.
+- **Decision (2026-11-26):** (1) per kind, the alternative. KRX034 is reported for the behavior method whose injected parameter type
+  cannot be resolved, naming the method and its kind; the referenced class stays in the pipelines of the kinds whose methods resolve.
+  Global and `[assembly: Behavior]` classes are checked for every kind they apply to, whatever targets exist; an attached behavior for
+  the kind of its target. KRX035 lists a global behavior per class and kind ("Global request behavior 'Audit' from assembly …"),
+  leaving out a kind KRX034 removes. (2) A message constraint through a derived interface counts, as the interim did: the constraint
+  type is the kind's message interface or implements it with the method's response or item type parameter; a constraint to an unrelated
+  interface is KRX019. Folded into the ADR (Behavior methods, Generic shape; KRX019; KRX034; KRX035; How the host reads it; Host
+  control) and the brief (Phases 4 and 7).
+
+### OQ-58: An open behavior method that annotates its response type parameter (2026-11-26)
+
+A fully open behavior method has its message and response (or item) positions as method type parameters (Behavior methods, Generic
+shape). The ADR does not say whether `TResponse?` counts as that type parameter: `where TRequest : IRequest<TResponse?>`,
+`where TNext : struct, INext<TResponse?>` (`IStreamNext<TItem?>`) or a return type of `ValueTask<TResponse?>`
+(`IAsyncEnumerable<TItem?>`). Matching substitutes the bare type parameter and ignores the annotation, but `IRequest<>` and `INext<>` are
+invariant, so for a request that responds with `string` the generated code fails with CS8631 (`Ping` does not satisfy
+`IRequest<string?>`; the link is `INext<string>`, not `INext<string?>`) or CS8619, and nothing reports it. As a global or assembly
+behavior, it breaks every host it reaches.
+
+- **Interim:** KRX019. An open request or stream behavior method whose `next` constraint, return type or message constraint carries
+  `TResponse?` (`TItem?`) is rejected: "carries its response type parameter as 'TResponse?'; an open behavior method's 'next', return
+  type and message constraint carry the bare type parameter 'TResponse', not 'TResponse?'". The host skips the class, so generated code
+  never names it.
+- **Proposal:** keep the interim and say in the ADR (Behavior methods, Generic shape; KRX019) that the open positions are the bare type
+  parameters. Alternative: accept the annotation and make matching substitute `string?` where the method writes `TResponse?`, then
+  check each substituted constraint with its nullability against the target (a `TResponse?` method would then fit only requests that
+  respond with an annotated or oblivious type).
+- **Decision (2026-11-26):** accept `TResponse?` / `TItem?`, nullability-aware (the alternative). The KRX019 rejection is removed.
+  Matching substitutes the annotated type where the method writes the annotation and checks the substituted constraints, `next` and the
+  return type with nullability against the target: a `TResponse?` method fits a request whose response is annotated (`string?`),
+  nullable-oblivious or a value type (`T?` on an unconstrained `T` substituted with `int` is `int`; on a `struct`-constrained `T` it is
+  `Nullable<T>` and fits only a nullable value type response exactly), and does not fit a non-annotated reference response. A global or
+  assembly behavior that does not fit is skipped for that target; an attached one is KRX009. A fit through an oblivious response is
+  called between `#nullable disable warnings` and `#nullable restore warnings`, so generated code compiles without warnings for every
+  fit. A closed method's `next` and return type are checked with nullability the same way (an annotated position over an oblivious
+  response fits with the pragma; `ValueTask<string?>` over a `string` response does not fit). Folded into the ADR (Behavior methods, Generic shape; KRX019; Matching) and the brief (Phases 4 and 7).

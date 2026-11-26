@@ -377,7 +377,7 @@ internal static partial class HostEmitter
             writer.Line(signature);
             writer.Open();
             writer.Line($"var pipeline = {context};");
-            writer.Line($"return {BehaviorCall(pipeline.Behaviors[0], 0, ContextName(index) + "." + LinkName(0), "pipeline", "request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], 0, ContextName(index) + "." + LinkName(0), "pipeline", "request")};");
             writer.Close();
         }
 
@@ -469,7 +469,7 @@ internal static partial class HostEmitter
         writer.Line($"public {ValueTask}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
         if (!isLast)
         {
-            writer.Line($"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_request")};");
+            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], position + 1, LinkName(position + 1), "_pipeline", "_request")};");
         }
         else if (request.StaticInvoker)
         {
@@ -481,6 +481,25 @@ internal static partial class HostEmitter
         }
 
         writer.Close();
+    }
+
+    /// <summary>
+    ///     Writes the line that calls a behavior method. A method that fits only through a nullable-oblivious response or item type where it
+    ///     writes <c>TResponse?</c> (OQ-58) is called with nullable warnings disabled: generated code names that type without an annotation,
+    ///     so the call would warn where the oblivious declaration does not.
+    /// </summary>
+    private static void BehaviorCallLine(CodeWriter writer, PipelineBehaviorModel behavior, string line)
+    {
+        if (behavior.ObliviousFit)
+        {
+            writer.Line("#nullable disable warnings");
+        }
+
+        writer.Line(line);
+        if (behavior.ObliviousFit)
+        {
+            writer.Line("#nullable restore warnings");
+        }
     }
 
     /// <summary>

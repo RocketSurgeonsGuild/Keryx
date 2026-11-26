@@ -38,7 +38,8 @@ analyzers and code fixes (`analyzers/dotnet/cs`).
 - Requests, notifications and handler libraries may target `netstandard2.0`. A **host** (the project with the mediator) targets
   `net10.0` or later ([KRX031](#krx031)).
 - The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (8.0.x for `netstandard2.0`, 10.0.x for
-  `net10.0`, 11.0.x for `net11.0`), which the generated host code uses.
+  `net10.0`), which the generated host code uses. On `net11.0` the assembly comes from the shared framework, so that target lists no
+  package dependency.
 - Analyzers do not flow through a `ProjectReference`: every project that declares requests or handlers, and every host, references the
   `Keryx` package directly.
 
@@ -201,13 +202,18 @@ pipeline context, so no behavior instance is ever created (a `[StreamBehavior]` 
 call; see [Streaming](#streaming)). A method is either:
 
 - **open:** generic in the message, its response (or item) and `TNext`, with the message type parameter constrained to the kind's
-  message interface (table above). Further constraints narrow where it applies (`where TRequest : ICommand<TResponse>` limits it to
-  commands); or
+  message interface (table above) or to an interface that derives from it: `where TRequest : ICommand<TResponse>` with
+  `ICommand<T> : IRequest<T>` counts and limits the method to commands, as `where TNotification : IDomainEvent` limits a notification
+  behavior to domain events. Further constraints narrow where it applies. The response (or item) type parameter may be written
+  annotated, `TResponse?`, in `next`, the return type and the message constraint: the method then fits responses that are annotated
+  (`string?`), declared nullable-oblivious, or value types (`int`; with `where TResponse : struct`, `TResponse?` is `Nullable<TResponse>`
+  and fits only `int?`), but not a non-annotated `string`; or
 - **closed:** generic only in `TNext`, over one concrete message type, with `next` carrying exactly that message's response or item
   type (`INext<Unit>` for an `IRequest`).
 
 A class that is not `static` or is generic, a kind attribute without a matching method, two methods of one kind, a partially open
-method or one with other type parameters, an open method without the message constraint, a wrong `next` or return type, or a `static`
+method or one with other type parameters, an open method without the message constraint (or constrained to an unrelated interface), a
+wrong `next` or return type, or a `static`
 `Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to
 different kinds is [KRX019](#krx019). One class may carry several kind attributes; when two of its methods would have the same parameter
 list, name one `Handle` and the other `HandleAsync`. Outside a host the class and method are `public`; in a host `internal` is enough
@@ -224,10 +230,10 @@ behavior class; in a pipeline it means X's method of that pipeline's kind.
 - global: `[GlobalBehavior]` on the behavior class applies each of its behaviors to every matching target in every host that references
   it; on a behavior method, only that method's kind is global. A host removes one with
   `[assembly: ExcludeBehavior(typeof(Audit))]`, which removes the class from pipelines of every kind; Info [KRX035](#krx035) lists every
-  global behavior a host applies.
+  global behavior a host applies, once per kind.
 
-An open method applies where its constraints hold for the target's types; a closed one where its message and response (or item) types
-are identical to the target's. Assembly and global behaviors that do not fit are skipped; one attached explicitly that does not fit is
+An open method applies where its constraints hold for the target's types, nullable annotations included; a closed one where its message
+and response (or item) types are identical to the target's. Assembly and global behaviors that do not fit are skipped; one attached explicitly that does not fit is
 [KRX009](#krx009).
 
 **Ordering.** Lower runs first (further out). Behaviors sort by `[BehaviorOrder(Phase)]` (`Outermost` 0, `Observability` 100, `Security`
@@ -396,7 +402,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx006"></a>KRX006      | Error    | A class directly contains more than one handler.                                                                                                              |
 | <a id="krx007"></a>KRX007      | Error    | A handler class declares an instance or primary constructor, or has injected parameters and is `abstract`, has `required` members, or has a base type without an accessible parameterless constructor. |
 | <a id="krx008"></a>KRX008      | Error    | Behavior ordering has a cycle, or `RunsAfter`/`RunsBefore` contradicts phase or order. Reported once per pair of behavior classes (and per kind where a method overrides the class's ordering). |
-| <a id="krx009"></a>KRX009      | Error    | A behavior attached with `[Behavior]` to a request or stream handler method or a notification type does not fit it: not a behavior class, no behavior method of the target's kind, constraints that do not hold, or a closed method over other types. The host reports it for behaviors a referenced handler or notification type attaches. |
+| <a id="krx009"></a>KRX009      | Error    | A behavior attached with `[Behavior]` to a request or stream handler method or a notification type does not fit it: not a behavior class, no behavior method of the target's kind, constraints that do not hold (nullable annotations included, such as a `TResponse?` method against a `string` response), or a closed method over other types. The host reports it for behaviors a referenced handler or notification type attaches. |
 | <a id="krx011"></a>KRX011      | Error    | A type implements more than one request closing, both request kinds, or a request interface and `INotification`.                                              |
 | <a id="krx012"></a>KRX012      | Error    | A request, stream request or notification is generic, nested in a generic type or a `ref struct`; or a handler class is generic.                             |
 | <a id="krx013"></a>KRX013      | Error    | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`. |
@@ -405,15 +411,15 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx016"></a>KRX016      | Error    | Outside a host, a type a pipeline needs (request, response, notification, injected parameter type) or a behavior class or method is not public. In a host, one is narrower than `internal` or file-local. |
 | <a id="krx017"></a>KRX017      | Warning  | A handler's response type differs from the request's only in nullability.                                                                                     |
 | <a id="krx018"></a>KRX018      | Error    | A `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form. |
-| <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape: not `static` or generic, a kind attribute without a matching behavior method, two methods of one kind, a partially open method or one with other type parameters, an open method whose message type parameter lacks the kind's message constraint, a `next` without the `struct` and interface constraint, a wrong return type, or a `static` `Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to different kinds. |
+| <a id="krx019"></a>KRX019      | Error    | A behavior class has an unsupported shape: not `static` or generic, a kind attribute without a matching behavior method, two methods of one kind, a partially open method or one with other type parameters, an open method whose message type parameter lacks the kind's message constraint (directly or through a derived interface), a `next` without the `struct` and interface constraint, a wrong return type, or a `static` `Handle`/`HandleAsync` whose kind the class does not carry, that has no valid `next`, or whose `next` and message type belong to different kinds. |
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
 | <a id="krx030"></a>KRX030      | Error    | A request the host can see (its own, or a referenced one, including one declared in another host) has no handler anywhere in the host, unless `[assembly: ExternallyHandled(typeof(X))]` names it. Severity can be changed in `.editorconfig`. |
 | <a id="krx031"></a>KRX031      | Error    | A `[KeryxHost]` project targets a framework older than `net10.0`. The host generator emits nothing there.                                                    |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
-| <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. |
-| <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies and the assembly it comes from.                                                                                   |
+| <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. For a behavior method it names the method and its kind; the class still applies through its other kinds. |
+| <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies, once per kind, and the assembly it comes from.                                                                   |
 | <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline, or `ExternallyHandled` names a type the host handles or that is not a request or stream request. |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |

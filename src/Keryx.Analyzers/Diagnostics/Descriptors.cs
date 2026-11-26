@@ -335,6 +335,21 @@ internal static class Descriptors
     );
 
     /// <summary>
+    ///     KRX034 for the behavior method of one kind of a referenced behavior class that injects a type the host cannot resolve (OQ-57): the
+    ///     class is left out of the pipelines of that kind only, and stays in those of its other kinds.
+    /// </summary>
+    public static readonly DiagnosticDescriptor UnresolvedBehaviorService = new(
+        "KRX034",
+        "Type in a Keryx manifest cannot be resolved",
+        "Type '{0}', which the {1} behavior method '{2}' from assembly '{3}' injects, cannot be resolved or is not accessible from this host; reference assembly '{4}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated pipeline context names the injected parameter types of every behavior method it calls. A referenced behavior method that injects a type from an assembly the host does not reference is left out of the pipelines of its kind until the assembly is referenced; the class's behavior methods of other kinds still apply.",
+        helpLinkUri: HelpLinkBase + "krx034"
+    );
+
+    /// <summary>
     ///     KRX034 for a referenced handler whose manifest entry resolves but no longer describes a handler the host can compose with the types it
     ///     resolves (typically a library built against another version of a contracts assembly than the host references; OQ-47).
     /// </summary>
@@ -352,11 +367,11 @@ internal static class Descriptors
     public static readonly DiagnosticDescriptor GlobalBehaviorApplied = new(
         "KRX035",
         "Global behavior applies in this host",
-        "Global behavior '{0}' from assembly '{1}' applies in this host",
+        "Global {0} behavior '{1}' from assembly '{2}' applies in this host",
         Category,
         DiagnosticSeverity.Info,
         isEnabledByDefault: true,
-        description: "Every [GlobalBehavior] the host sees applies to every matching target. Remove one with [assembly: ExcludeBehavior(typeof(...))].",
+        description: "Every [GlobalBehavior] the host sees applies to every matching target of its kind. It is listed once per behavior class and kind it makes global. Remove one with [assembly: ExcludeBehavior(typeof(...))].",
         helpLinkUri: HelpLinkBase + "krx035"
     );
 
