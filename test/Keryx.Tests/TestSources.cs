@@ -18,6 +18,16 @@ internal static class TestSources
 
         """;
 
+    /// <summary>
+    ///     What a source with C# 15 <c>closed</c> types starts with: on .NET 10, whose reference assemblies the tests compile against there,
+    ///     the <c>IsClosedTypeAttribute</c> the compiler writes on a closed type (CS0656 without it); on .NET 11, which has it, nothing. A
+    ///     block namespace, so it can precede the types of the global namespace or another block namespace.
+    /// </summary>
+    public static string ClosedTypeAttribute { get; } =
+        typeof(object).Assembly.GetType("System.Runtime.CompilerServices.IsClosedTypeAttribute") is null
+            ? "namespace System.Runtime.CompilerServices { public sealed class IsClosedTypeAttribute : System.Attribute { } }\n"
+            : "";
+
     /// <summary>One source the host generator generated, by hint name (<c>HostEmitter.MediatorHintName</c>, for example).</summary>
     public static string HostSource(GeneratorTestResults result, string hintName) =>
         result.Results[typeof(HostGenerator)].SyntaxTrees.Single(t => t.FilePath.EndsWith(hintName, StringComparison.Ordinal)).ToString();

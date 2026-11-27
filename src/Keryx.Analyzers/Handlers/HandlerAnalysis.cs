@@ -659,11 +659,20 @@ internal static class HandlerAnalysis
         signature.ResponseType = messageType.IsStream ? messageType.ItemType : messageType.ResponseType;
         if (!messageType.IsConcrete)
         {
+            // An abstract or closed request type is a base of sealed request types and is never dispatched: each sealed case has its own
+            // handler (ADR 0001, Requests and notifications).
+            var what = parameter.Type switch
+            {
+                INamedTypeSymbol { TypeKind: TypeKind.Interface } => "the interface",
+                INamedTypeSymbol { TypeKind: TypeKind.Class } named when MessageType.IsClosed(named) => "the closed type",
+                INamedTypeSymbol { TypeKind: TypeKind.Class, IsAbstract: true } => "the abstract type",
+                _ => "the type",
+            };
             issues.Add(
                 Descriptors.InvalidHandlerParameter,
                 parameterLocation,
                 methodName,
-                $"must take the concrete request type, not '{parameterTypeName}'; dispatch is by exact request type"
+                $"must take a sealed request type, not {what} '{parameterTypeName}'; each sealed request type has its own handler"
             );
             return;
         }

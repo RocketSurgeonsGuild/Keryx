@@ -195,6 +195,24 @@ internal static class GeneratedSyntax
             SingletonList(statement)
         );
 
+    /// <summary>
+    ///     A switch section with a type pattern: <c>case type designation: statement</c>, or <c>case type: statement</c> without a designation.
+    /// </summary>
+    public static SwitchSectionSyntax TypeSection(string type, string? designation, StatementSyntax statement) =>
+        SwitchSection(
+            SingletonList<SwitchLabelSyntax>(
+                CasePatternSwitchLabel(
+                    designation is null ? TypePattern(TypeName(type)) : DeclarationPattern(TypeName(type), SingleVariableDesignation(Identifier(designation))),
+                    Token(SyntaxKind.ColonToken)
+                )
+            ),
+            SingletonList(statement)
+        );
+
+    /// <summary>The switch section <c>default: statement</c>.</summary>
+    public static SwitchSectionSyntax DefaultSection(StatementSyntax statement) =>
+        SwitchSection(SingletonList<SwitchLabelSyntax>(DefaultSwitchLabel()), SingletonList(statement));
+
     /// <summary>A switch section <c>case constant: statement</c>.</summary>
     public static SwitchSectionSyntax ConstantSection(int constant, StatementSyntax statement) =>
         SwitchSection(SingletonList<SwitchLabelSyntax>(CaseSwitchLabel(Number(constant))), SingletonList(statement));

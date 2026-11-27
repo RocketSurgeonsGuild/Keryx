@@ -28,8 +28,7 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <summary>
@@ -501,9 +500,9 @@ namespace Sample
                     return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream31(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S31>(request), cancellationToken));
                 case 32:
                     return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream32(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S32>(request), cancellationToken));
+                default:
+                    throw __HandlerNotFound(requestType);
             }
-
-            throw __HandlerNotFound(requestType);
         }
 
         /// <summary>Every stream request type this host dispatches, mapped to its position in the dispatch switch.</summary>

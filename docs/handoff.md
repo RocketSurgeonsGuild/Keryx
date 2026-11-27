@@ -29,7 +29,7 @@ question, the interim behavior you are using and a proposal, continue with the s
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
   attribute.
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables and test projects) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
-  exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
+  exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
   lambdas (nothing for behaviors).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
   kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
@@ -191,12 +191,15 @@ above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.c
 
 Handler-candidate selection, handler partial generation (constructor, `InvokeAsync`, return adaptation, keyed/default parameter copying,
 static invoker, `[KeryxHandler]` and `[assembly: KeryxManifest(FormatVersion = 1)]`). Analyzer rules KRX001–KRX007, KRX011–KRX018,
-KRX021, KRX022 and KRX023, and the shape checks for notification handlers (KRX040, KRX041). KRX001 applies in every assembly, hosts
+KRX021, KRX022, KRX023 and KRX024, and the shape checks for notification handlers (KRX040, KRX041). KRX001 applies in every assembly, hosts
 included; KRX023 (a handler of a request or stream request declared in another assembly, decided in the second rework) is reported on
-the handler's request parameter, and the generators skip that handler like any handler error. KRX022 (language version below C# 14, OQ-52) is
+the handler's request parameter, and the generators skip that handler like any handler error. KRX024 (owner decision 14 of the second
+rework) is reported by `MessageTypeAnalyzer` on a request or stream request class or record that is neither sealed nor abstract (or
+closed: the `closed` modifier's text on the declaring syntax, `IsClosedTypeAttribute` in metadata, Roslyn 5.0 APIs only), in libraries and
+hosts; a handler of an abstract or closed request base is KRX003. KRX022 (language version below C# 14, OQ-52) is
 reported once per compilation from the parse options; with it, the handler generator emits nothing for that project (no manifest, no
-partials), so the only error the user sees is KRX022. Code fixes for KRX001 (add a handler stub, also in a host), KRX002, KRX004 and KRX014, in
-`src/Keryx.Analyzers/CodeFixes`.
+partials), so the only error the user sees is KRX022. Code fixes for KRX001 (add a handler stub, also in a host), KRX002, KRX004, KRX014 and KRX024 (make the type `sealed`, keeping
+`partial` and the other modifiers), in `src/Keryx.Analyzers/CodeFixes`.
 
 **Done when:** snapshot tests cover every handler shape (nested/top-level, static/instance, every return type, keyed and default
 parameters, notifications including polymorphic parameters); every diagnostic has a positive and a negative test (KRX022: C# 13 is
@@ -211,9 +214,13 @@ The `KeryxHost` MSBuild property (ADR, Opting in): `build/Keryx.targets` default
 `build_property.KeryxHost` (unset is not a host; tests set it with the `WithKeryxHost()` builder helper). Host diagnostics without a source
 location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped,
 lazy pipeline contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic
-`Send` with exact-type dispatch (exact-type `when` guards, never type patterns, and above the threshold a switch on the index; owner
-decision 7 of the second rework asks for switch expressions, and the generated code uses switch statements with one `return` per section
-until OQ-67 is decided, because the expressions lose the arms' tail calls), `Unsafe.As` result reinterpretation, `FrozenDictionary` above
+`Send` with exact-type dispatch (a switch statement with a type pattern per sealed request type, `case global::X r: return
+__Dispatch0<TResponse>(r, cancellationToken);`, ending `default: throw __HandlerNotFound(request.GetType());`, and above the threshold a switch on
+the index of `request.GetType()`; switch statements with one `return` per section, never switch expressions, which lose the arms' tail
+calls, owner decision 16 and OQ-67; a struct request's section has no designation, `case global::S: return __Dispatch1<TResponse>(request,
+cancellationToken);`, and its arm takes `IRequest<TResponse>` and unboxes, so `Send` holds no struct local and every arm stays a tail call;
+a request or stream request type that is not sealed, reachable only with KRX024 suppressed, is never composed: no section, no typed overload,
+so sending it throws not-found, owner decision 18 and OQ-68; typed overloads of sealed requests have no runtime type check), `Unsafe.As` result reinterpretation, `FrozenDictionary` above
 the threshold, `KeryxHandlerNotFoundException`, `AddKeryx()` with factory registrations (including value-type and keyed optional
 parameters), host namespace from `RootNamespace` with the sanitised assembly-name fallback. The host's own request types are KRX001's (the
 analyzer runs in hosts too), so the host generator does not collect them; KRX030 is Phase 7's, for referenced request types. Same-assembly
@@ -227,7 +234,11 @@ concurrency test covers concurrent first use in one scope; a micro-benchmark com
 tested on both sides of the threshold (decided 2026-11-26): the generated shape (type compares at the threshold, an index lookup
 governing a `switch` above it), the compiled IL (a `switch` opcode above the threshold and none at or below it, read with
 System.Reflection.Metadata), every request dispatched to its own handler above it, and a type derived from a handled request, with no
-handler of its own, not dispatched to the base handler (`KeryxHandlerNotFoundException`), as an unknown type is not; a host with
+handler of its own, not dispatched to the base handler, as an unknown type is not (for notifications; a request or stream request type
+that is not sealed, the only one a derived type can come from, is not dispatched at all: `KeryxHandlerNotFoundException` for it while its
+sealed siblings still dispatch); Verify snapshots of the generated mediator per kind at and one above the
+threshold; the JIT code of the generic `Send`, `Stream` and `Publish<T>` (`DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`) keeps every
+arm's tail call and tests each sealed type with one method-table compare; a host with
 `LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`) cover the
 `KeryxHost` defaults through `build/` and `buildTransitive/`, the project's own value, and the compiler-visible property; `dotnet pack`
 ships `build/`, `buildMultiTargeting/` and `buildTransitive/` (the `_KeryxCheckPackedBuildFiles` target in `Keryx.csproj` fails the pack
@@ -349,7 +360,9 @@ behaviors and no fused segments.
 
 ### Phase 6: notifications
 
-Publish dispatch (typed and generic), handler lists with polymorphic expansion and `[HandlerOrder]`, sequential and parallel strategies,
+Publish dispatch (typed and generic; generic `Publish` keeps exact-type `when` guards, `case var _ when notificationType ==
+typeof(X):`, ending `default: return default;`, because notification types need not be sealed and a type pattern would send an unknown
+derived notification to its base type's pipeline), handler lists with polymorphic expansion and `[HandlerOrder]`, sequential and parallel strategies,
 run-all-then-`AggregateException` (also for one failure and on cancellation), boxing-free generic `Publish` for struct notifications,
 KRX037. Parallel publish exactly as the ADR's Publish strategy section defines it. `open-questions.md` OQ-3, OQ-4, OQ-5, OQ-17 and OQ-18
 record the decisions this phase follows.
@@ -391,6 +404,10 @@ into the Phase 3 model.
   There is no `ExternallyHandled`. Outside a host, `ExcludeHandler` and `ExcludeBehavior` have no effect and the analyzer reports
   warning KRX043 on each (OQ-54). KRX023 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries, and the
   `AnalyzerReleases.Unshipped.md` descriptions of KRX034 and KRX036 match the ADR's rows.
+- A referenced request or stream request type that is not sealed (its library suppressed KRX024) is the host error KRX038, without a
+  location, naming the type and its assembly; the host composes no part of it (no dispatch section, no typed overload; sending it throws
+  `KeryxHandlerNotFoundException`), and it counts as handled, so there is no KRX030 on top. The host's own type that is not sealed is its
+  KRX024, not KRX038, and is not composed either (owner decision 18, OQ-68).
 - A `[Behavior]` on a referenced notification type that does not fit the type as the host resolves it is KRX009 without a location,
   naming the notification type and the behavior; the behavior is skipped and the rest of the publish pipeline kept
   (OQ-55).
@@ -405,7 +422,9 @@ into the Phase 3 model.
 the only kind KRX035 lists, as a global, attached and `[assembly: Behavior]` behavior, reported once), a referenced global behavior that writes `TResponse?` (fits and runs for the same targets as in source), a newer format version (KRX032), a Keryx reference
 without a manifest (KRX033), duplicate handlers (KRX005), exclusion (including KRX036 for `ExcludeHandler`), a referenced global behavior
 marked only on a method, KRX023 for a host's handler of a referenced request (also when the host excludes the referenced handler), KRX030
-for a referenced request without a handler, KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host
+for a referenced request without a handler, KRX038 for a referenced request and stream request type that is not sealed (not for the
+host's own type, an abstract or closed base, a sealed type or a notification; at run time not dispatched while a sealed sibling is),
+KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host
 KRX009 for a
 `[Behavior]` on a referenced notification type that no longer fits (the other publish behaviors still run; a fitting one reports nothing),
 and a test host that references an app host (KRX030 for an app request whose handler is internal, nothing for one whose handler is

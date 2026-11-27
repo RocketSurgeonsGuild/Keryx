@@ -15,10 +15,6 @@ namespace Keryx.Analyzers.Hosts;
 /// <param name="Kind">What the handler handles.</param>
 /// <param name="MessageType">The request, stream request or notification parameter type, fully qualified, without a nullable annotation.</param>
 /// <param name="MessageIsValueType">Whether the message type is a struct (unboxed on the generic path, KRX021).</param>
-/// <param name="MessageIsSealed">
-///     Whether no other type can derive from the message type (a sealed class or a struct). A typed overload for a request that is not sealed
-///     checks the runtime type, so a derived request never reaches the base request's handler (OQ-31).
-/// </param>
 /// <param name="ResponseType">The request's <c>TResponse</c> or the stream request's <c>TItem</c>; <see langword="null" /> for a notification.</param>
 /// <param name="StaticInvoker">Whether <c>InvokeAsync</c> is static: the handler has no injected parameters and is never constructed.</param>
 /// <param name="Services">The generated constructor's parameters (the handler's injected parameters), in order.</param>
@@ -43,7 +39,6 @@ internal sealed record HostHandlerModel(
     HandlerKind Kind,
     string MessageType,
     bool MessageIsValueType,
-    bool MessageIsSealed,
     string? ResponseType,
     bool StaticInvoker,
     EquatableArray<ServiceParameterModel> Services,

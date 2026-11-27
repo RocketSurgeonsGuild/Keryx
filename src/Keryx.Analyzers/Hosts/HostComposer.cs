@@ -190,6 +190,21 @@ internal static class HostComposer
                 continue;
             }
 
+            // KRX038: a referenced request or stream request type that is not sealed (its assembly suppressed KRX024) is not composed, so no
+            // generated path depends on it (OQ-68); sending it throws KeryxHandlerNotFoundException. Its request counts as handled, so KRX030
+            // does not add a second error.
+            if (handler.Kind is HandlerKind.Request or HandlerKind.Stream && !HostModelFactory.IsSealed(handler.Target))
+            {
+                context.Report(
+                    Descriptors.UnsealedRequestInHost,
+                    null,
+                    handler.Kind == HandlerKind.Request ? "Request type" : "Stream request type",
+                    handler.Target.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
+                    handler.Target.ContainingAssembly?.Identity.Name ?? handler.Assembly
+                );
+                continue;
+            }
+
             // KRX009 for the pairs that involve referenced behaviors: an attached behavior that does not fit the target as the host resolves
             // it would otherwise drop out of the pipeline silently.
             foreach (var (behavior, reason) in HostModelFactory.UnfitAttachedBehaviors(handler.Behaviors, handler.Target, handler.Kind, catalog))

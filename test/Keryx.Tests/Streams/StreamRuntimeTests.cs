@@ -187,10 +187,13 @@ public class StreamRuntimeTests : HostTest
         await Assert.That(Items).IsEquivalentTo(["a", "b"], CollectionOrdering.Matching);
         await Assert.That(TakeLog(host)).IsEquivalentTo(["WrapA>", "<WrapA"], CollectionOrdering.Matching);
 
-        // The Shape overload, called with a Square (statically typed as a Shape), still dispatches on the runtime type (OQ-31).
-        var shapeOverload = mediator.GetType().GetMethod("Stream", [host.GetType("Sample.Shape")!, typeof(CancellationToken)])!;
-        var square = (IAsyncEnumerable<int>)shapeOverload.Invoke(mediator, [Create(host, "Sample.Square", 5), cancellationToken])!;
-        await Assert.That(Text(( await ConsumeAsync(square, cancellationToken) ).Items)).IsEqualTo("100");
+        // Each sealed case of an abstract stream request base streams from its own handler, through its typed overload and generic Stream.
+        var circle = Create(host, "Sample.Circle", 3);
+        var square = Create(host, "Sample.Square", 5);
+        await Assert.That(Text(( await ConsumeAsync(StreamTyped<int>(mediator, circle, cancellationToken), cancellationToken) ).Items)).IsEqualTo("1,2,3");
+        await Assert.That(Text(( await ConsumeAsync(StreamTyped<int>(mediator, square, cancellationToken), cancellationToken) ).Items)).IsEqualTo("100");
+        await Assert.That(Text(( await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)circle, cancellationToken), cancellationToken) ).Items)).IsEqualTo("1,2,3");
+        await Assert.That(Text(( await ConsumeAsync(Sender(scope).Stream((IStreamRequest<int>)square, cancellationToken), cancellationToken) ).Items)).IsEqualTo("100");
     }
 
     [Test]
@@ -372,10 +375,13 @@ public class StreamRuntimeTests : HostTest
             }
         }
 
-        public record Shape(int Count) : IStreamRequest<int>;
-        public static partial class ShapeHandler
+        /// <summary>An abstract stream request base: each sealed case has its own handler, and it has none.</summary>
+        public abstract record Shape(int Count) : IStreamRequest<int>;
+
+        public sealed record Circle(int Count) : Shape(Count);
+        public static partial class CircleHandler
         {
-            private static IAsyncEnumerable<int> Handle(Shape request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
+            private static IAsyncEnumerable<int> Handle(Circle request, CancellationToken cancellationToken) => Numbers.Range(request.Count, cancellationToken);
         }
 
         public sealed record Square(int Count) : Shape(Count);

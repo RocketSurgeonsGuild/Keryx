@@ -1,0 +1,76 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample;
+
+public class WithVirtual : IRequest<int>
+{
+    public virtual int Value { get; set; }
+}
+
+public class WithProtected : IRequest<int>
+{
+    protected int Value;
+}
+
+public record WithPrintMembers(int Value) : IRequest<int>
+{
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => true;
+}
+
+public record WithCopyConstructor : IRequest<int>
+{
+    protected WithCopyConstructor(WithCopyConstructor original) { }
+}
+
+public class Overrides : IRequest<int>
+{
+    public override string ToString() => "Overrides";
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX024: Request type 'Overrides' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Overrides' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+public class WithVirtual : IRequest<int>
+{
+    public virtual int Value { get; set; }
+}
+
+public class WithProtected : IRequest<int>
+{
+    protected int Value;
+}
+
+public record WithPrintMembers(int Value) : IRequest<int>
+{
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => true;
+}
+
+public record WithCopyConstructor : IRequest<int>
+{
+    protected WithCopyConstructor(WithCopyConstructor original) { }
+}
+
+public sealed class Overrides : IRequest<int>
+{
+    public override string ToString() => "Overrides";
+}
+      },
+      Remaining: [
+        KRX024: Request type 'WithCopyConstructor' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'WithPrintMembers' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'WithProtected' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'WithVirtual' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    }
+  ]
+}

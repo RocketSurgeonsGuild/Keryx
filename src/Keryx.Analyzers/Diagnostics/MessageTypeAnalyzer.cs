@@ -8,7 +8,7 @@ namespace Keryx.Analyzers.Diagnostics;
 
 /// <summary>
 ///     The rules on request, stream request and notification types: KRX011, KRX012 (types), KRX016 (the type and its response outside a
-///     host) and KRX041. Also KRX016 for the behaviors a host's pipelines take from this assembly outside a host: <c>[Behavior]</c> on a
+///     host), KRX024 and KRX041. Also KRX016 for the behaviors a host's pipelines take from this assembly outside a host: <c>[Behavior]</c> on a
 ///     notification type (notification behaviors), <c>[assembly: Behavior]</c> and <c>[GlobalBehavior]</c>s; their classes and behavior
 ///     methods must be public.
 /// </summary>
@@ -20,6 +20,7 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
     [
         Descriptors.ConflictingMessageInterfaces,
         Descriptors.UnsupportedTypeShape,
+        Descriptors.UnsealedRequest,
         Descriptors.NotEffectivelyPublic,
         Descriptors.MisplacedPublishStrategy,
     ];
@@ -182,6 +183,13 @@ public sealed class MessageTypeAnalyzer : DiagnosticAnalyzer
                     : "is nested in a generic type, so it cannot be a request or notification";
             context.ReportDiagnostic(Diagnostic.Create(Descriptors.UnsupportedTypeShape, location, typeName, reason));
             return;
+        }
+
+        // KRX024, in every assembly: generic dispatch tests each request type with a type pattern, which matches derived types too, so a
+        // request type that is not abstract (or closed) must be sealed. A struct always is. Notifications may be derived from.
+        if (( messageType.IsRequest || messageType.IsStream ) && type.TypeKind == TypeKind.Class && !type.IsSealed)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(Descriptors.UnsealedRequest, location, messageType.IsRequest ? "Request type" : "Stream request type", typeName));
         }
 
         if (isHost)

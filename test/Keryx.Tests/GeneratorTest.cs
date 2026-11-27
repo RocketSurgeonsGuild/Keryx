@@ -1,6 +1,7 @@
 using System.Runtime.Loader;
 using Keryx.Analyzers;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Rocket.Surgery.Extensions.Testing;
 using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 
@@ -30,7 +31,8 @@ public abstract class GeneratorTest() : LoggerTest(Defaults.LoggerTest)
     ///     <see cref="LibraryKind" />), with nullable enabled, from one source named <c>{assemblyName}.cs</c>, and fails with its errors if it
     ///     does not compile. The library is loaded into the test's load context, where a host that references it resolves it by name, unless
     ///     <paramref name="ownLoadContext" /> gives it a load context of its own: a second build of an assembly name the test already built
-    ///     (another version of it), which cannot share a load context with the first.
+    ///     (another version of it), which cannot share a load context with the first. <paramref name="languageVersion" /> sets the C# version
+    ///     (the builder's default without it), for a library that uses a preview feature such as <c>closed</c> types.
     /// </summary>
     protected async Task<GeneratorTestResults> CompileLibraryAsync(
         string assemblyName,
@@ -38,7 +40,8 @@ public abstract class GeneratorTest() : LoggerTest(Defaults.LoggerTest)
         CancellationToken cancellationToken,
         IEnumerable<GeneratorTestResults>? references = null,
         LibraryKind kind = LibraryKind.Handlers,
-        bool ownLoadContext = false
+        bool ownLoadContext = false,
+        LanguageVersion? languageVersion = null
     )
     {
         var builder = kind switch
@@ -48,6 +51,11 @@ public abstract class GeneratorTest() : LoggerTest(Defaults.LoggerTest)
             LibraryKind.Host => GeneratorBuilderConstants.Builder.WithGenerator<HostGenerator>().WithKeryxHost(),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
+        if (languageVersion is { } version)
+        {
+            builder = builder.WithLanguageVersion(version);
+        }
+
         var result = await builder.WithAssemblyLoadContext(ownLoadContext ? NewLoadContext() : AssemblyLoadContext)
                                   .WithProjectName(assemblyName)
                                   .WithNullableContext(NullableContextOptions.Enable)

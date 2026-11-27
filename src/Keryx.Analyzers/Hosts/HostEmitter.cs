@@ -14,8 +14,9 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Writes the host's generated types (ADR 0001, Generated host), built with <see cref="SyntaxFactory" /> (<see cref="GeneratedSyntax" />):
-///     the scoped <c>KeryxMediator</c> with its typed overloads, generic exact-type dispatch (runtime-type dispatch for notifications) as
-///     switch statements, lazy pipeline contexts and flat link structs (ADR 0001, Generated pipeline shape), and
+///     the scoped <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request
+///     and stream request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts and
+///     flat link structs (ADR 0001, Generated pipeline shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
 ///     their behavior methods directly, and the pipeline contexts resolve their injected services.
 /// </summary>
@@ -242,25 +243,6 @@ internal static partial class HostEmitter
             statements.Add(Call(Qualified(ThrowIfNull), Id("request")));
         }
 
-        if (!request.MessageIsSealed)
-        {
-            // Dispatch is by exact runtime type: a derived request statically typed as this one goes to its own handler (OQ-31).
-            statements.Add(
-                IfStatement(
-                    NotEqual(Invoke(Member(Id("request"), "GetType")), TypeOf(request.MessageType)),
-                    Block(
-                        Return(
-                            Invoke(
-                                Generic("Send", TypeName(request.ResponseType!)),
-                                Cast(TypeName($"global::Keryx.IRequest<{request.ResponseType}>"), Id("request")),
-                                Id(CancellationTokenName)
-                            )
-                        )
-                    )
-                )
-            );
-        }
-
         statements.Add(Return(Invoke(Id(CoreName(index)), Id("request"), Id(CancellationTokenName))));
         return Method(
                    Modifiers(SyntaxKind.PublicKeyword),
@@ -291,13 +273,10 @@ internal static partial class HostEmitter
                     .Statements(
                          [
                              Call(Qualified(ThrowIfNull), Id("request")),
-                             Var("requestType", Invoke(Member(Id("request"), "GetType"))),
-                             .. Dispatch(
-                                 "requestType",
+                             .. RequestDispatch(
+                                 requests,
                                  "__RequestIndex",
-                                 requests.Select(static r => r.MessageType).ToImmutableArray(),
-                                 static (_, i) => Invoke(Id(DispatchName(i)), Id("request"), Id(CancellationTokenName)),
-                                 ThrowStatement(Invoke(Id("__HandlerNotFound"), Id("requestType")))
+                                 static (_, i, request) => Invoke(Generic(DispatchName(i), TypeName("TResponse")), request, Id(CancellationTokenName))
                              ),
                          ]
                      )
@@ -318,24 +297,78 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The statements that dispatch a generic entry point on the exact runtime type (ADR 0001, Generic entry points): up to
-    ///     <see cref="DispatchThreshold" /> types, <c>switch (type) { case var _ when type == typeof(X): return ...; }</c>, exact-type
-    ///     <c>when</c> guards and never type patterns (<c>case X x:</c> is <c>isinst</c>, which a derived type also matches); above it,
-    ///     <c>switch (Index(type)) { case 0: return ...; }</c>, which compiles to a jump table; then the fallback. Without types, the fallback
-    ///     alone.
+    ///     The statements that dispatch generic <c>Send</c> or <c>Stream</c> on the request's runtime type (ADR 0001, Generic entry points). Up
+    ///     to <see cref="DispatchThreshold" /> types, a type pattern per request type, <c>switch (request) { case global::X r: return ...;
+    ///     default: throw __HandlerNotFound(request.GetType()); }</c>: every request type the host composes is sealed (KRX024, KRX038), so the
+    ///     pattern matches the exact type only, and the JIT compiles it to one method-table compare. Above the threshold,
+    ///     <c>var requestType = request.GetType();</c> and <c>switch (Index(requestType)) { case 0: return ...; default: throw ...; }</c>, which
+    ///     compiles to a jump table on the exact type. Without types, the throw alone.
     /// </summary>
     /// <remarks>
-    ///     A switch statement with one <c>return</c> per section, not the <c>return type switch { ... };</c> expression of owner decision 7: C#
-    ///     lowers a switch expression to one result local that every arm stores and a single return, and the JIT then neither tail-calls the
-    ///     arms nor avoids zeroing that <c>ValueTask</c> in the prolog, which measured slower (OQ-67, open). The statement keeps the same
-    ///     compares and jump table.
+    ///     A switch statement with one <c>return</c> per section, not a switch expression: C# lowers a switch expression to one result local
+    ///     that every arm stores and a single return, and the JIT then neither tail-calls the arms nor avoids zeroing that result in the prolog
+    ///     (OQ-67). A struct request's section has no designation (<c>case global::S:</c>) and its arm gets <c>request</c> as the interface and
+    ///     unboxes it itself: a pattern variable would unbox the struct into a local of the dispatching method, which the JIT zeroes in the
+    ///     prolog of every call (it holds references) and whose copy keeps that arm from being a tail call.
     /// </remarks>
+    /// <param name="requests">The dispatched request or stream request types, in switch order.</param>
+    /// <param name="lookup">The index method above the threshold.</param>
+    /// <param name="arm">
+    ///     The result of the section of type <c>i</c>, given the request: as its exact type for a class, as the interface-typed <c>request</c>
+    ///     for a struct.
+    /// </param>
+    private static StatementSyntax[] RequestDispatch(
+        ImmutableArray<HostHandlerModel> requests,
+        string lookup,
+        Func<HostHandlerModel, int, ExpressionSyntax, ExpressionSyntax> arm
+    )
+    {
+        if (requests.IsEmpty)
+        {
+            return [ThrowStatement(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))];
+        }
+
+        var sections = new List<SwitchSectionSyntax>(requests.Length + 1);
+        if (requests.Length > DispatchThreshold)
+        {
+            for (var i = 0; i < requests.Length; i++)
+            {
+                var request = requests[i];
+                var exact = request.MessageIsValueType ? Id("request") : Exact(request.MessageType, false, Id("request"));
+                sections.Add(ConstantSection(i, Return(arm(request, i, exact))));
+            }
+
+            sections.Add(DefaultSection(ThrowStatement(Invoke(Id("__HandlerNotFound"), Id("requestType")))));
+            return [Var("requestType", Invoke(Member(Id("request"), "GetType"))), SwitchStatement(Invoke(Id(lookup), Id("requestType")), List(sections))];
+        }
+
+        for (var i = 0; i < requests.Length; i++)
+        {
+            var request = requests[i];
+            sections.Add(
+                request.MessageIsValueType
+                    ? TypeSection(request.MessageType, null, Return(arm(request, i, Id("request"))))
+                    : TypeSection(request.MessageType, "r", Return(arm(request, i, Id("r"))))
+            );
+        }
+
+        sections.Add(DefaultSection(ThrowStatement(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))));
+        return [SwitchStatement(Id("request"), List(sections))];
+    }
+
+    /// <summary>
+    ///     The statements that dispatch generic <c>Publish</c> on the exact runtime type of a notification held as a reference (ADR 0001,
+    ///     Generic entry points): notification types are not sealed (a handler of a base type receives derived notifications through the
+    ///     host's expansion, so a type pattern would match a derived type the host does not know), so up to <see cref="DispatchThreshold" />
+    ///     types the sections keep exact-type guards, <c>switch (type) { case var _ when type == typeof(X): return ...; default: ... }</c>;
+    ///     above it, <c>switch (Index(type)) { case 0: return ...; default: ... }</c>, which compiles to a jump table.
+    /// </summary>
     /// <param name="typeVariable">The local that holds the runtime type.</param>
     /// <param name="lookup">The index method above the threshold.</param>
     /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
     /// <param name="arm">The result of the section of type <c>i</c>.</param>
-    /// <param name="fallback">The statement for any other type: a <c>throw</c> or <c>return default;</c>.</param>
-    private static StatementSyntax[] Dispatch(
+    /// <param name="fallback">The statement of the <c>default</c> section.</param>
+    private static StatementSyntax[] ExactTypeDispatch(
         string typeVariable,
         string lookup,
         ImmutableArray<string> types,
@@ -348,7 +381,7 @@ internal static partial class HostEmitter
             return [fallback];
         }
 
-        var sections = new List<SwitchSectionSyntax>(types.Length);
+        var sections = new List<SwitchSectionSyntax>(types.Length + 1);
         if (types.Length > DispatchThreshold)
         {
             for (var i = 0; i < types.Length; i++)
@@ -356,7 +389,8 @@ internal static partial class HostEmitter
                 sections.Add(ConstantSection(i, Return(arm(types[i], i))));
             }
 
-            return [SwitchStatement(Invoke(Id(lookup), Id(typeVariable)), List(sections)), fallback];
+            sections.Add(DefaultSection(fallback));
+            return [SwitchStatement(Invoke(Id(lookup), Id(typeVariable)), List(sections))];
         }
 
         for (var i = 0; i < types.Length; i++)
@@ -364,7 +398,8 @@ internal static partial class HostEmitter
             sections.Add(WhenSection(Equal(Id(typeVariable), TypeOf(types[i])), Return(arm(types[i], i))));
         }
 
-        return [SwitchStatement(Id(typeVariable), List(sections)), fallback];
+        sections.Add(DefaultSection(fallback));
+        return [SwitchStatement(Id(typeVariable), List(sections))];
     }
 
     /// <summary>
@@ -405,10 +440,11 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     One arm of generic dispatch: the request is reinterpreted as its exact type (a class with <c>Unsafe.As</c>, a struct unboxed), and
-    ///     the arm's <c>ValueTask&lt;X&gt;</c> as <c>ValueTask&lt;TResponse&gt;</c>, which is the same type at run time because
-    ///     <c>IRequest&lt;&gt;</c> is invariant and a request implements exactly one closing (KRX011). Never a cast through <c>object</c>,
-    ///     which would box the result.
+    ///     One arm of generic dispatch: a class request arrives as its exact type (the switch section's type pattern, or above the threshold
+    ///     the request reinterpreted with <c>Unsafe.As</c>); a struct request arrives as <c>IRequest&lt;TResponse&gt;</c> and is unboxed here,
+    ///     so the dispatching method holds no struct local (<see cref="RequestDispatch" />). It reinterprets the arm's
+    ///     <c>ValueTask&lt;X&gt;</c> as <c>ValueTask&lt;TResponse&gt;</c>, which is the same type at run time because <c>IRequest&lt;&gt;</c>
+    ///     is invariant and a request implements exactly one closing (KRX011). Never a cast through <c>object</c>, which would box the result.
     /// </summary>
     /// <remarks>
     ///     Each arm is its own method, not inlined, so the dispatching method holds no address-taken locals: with one <c>Unsafe.As(ref ...)</c>
@@ -420,13 +456,23 @@ internal static partial class HostEmitter
                 Modifiers(SyntaxKind.PrivateKeyword),
                 TypeName($"{ValueTask}<TResponse>"),
                 DispatchName(index),
-                Params(Param(TypeName("global::Keryx.IRequest<TResponse>"), "request"), Param(TypeName(CancellationToken), CancellationTokenName))
+                Params(
+                    Param(TypeName(request.MessageIsValueType ? "global::Keryx.IRequest<TResponse>" : request.MessageType), "request"),
+                    Param(TypeName(CancellationToken), CancellationTokenName)
+                )
             )
            .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TResponse"))))
            .AddAttributeLists(NoInliningAttribute())
            .Statements(
                 [
-                    Var("response", Invoke(Id(CoreName(index)), Exact(request.MessageType, request.MessageIsValueType, Id("request")), Id(CancellationTokenName))),
+                    Var(
+                        "response",
+                        Invoke(
+                            Id(CoreName(index)),
+                            request.MessageIsValueType ? Exact(request.MessageType, true, Id("request")) : Id("request"),
+                            Id(CancellationTokenName)
+                        )
+                    ),
                     Return(
                         Invoke(
                             Member(Qualified(Unsafe), Generic("As", TypeName($"{ValueTask}<{request.ResponseType}>"), TypeName($"{ValueTask}<TResponse>"))),

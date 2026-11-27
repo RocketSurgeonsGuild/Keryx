@@ -12,8 +12,9 @@ namespace Keryx.Tests.Hosts;
 /// <summary>
 ///     Generic dispatch above <see cref="HostEmitter.DispatchThreshold" /> (ADR 0001, Generic entry points): the generic <c>Send</c>,
 ///     <c>Stream</c> and <c>Publish&lt;T&gt;</c> look the runtime type up in a <c>FrozenDictionary</c> and jump on its index; at or below the
-///     threshold they compare types one after another. The jump table matches the exact runtime type only: a type derived from a handled
-///     message, with no handler of its own, is not dispatched to the base type's handler. Each kind is checked at the boundary in the
+///     threshold they test types one after another (type patterns on the sealed request and stream request types, exact-type guards on
+///     notification types). The jump table matches the exact runtime type only: a type derived from a handled message, with no handler of
+///     its own, is not dispatched to the base type's handler. Each kind is checked at the boundary in the
 ///     generated syntax and in the compiled IL (a <c>switch</c> opcode above the threshold, none at or below it), and at run time above it;
 ///     the generated mediator of each kind at the boundary, and of a host with every kind above it, is snapshotted.
 /// </summary>
@@ -55,20 +56,18 @@ public class JumpTableDispatchTests : HostTest
     }
 
     [Test]
-    [Arguments(Kind.Request)]
-    [Arguments(Kind.Stream)]
-    [Arguments(Kind.Notification)]
-    public async Task A_Derived_Type_Is_Not_Dispatched_To_Its_Base_Types_Handler_Above_The_Threshold(Kind kind, CancellationToken cancellationToken)
+    public async Task A_Derived_Notification_Is_Not_Dispatched_To_Its_Base_Types_Handler_Above_The_Threshold(CancellationToken cancellationToken)
     {
-        // A type the host does not know, derived from one it dispatches: the jump table holds exact types only, so it takes the default arm
-        // (not found for a request or a stream request, nothing to run for a notification) instead of the base type's handler.
+        // A notification type the host does not know, derived from one it dispatches: the jump table holds exact types only, so it takes the
+        // default arm (nothing to run) instead of the base type's handler. Request and stream request types cannot be derived from: a host
+        // composes only sealed ones (KRX024, KRX038), which A_Request_Type_That_Is_Not_Sealed_Is_Not_Dispatched_Above_The_Threshold covers.
         var count = HostEmitter.DispatchThreshold + 1;
-        var hostResult = await HostBuilder.AddSources(Usings + Messages(kind, count)).Build().GenerateAsync(cancellationToken);
+        var hostResult = await HostBuilder.AddSources(Usings + Messages(Kind.Notification, count)).Build().GenerateAsync(cancellationToken);
         hostResult.AssertCompilationWasSuccessful();
         var host = hostResult.Assembly!;
         var late = await CompileLibraryAsync(
             "Late",
-            string.Create(CultureInfo.InvariantCulture, $"namespace Late;\n\npublic sealed record Derived(int Value) : {TypeName(kind, 0)}(Value);\n"),
+            string.Create(CultureInfo.InvariantCulture, $"namespace Late;\n\npublic sealed record Derived(int Value) : {TypeName(Kind.Notification, 0)}(Value);\n"),
             cancellationToken,
             references: [hostResult],
             kind: LibraryKind.Plain
@@ -79,26 +78,48 @@ public class JumpTableDispatchTests : HostTest
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
         // The base type itself is dispatched to its handler.
-        var handled = Create(host, TypeName(kind, 0), 7);
+        _ = Call<string[]>(host, "Sample.Log", "Take");
+        await mediator.Publish((INotification)Create(host, TypeName(Kind.Notification, 0), 7), cancellationToken);
+        await Assert.That(Call<string[]>(host, "Sample.Log", "Take")).IsEquivalentTo(["00 7"]);
+        await mediator.Publish((INotification)derived, cancellationToken);
+        await Assert.That(Call<string[]>(host, "Sample.Log", "Take")).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(Kind.Request)]
+    [Arguments(Kind.Stream)]
+    public async Task A_Request_Type_That_Is_Not_Sealed_Is_Not_Dispatched_Above_The_Threshold(Kind kind, CancellationToken cancellationToken)
+    {
+        // A request or stream request type that is not sealed (KRX024 is not part of this compilation, as if it were suppressed) is not
+        // composed (OQ-68): it has no section in the jump table and no typed overload, so sending it throws not-found, while its sealed
+        // siblings above the threshold still dispatch.
+        var count = HostEmitter.DispatchThreshold + 1;
+        var open = kind == Kind.Request
+            ? "public record Open(int Value) : IRequest<int>;\npublic static partial class OpenHandler { private static int Handle(Open request) => -1; }\n"
+            : "public record Open(int Value) : IStreamRequest<int>;\npublic static partial class OpenHandler { private static IAsyncEnumerable<int> Handle(Open request) => null!; }\n";
+        var hostResult = await HostBuilder.AddSources(Usings + Messages(kind, count) + open).Build().GenerateAsync(cancellationToken);
+        hostResult.AssertCompilationWasSuccessful();
+        var host = hostResult.Assembly!;
+        await using var provider = BuildProvider(host);
+        await using var scope = provider.CreateAsyncScope();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+
+        await Assert.That(TestSources.HostSource(hostResult, HostEmitter.MediatorHintName)).DoesNotContain("global::Sample.Open");
+        await Assert.That(mediator.GetType().GetMethods().Where(static m => m.GetParameters() is [{ ParameterType.Name: "Open" }, ..])).IsEmpty();
+        var unsealed = Create(host, "Sample.Open", 7);
+        var sibling = Create(host, TypeName(kind, 0), 7);
         switch (kind)
         {
             case Kind.Request:
-                await Assert.That(await mediator.Send((IRequest<int>)handled, cancellationToken)).IsEqualTo(7);
-                var request = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => Ignore(mediator.Send((IRequest<int>)derived, cancellationToken)));
-                await Assert.That(request.RequestType).IsEqualTo(derived.GetType());
+                await Assert.That(await mediator.Send((IRequest<int>)sibling, cancellationToken)).IsEqualTo(7);
+                var request = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => Ignore(mediator.Send((IRequest<int>)unsealed, cancellationToken)));
+                await Assert.That(request.RequestType).IsEqualTo(unsealed.GetType());
                 break;
             case Kind.Stream:
-                await Assert.That(await ToListAsync(mediator.Stream((IStreamRequest<int>)handled, cancellationToken), cancellationToken))
+                await Assert.That(await ToListAsync(mediator.Stream((IStreamRequest<int>)sibling, cancellationToken), cancellationToken))
                             .IsEquivalentTo([0, 7], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-                var stream = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => _ = mediator.Stream((IStreamRequest<int>)derived, cancellationToken));
-                await Assert.That(stream.RequestType).IsEqualTo(derived.GetType());
-                break;
-            case Kind.Notification:
-                _ = Call<string[]>(host, "Sample.Log", "Take");
-                await mediator.Publish((INotification)handled, cancellationToken);
-                await Assert.That(Call<string[]>(host, "Sample.Log", "Take")).IsEquivalentTo(["00 7"]);
-                await mediator.Publish((INotification)derived, cancellationToken);
-                await Assert.That(Call<string[]>(host, "Sample.Log", "Take")).IsEmpty();
+                var stream = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => _ = mediator.Stream((IStreamRequest<int>)unsealed, cancellationToken));
+                await Assert.That(stream.RequestType).IsEqualTo(unsealed.GetType());
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
@@ -184,7 +205,7 @@ public class JumpTableDispatchTests : HostTest
     {
         // The generated mediator, so a change to the generic dispatch (the linear comparisons at the threshold, the FrozenDictionary index
         // and its switch above it) shows up in review as a snapshot diff.
-        var result = await HostBuilder.AddSources(Usings + Messages(count, sealedTypes: true, kind)).Build().GenerateAsync(cancellationToken);
+        var result = await HostBuilder.AddSources(Usings + Messages(count, Sealed, kind)).Build().GenerateAsync(cancellationToken);
 
         result.AssertCompilationWasSuccessful();
         await VerifyMediator(result).UseParameters(kind, count);
@@ -194,7 +215,7 @@ public class JumpTableDispatchTests : HostTest
     public async Task The_Generated_Generic_Dispatch_Of_A_Host_With_Every_Kind_Above_The_Threshold(CancellationToken cancellationToken)
     {
         // Each kind gets its own table and index lookup; one kind's dispatch must not reach another kind's types.
-        var result = await HostBuilder.AddSources(Usings + Messages(HostEmitter.DispatchThreshold + 1, sealedTypes: true, Kind.Request, Kind.Stream, Kind.Notification))
+        var result = await HostBuilder.AddSources(Usings + Messages(HostEmitter.DispatchThreshold + 1, Sealed, Kind.Request, Kind.Stream, Kind.Notification))
                                       .Build()
                                       .GenerateAsync(cancellationToken);
 
@@ -202,20 +223,25 @@ public class JumpTableDispatchTests : HostTest
         await VerifyMediator(result);
     }
 
+    /// <summary>The modifiers of sealed message records.</summary>
+    private const string Sealed = "public sealed";
+
+    /// <summary>The modifiers of notification records, which another assembly can derive from.</summary>
+    private const string Unsealed = "public";
+
     /// <summary>
-    ///     <paramref name="count" /> messages of one kind, each with its own handler, as non-sealed records (so another assembly can derive from
-    ///     them): <c>R{n}</c> answers <c>Value + n</c>, <c>S{n}</c> streams <c>n</c> then <c>Value</c>, and <c>N{n}</c> logs <c>"{n} {Value}"</c>
-    ///     to <c>Sample.Log</c>.
+    ///     <paramref name="count" /> messages of one kind, each with its own handler: <c>R{n}</c> answers <c>Value + n</c>, <c>S{n}</c> streams
+    ///     <c>n</c> then <c>Value</c>, and <c>N{n}</c> logs <c>"{n} {Value}"</c> to <c>Sample.Log</c>. Request and stream request records are
+    ///     sealed (KRX024); notification records are not, so another assembly can derive from them.
     /// </summary>
-    private static string Messages(Kind kind, int count) => Messages(count, sealedTypes: false, kind);
+    private static string Messages(Kind kind, int count) => Messages(count, kind == Kind.Notification ? Unsealed : Sealed, kind);
 
     /// <summary>
     ///     <paramref name="count" /> messages of each of <paramref name="kinds" />, each with its own handler, shaped as
-    ///     <see cref="Messages(Kind, int)" /> describes; <paramref name="sealedTypes" /> seals the records.
+    ///     <see cref="Messages(Kind, int)" /> describes, declared with <paramref name="modifiers" />.
     /// </summary>
-    private static string Messages(int count, bool sealedTypes, params Kind[] kinds)
+    private static string Messages(int count, string modifiers, params Kind[] kinds)
     {
-        var modifiers = sealedTypes ? "public sealed" : "public";
         var builder = new StringBuilder("namespace Sample;\n\n");
         builder.Append(
             """

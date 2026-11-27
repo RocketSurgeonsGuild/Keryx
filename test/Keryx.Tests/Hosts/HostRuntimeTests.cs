@@ -5,7 +5,8 @@ namespace Keryx.Tests.Hosts;
 
 /// <summary>
 ///     Compiles a host and sends through the generated mediator (ADR 0001, Generated host; the Phase 3 brief): typed and generic paths,
-///     value-type and reference-type responses, <c>IRequest</c>, struct requests, exact-type dispatch, <c>null</c> and unknown requests,
+///     value-type and reference-type responses, <c>IRequest</c>, struct requests, the sealed cases of an abstract or closed request base, a
+///     request type that is not sealed (KRX024 suppressed) left out of dispatch, <c>null</c> and unknown requests,
 ///     <c>AddKeryx()</c> registrations and injected parameters.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
@@ -54,11 +55,14 @@ public class HostRuntimeTests : HostTest
         public sealed record Wait : IRequest;
         public static partial class WaitHandler { private static async Task Handle(Wait request, CancellationToken ct) => await Task.Yield(); }
 
-        public record Animal(string Name) : IRequest<string>;
-        public static partial class AnimalHandler { private static string Handle(Animal request) => "animal " + request.Name; }
+        /// <summary>An abstract request base: never a request itself, so each sealed case has its own handler and it has none.</summary>
+        public abstract record Animal(string Name) : IRequest<string>;
 
         public sealed record Dog(string Name) : Animal(Name);
         public static partial class DogHandler { private static string Handle(Dog request) => "dog " + request.Name; }
+
+        public sealed record Cat(string Name) : Animal(Name);
+        public static partial class CatHandler { private static string Handle(Cat request) => "cat " + request.Name; }
 
         public sealed record WhoAmI : IRequest<int>;
         public partial class WhoAmIHandler { private static int Handle(WhoAmI request, Identity identity) => identity.Id; }
@@ -125,8 +129,8 @@ public class HostRuntimeTests : HostTest
         await Assert.That(await SendTyped<string>(mediator, Create(host, "Sample.Label", 7), cancellationToken)).IsEqualTo("hello 7");
         await Assert.That(await SendTyped<Unit>(mediator, Create(host, "Sample.Touch"), cancellationToken)).IsEqualTo(Unit.Value);
         await Assert.That(await SendTyped<Unit>(mediator, Create(host, "Sample.Wait"), cancellationToken)).IsEqualTo(Unit.Value);
-        await Assert.That(await SendTyped<string>(mediator, Create(host, "Sample.Animal", "rex"), cancellationToken)).IsEqualTo("animal rex");
         await Assert.That(await SendTyped<string>(mediator, Create(host, "Sample.Dog", "rex"), cancellationToken)).IsEqualTo("dog rex");
+        await Assert.That(await SendTyped<string>(mediator, Create(host, "Sample.Cat", "tom"), cancellationToken)).IsEqualTo("cat tom");
     }
 
     [Test]
@@ -145,24 +149,99 @@ public class HostRuntimeTests : HostTest
         await Assert.That(await sender.Send((IRequest<Unit>)Create(host, "Sample.Touch"), cancellationToken)).IsEqualTo(Unit.Value);
         await Assert.That(await sender.Send((IRequest<Unit>)Create(host, "Sample.Wait"), cancellationToken)).IsEqualTo(Unit.Value);
 
-        // A derived request goes to its own handler, never to the base request's (ADR 0001, Dispatch is by exact runtime type).
-        await Assert.That(await sender.Send((IRequest<string>)Create(host, "Sample.Animal", "rex"), cancellationToken)).IsEqualTo("animal rex");
+        // Each sealed case of an abstract request base goes to its own handler (ADR 0001, Requests and notifications).
         await Assert.That(await sender.Send((IRequest<string>)Create(host, "Sample.Dog", "rex"), cancellationToken)).IsEqualTo("dog rex");
+        await Assert.That(await sender.Send((IRequest<string>)Create(host, "Sample.Cat", "tom"), cancellationToken)).IsEqualTo("cat tom");
     }
 
     [Test]
-    public async Task A_Typed_Overload_Sends_A_Derived_Request_To_Its_Own_Handler(CancellationToken cancellationToken)
+    public async Task A_Request_Type_That_Is_Not_Sealed_Is_Not_Dispatched(CancellationToken cancellationToken)
     {
-        var host = await CompileHostAsync(Source, cancellationToken);
-        await using var provider = BuildProvider(host, Registrations(host));
+        // KRX024 makes every request type sealed or abstract (or closed); a project can still turn it off. Such a type is never composed
+        // (OQ-68): a referenced one is KRX038 in the host (turned off here too, so the host builds), the host's own one is its KRX024. It has
+        // no typed overload and no dispatch section, so sending it throws not-found, while its sealed siblings still dispatch.
+        var library = await CompileUnsealedLibraryAsync(cancellationToken);
+        var result = await HostBuilder.WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+                                      .WithAnalyzer<Keryx.Analyzers.Diagnostics.MessageTypeAnalyzer>()
+                                      .AddGlobalOption("dotnet_diagnostic.KRX024.severity", "none")
+                                      .AddGlobalOption("dotnet_diagnostic.KRX038.severity", "none")
+                                      .AddCompilationReferences(library)
+                                      .AddSources(
+                                           Usings
+                                         + """
+                                           namespace Sample;
+
+                                           public record Mine(int Id) : IRequest<string>;
+                                           public static partial class MineHandler { private static string Handle(Mine request) => "mine"; }
+
+                                           public sealed record Ours(int Id) : IRequest<string>;
+                                           public static partial class OursHandler { private static string Handle(Ours request) => "ours " + request.Id; }
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful();
+        var host = result.Assembly!;
+        var open = library.Assembly!;
+        await using var provider = BuildProvider(host);
         await using var scope = provider.CreateAsyncScope();
-        var mediator = scope.ServiceProvider.GetRequiredService(host.GetType("Sample.KeryxMediator", throwOnError: true)!);
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        // The Animal overload, called with a Dog (statically typed as an Animal), still dispatches on the runtime type (OQ-31).
-        var animalOverload = mediator.GetType().GetMethod("Send", [host.GetType("Sample.Animal")!, typeof(CancellationToken)])!;
-        var response = (ValueTask<string>)animalOverload.Invoke(mediator, [Create(host, "Sample.Dog", "rex"), cancellationToken])!;
+        foreach (var type in (Type[])[open.GetType("Open.Get")!, open.GetType("Open.Items")!, host.GetType("Sample.Mine")!])
+        {
+            await Assert.That(mediator.GetType().GetMethods().Where(m => m.GetParameters() is [var first, ..] && first.ParameterType == type)).IsEmpty();
+        }
 
-        await Assert.That(await response).IsEqualTo("dog rex");
+        var get = Create(open, "Open.Get", 1);
+        var notFound = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => Ignore(mediator.Send((IRequest<string>)get, cancellationToken)));
+        await Assert.That(notFound.RequestType).IsEqualTo(get.GetType());
+        var items = Create(open, "Open.Items", 1);
+        var streamNotFound = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => _ = mediator.Stream((IStreamRequest<int>)items, cancellationToken));
+        await Assert.That(streamNotFound.RequestType).IsEqualTo(items.GetType());
+        var mine = Create(host, "Sample.Mine", 1);
+        var ownNotFound = ThrowsSynchronously<KeryxHandlerNotFoundException>(() => Ignore(mediator.Send((IRequest<string>)mine, cancellationToken)));
+        await Assert.That(ownNotFound.RequestType).IsEqualTo(mine.GetType());
+
+        await Assert.That(await mediator.Send((IRequest<string>)Create(open, "Open.Ping", 2), cancellationToken)).IsEqualTo("ping 2");
+        await Assert.That(await mediator.Send((IRequest<string>)Create(open, "Open.Ship", 3), cancellationToken)).IsEqualTo("ship 3");
+        await Assert.That(await mediator.Send((IRequest<string>)Create(open, "Open.Circle", 4), cancellationToken)).IsEqualTo("circle 4");
+        await Assert.That(await mediator.Send((IRequest<string>)Create(host, "Sample.Ours", 5), cancellationToken)).IsEqualTo("ours 5");
+    }
+
+    /// <summary>A closed request base (C# 15, preview) with two sealed cases, each with its own handler.</summary>
+    private static readonly string ClosedShapes = TestSources.ClosedTypeAttribute
+                                                + """
+                                                  namespace Shapes
+                                                  {
+                                                      public closed record Shape : IRequest<string>;
+                                                      public sealed record Circle(int Radius) : Shape;
+                                                      public sealed record Square(int Side) : Shape;
+                                                      public static partial class CircleHandler { private static string Handle(Circle request) => "circle " + request.Radius; }
+                                                      public static partial class SquareHandler { private static string Handle(Square request) => "square " + request.Side; }
+                                                  }
+                                                  """;
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task The_Sealed_Cases_Of_A_Closed_Request_Base_Go_To_Their_Own_Handlers(bool referenced, CancellationToken cancellationToken)
+    {
+        // Declared in the host, or in a referenced library (where the closed base and its cases must live together): the base is never a
+        // request, and each case is dispatched by its type pattern.
+        var library = referenced
+            ? await CompileLibraryAsync("Shapes", "using Keryx;\n" + ClosedShapes, cancellationToken, languageVersion: Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+            : null;
+        var builder = HostBuilder.WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview);
+        builder = library is null ? builder.AddSources(Usings + ClosedShapes) : builder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;\n");
+        var result = await builder.Build().GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful();
+        var shapes = library?.Assembly ?? result.Assembly!;
+        await using var provider = BuildProvider(result.Assembly!);
+        await using var scope = provider.CreateAsyncScope();
+        var sender = scope.ServiceProvider.GetRequiredService<ISender>();
+
+        await Assert.That(await sender.Send((IRequest<string>)Create(shapes, "Shapes.Circle", 2), cancellationToken)).IsEqualTo("circle 2");
+        await Assert.That(await sender.Send((IRequest<string>)Create(shapes, "Shapes.Square", 3), cancellationToken)).IsEqualTo("square 3");
     }
 
     [Test]

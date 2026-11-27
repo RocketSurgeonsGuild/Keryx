@@ -94,8 +94,20 @@ nothing to register for them.
 
 A **request** implements exactly one of `IRequest<TResponse>`, `IRequest` (no response; it is `IRequest<Unit>`) or
 `IStreamRequest<TItem>`. A **notification** implements `INotification`. Requests may be classes, records or structs; they must not be
-generic, nested in a generic type or `ref struct`s ([KRX012](#krx012)). Dispatch is by exact runtime type: a handler for a base request
-never receives a derived one, and every concrete request needs its own handler.
+generic, nested in a generic type or `ref struct`s ([KRX012](#krx012)). A request class or record is `sealed` ([KRX024](#krx024), with a
+code fix); a struct always is. A family of requests is an abstract (or C# 15 `closed`) base with sealed cases, and each case has its own
+handler; the base has none ([KRX003](#krx003) for a handler that takes it):
+
+```csharp
+public abstract record Command : IRequest;
+
+public sealed record Ship(Guid Order) : Command;
+public sealed record Cancel(Guid Order) : Command;
+```
+
+Dispatch is by exact runtime type: a handler never receives another request type. A host composes only sealed request types: one that
+is not sealed (KRX024 turned off) is not dispatched, and a referenced one is the host error [KRX038](#krx038). Notifications need not be
+sealed (see [Notifications](#notifications)).
 
 A **handler** is a method named `Handle` (or `HandleAsync`) with the request as a parameter:
 
@@ -394,13 +406,14 @@ services its behavior methods inject; it never creates a behavior instance. From
 services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
 as long as the scope, and the behaviors of one pipeline that inject the same transient share one instance.
 
-The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a switch statement whose
-sections compare `requestType == typeof(X)`; a `FrozenDictionary` lookup and a jump table above 32 request types) and never boxes the
-response. A struct request is boxed when sent through `ISender`; the typed
-overload avoids it (Info [KRX021](#krx021)). An unknown request type throws `KeryxHandlerNotFoundException`, and so does a type derived
-from a handled request that has no handler of its own: dispatch never falls back to a base type's handler. Generic `Stream` dispatches
-the same way. Generic `Publish` does too, so a notification type the host does not know (even one derived from a type it does) runs
-nothing; polymorphic handlers receive only the types the host knows.
+The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type: a switch statement with a type pattern per
+sealed request type (`case Ping r: return ...;`, one method-table compare each), and above 32 request types a `FrozenDictionary` lookup
+of `request.GetType()` and a jump table. It never boxes the response, and every section returns its handler's pipeline as a tail call.
+A struct request is boxed when sent through `ISender`; the typed overload avoids it (Info [KRX021](#krx021)). An unknown request type
+throws `KeryxHandlerNotFoundException`: dispatch never falls back to a base type's handler. Generic `Stream` dispatches the same way.
+Generic `Publish` compares `notification.GetType()` with each notification type instead (notification types need not be sealed), so a
+notification type the host does not know (even one derived from a type it does) runs nothing; polymorphic handlers receive only the
+types the host knows.
 
 Hosts are Native AOT and trimming safe: CI publishes the [sample host](samples/hosts/Keryx.Samples.Host) with `PublishAot=true`, fails
 on any trim or AOT warning and runs it.
@@ -436,7 +449,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a id="krx001"></a>KRX001      | Error    | A request or stream request has no handler in its assembly (in every assembly, hosts included). Code fix: add a handler stub.                                                               |
 | <a id="krx002"></a>KRX002      | Error    | A handler is not `private static`, or returns a type its request kind does not allow (including `async void`). Code fix: make it `private static`.           |
-| <a id="krx003"></a>KRX003      | Error    | A handler has no request or notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract request or an interface.        |
+| <a id="krx003"></a>KRX003      | Error    | A handler has no request or notification parameter, more than one, or a request parameter typed as `IRequest<T>`, an abstract or closed request base or an interface. |
 | <a id="krx004"></a>KRX004      | Error    | A handler class or a containing type is not `partial`, is file-local, is not `public` outside a host (narrower than `internal` in a host), or is not a class. Code fix: add `partial` (and `public`). |
 | <a id="krx005"></a>KRX005      | Error    | A request has two handlers (in one assembly, or across the host's assemblies; since KRX023 the host check only guards against manifests Keryx did not generate). |
 | <a id="krx006"></a>KRX006      | Error    | A class directly contains more than one handler.                                                                                                              |
@@ -455,6 +468,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx021"></a>KRX021      | Info     | A struct request is boxed when sent through `ISender`; the host's typed overload avoids it.                                                                   |
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
 | <a id="krx023"></a>KRX023      | Error    | A handler takes a request or stream request declared in another assembly. A request's handler lives in the request's own assembly; move the request or the handler. Notifications are not affected. |
+| <a id="krx024"></a>KRX024      | Error    | A request or stream request class or record is neither `sealed` nor abstract (or `closed`). Seal it, or make it an abstract base of sealed requests. Notifications are not affected. Code fix: make it `sealed`. |
 | <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an excluded referenced handler or an internal handler of a referenced host. The host's own requests are KRX001's. Reported without a location: change its severity in a `.globalconfig` or with `<NoWarn>`. |
 | <a id="krx031"></a>KRX031      | Error    | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. The host generator emits nothing there. An executable or test project is a host by default, whatever it targets: set `<KeryxHost>false</KeryxHost>` in one that is not meant to be a host, per target framework when it multi-targets ([Hosts](#hosts), OQ-62). |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
@@ -463,6 +477,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies, once per kind, and the assembly it comes from.                                                                   |
 | <a id="krx036"></a>KRX036      | Warning  | An exclusion has no effect: `ExcludeHandler` names no referenced handler class the host would compose, or `ExcludeBehavior` names a type that is not part of any pipeline. |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
+| <a id="krx038"></a>KRX038      | Error    | A referenced request or stream request type is not sealed (its assembly suppressed [KRX024](#krx024)). The host does not compose it: sending it throws `KeryxHandlerNotFoundException`. Seal it in its own assembly. |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |
 | <a id="krx042"></a>KRX042      | Warning  | `[Behavior]` where it has no effect (including on a notification handler method), or `[GlobalBehavior]` on a class without a behavior kind attribute or on a method that is not a behavior method. |

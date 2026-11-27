@@ -18,8 +18,10 @@ raised while implementing it and are open, and OQ-61 and OQ-62 were raised while
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
 are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
-(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them and are open. "`next` stays a struct link
-interface" (decision 4, which keeps the design as it was) comes last.
+(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them, and OQ-65 and OQ-66 are open. "`next` stays a struct link
+interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
+(decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, OQ-69 is open, and OQ-68, decided by the owner (decision 18),
+comes last.
 
 ## Open
 
@@ -162,40 +164,22 @@ cached), so the cost is paid on a full build and on edits to the pipelines.
   own and assemble the unit (bounded work per member, against the decision's one call per unit), or build the syntax with its trivia and
   skip normalization (Dovetail's pattern without `NormalizeWhitespace`). Needs a decision.
 
-### OQ-67: Switch-expression dispatch loses the arms' tail calls
+### OQ-69: A closed request base from a referenced assembly
 
-Owner decision 7 ("Generic dispatch is a switch expression", at the end) asks for switch expressions in generic `Send`, `Stream` and
-`Publish<TNotification>` and says the change must not regress. C# lowers a switch expression to one result local that every arm stores
-and a single return, and the JIT does not turn that back into tail calls. Measured on the comparison host (`Keryx.Benchmarks.KeryxHost`)
-with every pipeline context kept (OQ-65's interim), so the dispatch shape is the only difference: BenchmarkDotNet 0.15.8 default job,
-net10.0, Apple M4 Max, macOS 27.2, 2026-11-26; "before" is the text emitters' `if` chains, each row from two interleaved runs of the three
-builds (before, switch expressions, switch statements).
+Owner decision 14 ("Requests are sealed", at the end) says to detect closed types without new Roslyn APIs: the `closed` modifier's text on
+the declaring syntax for a type in source, and `IsClosedTypeAttribute` in metadata for a referenced type. Checked with Roslyn 5.12 (the
+tests' compiler; the .NET 11 SDK's compiler was not checked): `GetAttributes()` of a metadata type does not return `IsClosedTypeAttribute`, as it does not
+return the compiler's other marker attributes, so a closed type from a referenced assembly cannot be told from an abstract one through
+the Roslyn 5.0 API. The compiler makes a closed type abstract (`IsAbstract` is `true` in source and in metadata), so every rule (not a
+request, no handler, KRX003 for a handler that takes it, no KRX024) already treats it as a request base; only KRX003's wording ("the
+closed type" or "the abstract type") depends on telling them apart. Also observed: a closed type in a compilation against .NET 10 reference
+assemblies needs `System.Runtime.CompilerServices.IsClosedTypeAttribute` defined (CS0656 otherwise); the tests add it on .NET 10.
 
-- **JIT code** (`DOTNET_TieredCompilation=0`, `DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`): with switch expressions the method-table
-  compares (ten `cmp` in the linear `Send<int>`) and the jump table survive, but the linear `Send<int>` goes from 10 tail calls (`br`) to
-  none, the above-threshold one from 43 to 1, and `Publish<__Canon>` from 2 to 0 (35 to 1 above the threshold); each zeroes a `ValueTask`
-  slot in its prolog (the effect OQ-15 measured with one local per arm). With switch statements of the same sections (one `return` each)
-  the code of all four generic entry points, linear and above the threshold, is instruction for instruction the code of the `if` chains.
-- **Linear** (10 request types): `Publish` generic 2.80/2.81 ns (1 handler) and 3.07/3.04 ns (5 handlers) before, 3.16/3.10 and
-  3.34/3.32 ns with switch expressions (+0.3 ns), 2.89/2.79 and 3.09/3.15 ns with switch statements. `Send` sync generic: before
-  2.99 to 3.48 ns, switch expressions 3.14 to 4.21 ns (one run of depths 0 and 1 +0.6 to 1.0 ns, the other within noise), switch
-  statements 2.98 to 3.54 ns. `DispatchBenchmarks` (hand-written, one full run each): the switch-expression chain 4 to 9% slower than the
-  `if` chain at the middle request from 16 types up (32 types: 2.94 to 3.19 ns), the switch statement 2 to 3% (3.02 ns).
-- **Above the threshold** (42 request types, `KeryxDispatchPadding=true`): `Send` sync generic before 6.25 to 6.70 ns, switch expressions
-  6.38 to 8.23 ns, switch statements 6.36 to 6.83 ns; `Publish` generic noisy in every build (6.10 to 7.02 ns).
-- `Stream` changed by neither shape beyond noise (it was never a tail call: the arm's result is cast), and allocates the same (120 B at
-  depth 0, 680 B at depth 3).
-- The yielding `Send` rows (`SendYieldDepth*`, `SendUnitYield*`, about 1 µs) are bimodal from run to run whatever the build: in the
-  interleaved runs above the threshold, before measured 881 ns to 1.39 µs, switch expressions 905 ns to 1.42 µs and switch statements 900 ns
-  to 1.56 µs, and within one run two depths of the same build differ by 400 ns. Their spread is about 0.4 µs; they show no regression of the
-  dispatch either way.
-
-- **Interim:** switch statements, `switch (requestType) { case var _ when requestType == typeof(X): return __Dispatch0(...); ... }` and
-  `switch (__RequestIndex(requestType)) { case 0: return ...; }`, then `throw __HandlerNotFound(requestType);` (`return default;` in
-  `Publish`; the value-type branch `switch (typeof(TNotification)) { case var _ when typeof(TNotification) == typeof(X): return ...; }`).
-  They keep the exact-type guards, the compares, the IL `switch` opcode above the threshold and the arms' tail calls, and do not regress.
-- **Proposal:** keep the switch statements. Alternative: the switch expressions as decided, at up to about 0.3 ns per generic `Publish`
-  and an occasional 0.3 to 1.8 ns per generic `Send` with a synchronous handler, and nothing through the typed overloads. Needs a decision.
+- **Interim:** `MessageType.IsClosed` reads the modifier from syntax and, for a metadata type, looks for the attribute anyway (so it works
+  with a compiler that returns it); today a referenced closed base is treated, and named in KRX003, as abstract.
+  `HandlerAnalyzerTests.KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly` pins that.
+- **Proposal:** accept: the behavior is right and only a message differs. Alternatives: read Roslyn's own closed-type API through
+  reflection when the running compiler has it, or raise the analyzers' Roslyn floor to a version that exposes it. Needs a decision.
 
 ## Decided
 
@@ -1632,7 +1616,8 @@ overloads keep their single `if` (a two-way check, not a chain). `Hosts/GenericD
 unchanged, and the IL tests still find one `switch` opcode above the threshold and none at or below it. `DispatchBenchmarks` is written in
 the switch-statement shape. The before and after numbers of the comparison benchmarks (linear and above the threshold; the new
 `KeryxDispatchPadding` switch of `Keryx.Benchmarks.KeryxHost` compiles 32 more request, stream request and notification types) are in
-OQ-67. Folded into the ADR (Generic entry points, Alternatives considered), the brief (Phase 3) and the README (Hosts, Benchmarks).
+OQ-67. Folded into the ADR (Generic entry points, Alternatives considered), the brief (Phase 3) and the README (Hosts, Benchmarks). Owner decision 16 later decided OQ-67 for the switch statements (OQ-67, at the end), and decision 14 replaced the
+exact-type guards of `Send` and `Stream` with type patterns ("Requests are sealed", at the end).
 
 ### Links with primary constructors (2026-11-26)
 
@@ -1665,3 +1650,156 @@ the behavior method instead of `TNext`, and their stream and notification counte
 an indirect call that the JIT does not inline, one per pipeline step, and each delegate bound to a pipeline context is a heap object
 allocated per scope (per pipeline and position, or per call when it captures the request). Nothing in the code changes. Folded into the
 ADR (Behavior kinds, Alternatives considered), the brief (Phase 1) and the README (Behaviors).
+
+### OQ-67: Switch-expression dispatch loses the arms' tail calls (2026-11-26)
+
+Owner decision 7 ("Generic dispatch is a switch expression", at the end) asks for switch expressions in generic `Send`, `Stream` and
+`Publish<TNotification>` and says the change must not regress. C# lowers a switch expression to one result local that every arm stores
+and a single return, and the JIT does not turn that back into tail calls. Measured on the comparison host (`Keryx.Benchmarks.KeryxHost`)
+with every pipeline context kept (OQ-65's interim), so the dispatch shape is the only difference: BenchmarkDotNet 0.15.8 default job,
+net10.0, Apple M4 Max, macOS 27.2, 2026-11-26; "before" is the text emitters' `if` chains, each row from two interleaved runs of the three
+builds (before, switch expressions, switch statements).
+
+- **JIT code** (`DOTNET_TieredCompilation=0`, `DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`): with switch expressions the method-table
+  compares (ten `cmp` in the linear `Send<int>`) and the jump table survive, but the linear `Send<int>` goes from 10 tail calls (`br`) to
+  none, the above-threshold one from 43 to 1, and `Publish<__Canon>` from 2 to 0 (35 to 1 above the threshold); each zeroes a `ValueTask`
+  slot in its prolog (the effect OQ-15 measured with one local per arm). With switch statements of the same sections (one `return` each)
+  the code of all four generic entry points, linear and above the threshold, is instruction for instruction the code of the `if` chains.
+- **Linear** (10 request types): `Publish` generic 2.80/2.81 ns (1 handler) and 3.07/3.04 ns (5 handlers) before, 3.16/3.10 and
+  3.34/3.32 ns with switch expressions (+0.3 ns), 2.89/2.79 and 3.09/3.15 ns with switch statements. `Send` sync generic: before
+  2.99 to 3.48 ns, switch expressions 3.14 to 4.21 ns (one run of depths 0 and 1 +0.6 to 1.0 ns, the other within noise), switch
+  statements 2.98 to 3.54 ns. `DispatchBenchmarks` (hand-written, one full run each): the switch-expression chain 4 to 9% slower than the
+  `if` chain at the middle request from 16 types up (32 types: 2.94 to 3.19 ns), the switch statement 2 to 3% (3.02 ns).
+- **Above the threshold** (42 request types, `KeryxDispatchPadding=true`): `Send` sync generic before 6.25 to 6.70 ns, switch expressions
+  6.38 to 8.23 ns, switch statements 6.36 to 6.83 ns; `Publish` generic noisy in every build (6.10 to 7.02 ns).
+- `Stream` changed by neither shape beyond noise (it was never a tail call: the arm's result is cast), and allocates the same (120 B at
+  depth 0, 680 B at depth 3).
+- The yielding `Send` rows (`SendYieldDepth*`, `SendUnitYield*`, about 1 µs) are bimodal from run to run whatever the build: in the
+  interleaved runs above the threshold, before measured 881 ns to 1.39 µs, switch expressions 905 ns to 1.42 µs and switch statements 900 ns
+  to 1.56 µs, and within one run two depths of the same build differ by 400 ns. Their spread is about 0.4 µs; they show no regression of the
+  dispatch either way.
+
+- **Interim:** switch statements, `switch (requestType) { case var _ when requestType == typeof(X): return __Dispatch0(...); ... }` and
+  `switch (__RequestIndex(requestType)) { case 0: return ...; }`, then `throw __HandlerNotFound(requestType);` (`return default;` in
+  `Publish`; the value-type branch `switch (typeof(TNotification)) { case var _ when typeof(TNotification) == typeof(X): return ...; }`).
+  They keep the exact-type guards, the compares, the IL `switch` opcode above the threshold and the arms' tail calls, and do not regress.
+- **Proposal:** keep the switch statements. Alternative: the switch expressions as decided, at up to about 0.3 ns per generic `Publish`
+  and an occasional 0.3 to 1.8 ns per generic `Send` with a synchronous handler, and nothing through the typed overloads. Needs a decision.
+- **Decision:** switch statements (owner decision 16, 2026-11-26), superseding decision 7's switch expressions. With "Requests are
+  sealed" (below) the linear sections of generic `Send` and `Stream` are type patterns, `switch (request) { case global::Sample.Ping r:
+  return __Dispatch0<TResponse>(r, cancellationToken); ... default: throw __HandlerNotFound(request.GetType()); }`; above the threshold
+  `var requestType = request.GetType(); switch (__RequestIndex(requestType)) { case 0: return ...; ... default: throw
+  __HandlerNotFound(requestType); }`; `Publish<TNotification>` keeps exact-type guards and ends `default: return default;` (both its
+  branches). The tail calls are kept (JIT code below, under "Requests are sealed"). Folded into the ADR (status, Generic entry points,
+  Alternatives considered), the brief (Phase 3) and the README (Hosts).
+
+### Requests are sealed (2026-11-26)
+
+Owner decision 14 of the second rework. Request and stream request types (types implementing `IRequest`, `IRequest<T>` or
+`IStreamRequest<T>`) are sealed or part of a closed hierarchy; notifications and interfaces deriving the message interfaces are not
+affected.
+
+- A request or stream request class or record that is neither `sealed` nor abstract is the new error **KRX024** ("Request type 'Get' is
+  not sealed; make it sealed, or abstract (or closed) if it is the base of other request types"; "Stream request type" for a stream
+  request), reported by `MessageTypeAnalyzer` on the type, in libraries and hosts. KRX024 is the next free ID in the per-assembly range
+  (KRX010, the draft's "request is not sealed", stays retired; KRX020 too). Structs are always sealed. The code fix _Make sealed_
+  (`SealRequestCodeFixProvider`, equivalence key `Keryx.MakeSealed`) adds `sealed` to the declaration the diagnostic is on, after its
+  accessibility and `new` modifiers, keeping `partial` and the rest (one part of a partial type is enough). It is not offered when the
+  type declares a `virtual` or `protected` (`protected internal`, `private protected`) member that does not override one, including a
+  record's own `PrintMembers` or copy constructor: sealing would not compile (CS0549, CS8879) or would warn (CS0628); a second code-fix
+  snapshot covers those shapes and an `override` that still gets the fix.
+- Abstract bases (`abstract record Command : IRequest<Unit>`, `abstract record Query<T> : IRequest<T>`) and C# 15 closed types are
+  allowed as request bases. The compiler makes a closed type abstract, in source and in metadata, so every rule treats it as an abstract
+  base. The analyzers build against Roslyn 5.0, so `MessageType.IsClosed` reads the `closed` modifier's token text on the declaring
+  syntax and, for a metadata type, looks for `IsClosedTypeAttribute`; Roslyn 5.12 does not return that attribute from `GetAttributes`,
+  so a referenced closed base is named as abstract (OQ-69, open).
+- A handler of an abstract or closed request base reuses **KRX003** ("Handler 'H.Handle(Shape)' must take a sealed request type, not the
+  closed type 'Shape'; each sealed request type has its own handler"; "the abstract type", "the interface" for the other shapes); each
+  sealed case has its own handler (KRX001).
+- Dispatch: generic `Send` and `Stream` use type-pattern switch statements (OQ-67 above); each arm `__Dispatch{n}<TResponse>` takes the
+  request as its exact type (called with an explicit `<TResponse>`, which a parameter of the concrete type cannot infer), and above the
+  threshold the section reinterprets it with `Unsafe.As` (or unboxes a struct) at the call. Typed overloads of sealed requests have no
+  runtime type check. `Publish<TNotification>` keeps exact-type guards, because notification types are not sealed: a type pattern would
+  send a derived notification the host does not know to its base type's pipeline. A request type that is not sealed reaches a host only
+  with KRX024 suppressed; it is never composed, and a referenced one is the host error KRX038 (OQ-68, at the end). Review follow-up: a
+  struct request's section has no pattern variable (`case global::S:`), and its arm takes `IRequest<TResponse>` and unboxes inside, as
+  before this decision; with the pattern variable the struct was unboxed into a local of `Send`, which a 32-byte struct with references
+  made the JIT zero (64 bytes) in the prolog of every generic `Send` and copy for its arm, which then was no tail call (a probe host with
+  `readonly record struct Big(string A, string B, string C, long D)` and five class requests: 4 of 5 tail calls; with the fix 6 of 6, a
+  0x20 frame and no zeroing, `DOTNET_TieredCompilation=0`, net10.0 arm64). A struct stream request's section likewise has no designation
+  and is unboxed as the arm's argument. The comparison host has no struct request, and its generic `Send`, `Stream` and `Publish` code is
+  instruction for instruction unchanged (10 / 43 / 2 / 35 tail calls).
+- Tests: KRX024 positive (class, record, `IRequest`, stream request, a non-sealed case of an abstract base, a partial type, a nested type,
+  in a host) and negative (sealed, structs, abstract bases with sealed cases, a sealed partial type, interfaces, notifications);
+  closed bases with C# preview (sealed cases, a closed base of a closed base, a case that is not sealed); KRX003 for an abstract, generic
+  abstract, closed and interface request base, for an abstract and a closed stream request base, and for a closed base from a referenced
+  assembly; the code-fix snapshots; host runtime tests
+  for the sealed cases of an abstract base (typed and generic, requests and streams) and of a closed base declared in the host or a
+  referenced library; the KRX024-suppressed tests of OQ-68; `GenericDispatch` counts type-pattern sections as type tests. On .NET 10 a
+  compilation with a closed type needs `IsClosedTypeAttribute` defined (CS0656); the tests add it there (`TestSources.ClosedTypeAttribute`).
+  Updated fixtures that used requests that were not sealed: the host snapshot's `Animal`, `StreamGeneratorTests`' `Shapes` (now an
+  abstract base with a sealed `Circles`), `HostRuntimeTests`' `Animal`/`Dog` (an abstract base with `Dog` and `Cat`),
+  `StreamRuntimeTests`' `Shape`/`Square` (with `Circle`), `HostAllocationTests`' `Base` (with `Case`), the empty host's `Split`, and
+  `JumpTableDispatchTests` (request and stream messages sealed; the derived-type test is for notifications only, OQ-68).
+- Snapshots: every host snapshot with requests or streams changed only in the generic `Send`/`Stream` dispatch, the arms' signatures and
+  calls, the dropped typed-overload checks of the two fixtures above, the `default:` sections, and `Publish`'s `return default;` moving
+  into `default:`; `MessageTypeAnalyzerTests.Reports_Every_Rule_With_Its_Message` gained the two KRX024 messages; the code-fix snapshot is
+  new. The jump-table snapshots of decision 15 (committed in 2e8e4e1 on the earlier output) show the change as a diff.
+- Measured (comparison host `Keryx.Benchmarks.KeryxHost`, BenchmarkDotNet 0.15.8 default job, net10.0, Apple M4 Max, macOS 27.2,
+  2026-11-26; the machine carried other load during the full runs, so their rows are noisy and two interleaved reruns decide):
+  JIT code (`DOTNET_TieredCompilation=0`, `DOTNET_JitDisasm`, `--verify`): tail calls 10 / 43 / 2 / 35 for linear `Send<int>`,
+  above-threshold `Send<int>`, linear `Publish<__Canon>` and above-threshold `Publish<__Canon>`, the same as before; the linear
+  `Send<int>` loads the request's method table once and compares it with each sealed type's (no cast helper call), 512 bytes instead
+  of 784; the above-threshold `Send` and both `Publish` are instruction for instruction the same as before. Interleaved reruns (before,
+  sealed, before, sealed): linear `Send` sync generic 2.96 to 3.54 ns before, 2.53 to 2.85 ns sealed (0.4 to 0.7 ns faster at every
+  depth); linear `Publish` generic 2.85 to 3.27 and 2.98 to 3.08 ns before, 2.75 to 2.77 and 2.98 to 3.06 ns sealed; above the threshold
+  `Send` 6.20 to 7.08 ns before and 6.25 to 6.98 ns sealed, `Publish` 6.08 to 6.72 and 6.23 to 6.72 ns, within noise (the code is the
+  same). One row is slower beyond noise: `StreamDepth0` through generic `Stream` (100 items, no stream behaviors) measured 691, 717, 713,
+  693 and 668 ns in five runs against 656, 657, 659, 661 and 649 ns before (+20 to +60 ns, 3 to 9%), while its typed row and
+  `StreamDepth3` (generic and typed) did not move. The generic `Stream<int>` code got shorter (352 bytes instead of 356: the type pattern
+  reads the method table instead of calling `GetType()`), the benchmark method's Tier 1 code is the same, and a `--job short` run of
+  both builds measured 662 and 656 ns, so the cause is not the dispatch instructions; code placement in the rebuilt host assembly is the
+  likely suspect, not verified. Allocation is unchanged (0 B for every synchronous row, 120 B and 680 B for the streams).
+
+Folded into the ADR (status; Requests and notifications; Handler rules; Diagnostics and code fixes: KRX003, KRX010, KRX024 and the KRX024
+code fix; Mediator; Generic entry points; Alternatives considered; Consequences), the brief (Phases 2, 3 and 6), CONTEXT.md (request,
+stream request, request base) and the README (Requests and handlers, Hosts, Diagnostics).
+
+### OQ-68: A request type that is not sealed, when KRX024 is suppressed (2026-11-26)
+
+Owner decision 14 ("Requests are sealed", at the end) makes every non-abstract request and stream request type sealed (KRX024, an error),
+and generic `Send` and `Stream` test each request type with a type pattern, which a derived type also matches. KRX024 is an analyzer
+diagnostic, so a project can still lower its severity (`dotnet_diagnostic.KRX024.severity = none`), and a host can reference a library
+built that way. The decision does not say what the host generates for such a type: a bare type pattern would send a derived request
+statically unknown to the host (or one with a handler of its own placed after it) to the base type's handler, which breaks exact-type
+dispatch silently.
+
+- **Interim:** the host keeps exact-type dispatch for a request or stream request type that is not sealed (its model already carries
+  whether the type is sealed): its generic section is `case global::X r when r.GetType() == typeof(global::X):` (above the threshold the
+  index lookup is by exact type anyway), and its typed overload keeps the runtime type check of OQ-31 (`if (request.GetType() !=
+  typeof(X)) return Send<T>((IRequest<T>)request, cancellationToken);`). Sealed types, the only ones a project without the suppression
+  has, get the bare type pattern and no check. Covered by `HostRuntimeTests.A_Request_That_Is_Not_Sealed_Keeps_Exact_Type_Dispatch_When_KRX024_Is_Suppressed`
+  and the request and stream rows of `JumpTableDispatchTests.A_Derived_Type_Is_Not_Dispatched_To_Its_Base_Types_Handler_Above_The_Threshold`.
+- **Proposal:** keep the interim: it costs nothing for sealed types and keeps the semantics when the rule is bypassed. Alternatives: make
+  KRX024 not configurable in effect by having the host report an error for a referenced request type that is not sealed (a new host
+  diagnostic), or generate the bare type pattern and document that suppressing KRX024 changes dispatch. Needs a decision.
+- **Decision:** the host reports an error (owner decision 18, 2026-11-26), so turning KRX024 off in a library cannot reach dispatch. The
+  new host diagnostic **KRX038** (Error, the next free ID in the host range): "Request type 'Get' from assembly 'Open' is not sealed, so
+  this host does not dispatch it; make it sealed in 'Open' (KRX024)" ("Stream request type" for a stream request), reported by
+  `HostGenerator` without a location (like KRX030, its severity is set for the whole host) for each referenced request or stream request
+  type it would compose that is neither sealed nor a struct. The host's own types are KRX024 in the host and are not reported again. Such
+  a type is not composed: no dispatch section and no typed overload, so sending it throws `KeryxHandlerNotFoundException`, and its request
+  counts as handled (no KRX030 on top). The same applies to the host's own type that is not sealed when KRX024 is suppressed in the host.
+  So the generated code keeps only bare type patterns: the interim's guarded sections and the typed overloads' runtime type check are
+  removed, and no generated path depends on a request type that is not sealed (`HostHandlerModel.MessageIsSealed` is gone). Abstract
+  and closed bases (never composed, KRX003 for a handler) and notifications are not affected. Tests: `CrossAssemblyTests.KRX038_For_A_Referenced_Request_Type_That_Is_Not_Sealed`
+  (a library built with `MessageTypeAnalyzer` and KRX024 = none; KRX038 for its request and stream request types, not for its sealed
+  type, the sealed cases of its abstract and closed bases, its notification type or the host's own type that is not sealed; none
+  composed); `HostRuntimeTests.A_Request_Type_That_Is_Not_Sealed_Is_Not_Dispatched` (KRX038 turned off too: not-found for the referenced
+  request and stream request and the host's own type, the sealed siblings dispatch) replaces
+  `A_Request_That_Is_Not_Sealed_Keeps_Exact_Type_Dispatch_When_KRX024_Is_Suppressed`; `JumpTableDispatchTests.A_Request_Type_That_Is_Not_Sealed_Is_Not_Dispatched_Above_The_Threshold`
+  (request and stream) replaces the request and stream rows of the derived-type test, which keeps its notification row as
+  `A_Derived_Notification_Is_Not_Dispatched_To_Its_Base_Types_Handler_Above_The_Threshold`. No snapshot showed the guarded sections, so
+  none changed for this. Folded into the ADR (status; Requests and notifications; Diagnostics and code fixes: KRX038; HostGenerator's
+  host rules; Mediator; Generic entry points), `AnalyzerReleases.Unshipped.md`, the README (Requests and handlers, Diagnostics) and the
+  brief (Phases 3 and 7).

@@ -290,6 +290,17 @@ internal static class Descriptors
         helpLinkUri: HelpLinkBase + "krx023"
     );
 
+    public static readonly DiagnosticDescriptor UnsealedRequest = new(
+        "KRX024",
+        "Request type is not sealed",
+        "{0} '{1}' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Every non-abstract request and stream request type is sealed (a struct always is). An abstract or closed (C# 15) type may implement a request interface as the base of sealed request types; it is never a request itself, needs no handler and cannot have one (KRX003). Generic Send and Stream test each sealed request type with a type pattern, which the JIT compiles to one method-table compare. Notifications are not affected.",
+        helpLinkUri: HelpLinkBase + "krx024"
+    );
+
     public static readonly DiagnosticDescriptor UnhandledRequestInHost = new(
         "KRX030",
         "Request has no handler in the host",
@@ -406,6 +417,17 @@ internal static class Descriptors
         isEnabledByDefault: true,
         description: "A handler whose parameter is an interface or INotification cannot receive a struct without boxing it. The host boxes the notification once per Publish and reuses that box for every such handler. Type the handler with the struct itself to avoid it.",
         helpLinkUri: HelpLinkBase + "krx037"
+    );
+
+    public static readonly DiagnosticDescriptor UnsealedRequestInHost = new(
+        "KRX038",
+        "Referenced request type is not sealed",
+        "{0} '{1}' from assembly '{2}' is not sealed, so this host does not dispatch it; make it sealed in '{2}' (KRX024)",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Generic Send and Stream test each request type with a type pattern, which matches derived types too, so a host composes only sealed request and stream request types. A referenced one that is not sealed (its assembly suppressed KRX024) is left out of the host: it gets no dispatch section and no typed overload, and sending it throws KeryxHandlerNotFoundException. The host's own types are KRX024 in the host and are not reported again. It has no source location, so its severity is set for the whole host: a global AnalyzerConfig file (.globalconfig), NoWarn or WarningsAsErrors.",
+        helpLinkUri: HelpLinkBase + "krx038"
     );
 
     public static readonly DiagnosticDescriptor MisplacedHandlerOrder = new(

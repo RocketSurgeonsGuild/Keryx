@@ -8,7 +8,7 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Stream dispatch and stream pipelines (ADR 0001, Streaming): typed <c>Stream</c> overloads, generic <c>Stream&lt;TItem&gt;</c> with
-///     exact-type dispatch, and per stream request a pipeline context holding the handler and the injected services of its stream behaviors,
+///     type-pattern dispatch on the sealed stream request types, and per stream request a pipeline context holding the handler and the injected services of its stream behaviors,
 ///     and one flat <c>IStreamNext&lt;TItem&gt;</c> link struct per stream behavior.
 /// </summary>
 internal static partial class HostEmitter
@@ -21,25 +21,6 @@ internal static partial class HostEmitter
         if (!request.MessageIsValueType)
         {
             statements.Add(Call(Qualified(ThrowIfNull), Id("request")));
-        }
-
-        if (!request.MessageIsSealed)
-        {
-            // Dispatch is by exact runtime type: a derived stream request statically typed as this one goes to its own handler (OQ-31).
-            statements.Add(
-                IfStatement(
-                    NotEqual(Invoke(Member(Id("request"), "GetType")), TypeOf(request.MessageType)),
-                    Block(
-                        Return(
-                            Invoke(
-                                Generic("Stream", TypeName(request.ResponseType!)),
-                                Cast(TypeName($"global::Keryx.IStreamRequest<{request.ResponseType}>"), Id("request")),
-                                Id(CancellationTokenName)
-                            )
-                        )
-                    )
-                )
-            );
         }
 
         statements.Add(Return(Invoke(Id(StreamCoreName(index)), Id("request"), Id(CancellationTokenName))));
@@ -61,8 +42,9 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     Generic <c>Stream</c>: validates the request and dispatches on its exact runtime type synchronously, before any behavior runs (ADR
-    ///     0001, Streaming), then calls the outermost element of the pipeline directly. The result is a reference type, so reinterpreting
+    ///     Generic <c>Stream</c>: validates the request and dispatches on its runtime type synchronously, before any behavior runs (ADR 0001,
+    ///     Streaming), with a type pattern per sealed stream request type (a jump table above <see cref="DispatchThreshold" />), then calls the
+    ///     outermost element of the pipeline directly. The result is a reference type, so reinterpreting
     ///     <c>IAsyncEnumerable&lt;X&gt;</c> as <c>IAsyncEnumerable&lt;TItem&gt;</c> (the same type at run time, because
     ///     <c>IStreamRequest&lt;&gt;</c> is invariant and a stream request implements exactly one closing) needs only a reference cast.
     /// </summary>
@@ -78,14 +60,7 @@ internal static partial class HostEmitter
                     .Statements(
                          [
                              Call(Qualified(ThrowIfNull), Id("request")),
-                             Var("requestType", Invoke(Member(Id("request"), "GetType"))),
-                             .. Dispatch(
-                                 "requestType",
-                                 "__StreamRequestIndex",
-                                 streams.Select(static s => s.MessageType).ToImmutableArray(),
-                                 (_, i) => StreamArm(streams[i], i),
-                                 ThrowStatement(Invoke(Id("__HandlerNotFound"), Id("requestType")))
-                             ),
+                             .. RequestDispatch(streams, "__StreamRequestIndex", static (stream, i, request) => StreamArm(stream, i, request)),
                          ]
                      )
                     .Documented("<inheritdoc />");
@@ -99,10 +74,14 @@ internal static partial class HostEmitter
         }
     }
 
-    private static ExpressionSyntax StreamArm(HostHandlerModel stream, int index) =>
+    /// <summary>
+    ///     The result of one section of generic <c>Stream</c>, given the request as its exact type (a class) or as the interface-typed
+    ///     <c>request</c> (a struct, unboxed here as the argument, never into a local of the dispatching method; <see cref="RequestDispatch" />).
+    /// </summary>
+    private static ExpressionSyntax StreamArm(HostHandlerModel stream, int index, ExpressionSyntax request) =>
         Invoke(
             Member(Qualified(Unsafe), Generic("As", TypeName($"{AsyncEnumerable}<TItem>"))),
-            Invoke(Id(StreamCoreName(index)), Exact(stream.MessageType, stream.MessageIsValueType, Id("request")), Id(CancellationTokenName))
+            Invoke(Id(StreamCoreName(index)), stream.MessageIsValueType ? Exact(stream.MessageType, true, request) : request, Id(CancellationTokenName))
         );
 
     /// <summary>

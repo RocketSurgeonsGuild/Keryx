@@ -45,6 +45,62 @@ public abstract class HostTest : GeneratorTest
     }
 
     /// <summary>
+    ///     A handler library whose request and stream request types are not all sealed, as one built with KRX024 suppressed has them (OQ-68):
+    ///     <c>Get</c> and <c>Items</c> are not sealed; <c>Ping</c> is sealed, <c>Ship</c> is a sealed case of the abstract <c>Command</c>,
+    ///     <c>Circle</c> of the closed (C# 15) <c>Shape</c>, and <c>Noted</c> is a notification, which need not be sealed.
+    /// </summary>
+    protected static readonly string UnsealedLibrary = TestSources.ClosedTypeAttribute
+                                                     + """
+                                                       namespace Open
+                                                       {
+                                                           using System.Collections.Generic;
+                                                           using System.Threading.Tasks;
+                                                           using Keryx;
+
+                                                           public record Get(int Id) : IRequest<string>;
+                                                           public static partial class GetHandler { private static string Handle(Get request) => "get " + request.Id; }
+
+                                                           public record Items(int Count) : IStreamRequest<int>;
+                                                           public static partial class ItemsHandler { private static IAsyncEnumerable<int> Handle(Items request) => null!; }
+
+                                                           public sealed record Ping(int Id) : IRequest<string>;
+                                                           public static partial class PingHandler { private static string Handle(Ping request) => "ping " + request.Id; }
+
+                                                           public abstract record Command : IRequest<string>;
+                                                           public sealed record Ship(int Id) : Command;
+                                                           public static partial class ShipHandler { private static string Handle(Ship request) => "ship " + request.Id; }
+
+                                                           public closed record Shape : IRequest<string>;
+                                                           public sealed record Circle(int Radius) : Shape;
+                                                           public static partial class CircleHandler { private static string Handle(Circle request) => "circle " + request.Radius; }
+
+                                                           public record Noted(int Id) : INotification;
+                                                           public static partial class NotedHandler { private static ValueTask Handle(Noted notification) => default; }
+                                                       }
+                                                       """;
+
+    /// <summary>
+    ///     Compiles <see cref="UnsealedLibrary" /> as a library project that set <c>dotnet_diagnostic.KRX024.severity = none</c> compiles: with
+    ///     the handler generator and the <c>MessageTypeAnalyzer</c>, at C# 15 (preview) for its closed type, and fails unless the analyzer
+    ///     reports nothing.
+    /// </summary>
+    protected async Task<GeneratorTestResults> CompileUnsealedLibraryAsync(CancellationToken cancellationToken)
+    {
+        var result = await GeneratorBuilderConstants.Builder.WithAnalyzer<Keryx.Analyzers.Diagnostics.MessageTypeAnalyzer>()
+                                                    .AddGlobalOption("dotnet_diagnostic.KRX024.severity", "none")
+                                                    .WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+                                                    .WithAssemblyLoadContext(AssemblyLoadContext)
+                                                    .WithProjectName("Open")
+                                                    .WithNullableContext(NullableContextOptions.Enable)
+                                                    .AddSource("Open.cs", UnsealedLibrary)
+                                                    .Build()
+                                                    .GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful(DiagnosticSeverity.Error);
+        await Assert.That(result.AnalyzerResults[typeof(Keryx.Analyzers.Diagnostics.MessageTypeAnalyzer)].Diagnostics).IsEmpty();
+        return result;
+    }
+
+    /// <summary>
     ///     Compiles a host from the sources (after <see cref="Usings" />) with optimizations on, as a Release build would, and loads it.
     ///     Allocation tests of user-written <c>async</c> behaviors need it: a Debug build compiles an async state machine to a class,
     ///     allocated on every call even when the method completes synchronously.

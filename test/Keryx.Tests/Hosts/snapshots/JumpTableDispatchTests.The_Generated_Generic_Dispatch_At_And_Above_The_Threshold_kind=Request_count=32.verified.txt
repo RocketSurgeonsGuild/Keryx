@@ -412,299 +412,298 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            switch (requestType)
+            switch (request)
             {
-                case var _ when requestType == typeof(global::Sample.R00):
-                    return __Dispatch0(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R01):
-                    return __Dispatch1(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R02):
-                    return __Dispatch2(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R03):
-                    return __Dispatch3(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R04):
-                    return __Dispatch4(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R05):
-                    return __Dispatch5(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R06):
-                    return __Dispatch6(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R07):
-                    return __Dispatch7(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R08):
-                    return __Dispatch8(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R09):
-                    return __Dispatch9(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R10):
-                    return __Dispatch10(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R11):
-                    return __Dispatch11(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R12):
-                    return __Dispatch12(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R13):
-                    return __Dispatch13(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R14):
-                    return __Dispatch14(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R15):
-                    return __Dispatch15(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R16):
-                    return __Dispatch16(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R17):
-                    return __Dispatch17(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R18):
-                    return __Dispatch18(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R19):
-                    return __Dispatch19(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R20):
-                    return __Dispatch20(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R21):
-                    return __Dispatch21(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R22):
-                    return __Dispatch22(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R23):
-                    return __Dispatch23(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R24):
-                    return __Dispatch24(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R25):
-                    return __Dispatch25(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R26):
-                    return __Dispatch26(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R27):
-                    return __Dispatch27(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R28):
-                    return __Dispatch28(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R29):
-                    return __Dispatch29(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R30):
-                    return __Dispatch30(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.R31):
-                    return __Dispatch31(request, cancellationToken);
+                case global::Sample.R00 r:
+                    return __Dispatch0<TResponse>(r, cancellationToken);
+                case global::Sample.R01 r:
+                    return __Dispatch1<TResponse>(r, cancellationToken);
+                case global::Sample.R02 r:
+                    return __Dispatch2<TResponse>(r, cancellationToken);
+                case global::Sample.R03 r:
+                    return __Dispatch3<TResponse>(r, cancellationToken);
+                case global::Sample.R04 r:
+                    return __Dispatch4<TResponse>(r, cancellationToken);
+                case global::Sample.R05 r:
+                    return __Dispatch5<TResponse>(r, cancellationToken);
+                case global::Sample.R06 r:
+                    return __Dispatch6<TResponse>(r, cancellationToken);
+                case global::Sample.R07 r:
+                    return __Dispatch7<TResponse>(r, cancellationToken);
+                case global::Sample.R08 r:
+                    return __Dispatch8<TResponse>(r, cancellationToken);
+                case global::Sample.R09 r:
+                    return __Dispatch9<TResponse>(r, cancellationToken);
+                case global::Sample.R10 r:
+                    return __Dispatch10<TResponse>(r, cancellationToken);
+                case global::Sample.R11 r:
+                    return __Dispatch11<TResponse>(r, cancellationToken);
+                case global::Sample.R12 r:
+                    return __Dispatch12<TResponse>(r, cancellationToken);
+                case global::Sample.R13 r:
+                    return __Dispatch13<TResponse>(r, cancellationToken);
+                case global::Sample.R14 r:
+                    return __Dispatch14<TResponse>(r, cancellationToken);
+                case global::Sample.R15 r:
+                    return __Dispatch15<TResponse>(r, cancellationToken);
+                case global::Sample.R16 r:
+                    return __Dispatch16<TResponse>(r, cancellationToken);
+                case global::Sample.R17 r:
+                    return __Dispatch17<TResponse>(r, cancellationToken);
+                case global::Sample.R18 r:
+                    return __Dispatch18<TResponse>(r, cancellationToken);
+                case global::Sample.R19 r:
+                    return __Dispatch19<TResponse>(r, cancellationToken);
+                case global::Sample.R20 r:
+                    return __Dispatch20<TResponse>(r, cancellationToken);
+                case global::Sample.R21 r:
+                    return __Dispatch21<TResponse>(r, cancellationToken);
+                case global::Sample.R22 r:
+                    return __Dispatch22<TResponse>(r, cancellationToken);
+                case global::Sample.R23 r:
+                    return __Dispatch23<TResponse>(r, cancellationToken);
+                case global::Sample.R24 r:
+                    return __Dispatch24<TResponse>(r, cancellationToken);
+                case global::Sample.R25 r:
+                    return __Dispatch25<TResponse>(r, cancellationToken);
+                case global::Sample.R26 r:
+                    return __Dispatch26<TResponse>(r, cancellationToken);
+                case global::Sample.R27 r:
+                    return __Dispatch27<TResponse>(r, cancellationToken);
+                case global::Sample.R28 r:
+                    return __Dispatch28<TResponse>(r, cancellationToken);
+                case global::Sample.R29 r:
+                    return __Dispatch29<TResponse>(r, cancellationToken);
+                case global::Sample.R30 r:
+                    return __Dispatch30<TResponse>(r, cancellationToken);
+                case global::Sample.R31 r:
+                    return __Dispatch31<TResponse>(r, cancellationToken);
+                default:
+                    throw __HandlerNotFound(request.GetType());
             }
-
-            throw __HandlerNotFound(requestType);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch0<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch0<TResponse>(global::Sample.R00 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send0(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R00>(request), cancellationToken);
+            var response = __Send0(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch1<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch1<TResponse>(global::Sample.R01 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send1(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R01>(request), cancellationToken);
+            var response = __Send1(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch2<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch2<TResponse>(global::Sample.R02 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send2(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R02>(request), cancellationToken);
+            var response = __Send2(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch3<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch3<TResponse>(global::Sample.R03 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send3(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R03>(request), cancellationToken);
+            var response = __Send3(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch4<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch4<TResponse>(global::Sample.R04 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send4(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R04>(request), cancellationToken);
+            var response = __Send4(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch5<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch5<TResponse>(global::Sample.R05 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send5(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R05>(request), cancellationToken);
+            var response = __Send5(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch6<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch6<TResponse>(global::Sample.R06 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send6(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R06>(request), cancellationToken);
+            var response = __Send6(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch7<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch7<TResponse>(global::Sample.R07 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send7(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R07>(request), cancellationToken);
+            var response = __Send7(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch8<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch8<TResponse>(global::Sample.R08 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send8(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R08>(request), cancellationToken);
+            var response = __Send8(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch9<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch9<TResponse>(global::Sample.R09 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send9(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R09>(request), cancellationToken);
+            var response = __Send9(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch10<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch10<TResponse>(global::Sample.R10 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send10(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R10>(request), cancellationToken);
+            var response = __Send10(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch11<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch11<TResponse>(global::Sample.R11 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send11(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R11>(request), cancellationToken);
+            var response = __Send11(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch12<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch12<TResponse>(global::Sample.R12 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send12(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R12>(request), cancellationToken);
+            var response = __Send12(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch13<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch13<TResponse>(global::Sample.R13 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send13(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R13>(request), cancellationToken);
+            var response = __Send13(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch14<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch14<TResponse>(global::Sample.R14 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send14(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R14>(request), cancellationToken);
+            var response = __Send14(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch15<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch15<TResponse>(global::Sample.R15 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send15(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R15>(request), cancellationToken);
+            var response = __Send15(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch16<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch16<TResponse>(global::Sample.R16 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send16(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R16>(request), cancellationToken);
+            var response = __Send16(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch17<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch17<TResponse>(global::Sample.R17 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send17(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R17>(request), cancellationToken);
+            var response = __Send17(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch18<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch18<TResponse>(global::Sample.R18 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send18(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R18>(request), cancellationToken);
+            var response = __Send18(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch19<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch19<TResponse>(global::Sample.R19 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send19(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R19>(request), cancellationToken);
+            var response = __Send19(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch20<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch20<TResponse>(global::Sample.R20 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send20(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R20>(request), cancellationToken);
+            var response = __Send20(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch21<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch21<TResponse>(global::Sample.R21 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send21(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R21>(request), cancellationToken);
+            var response = __Send21(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch22<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch22<TResponse>(global::Sample.R22 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send22(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R22>(request), cancellationToken);
+            var response = __Send22(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch23<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch23<TResponse>(global::Sample.R23 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send23(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R23>(request), cancellationToken);
+            var response = __Send23(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch24<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch24<TResponse>(global::Sample.R24 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send24(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R24>(request), cancellationToken);
+            var response = __Send24(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch25<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch25<TResponse>(global::Sample.R25 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send25(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R25>(request), cancellationToken);
+            var response = __Send25(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch26<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch26<TResponse>(global::Sample.R26 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send26(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R26>(request), cancellationToken);
+            var response = __Send26(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch27<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch27<TResponse>(global::Sample.R27 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send27(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R27>(request), cancellationToken);
+            var response = __Send27(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch28<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch28<TResponse>(global::Sample.R28 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send28(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R28>(request), cancellationToken);
+            var response = __Send28(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch29<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch29<TResponse>(global::Sample.R29 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send29(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R29>(request), cancellationToken);
+            var response = __Send29(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch30<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch30<TResponse>(global::Sample.R30 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send30(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R30>(request), cancellationToken);
+            var response = __Send30(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch31<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch31<TResponse>(global::Sample.R31 request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send31(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.R31>(request), cancellationToken);
+            var response = __Send31(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<int>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
@@ -712,8 +711,7 @@ namespace Sample
         public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <inheritdoc />

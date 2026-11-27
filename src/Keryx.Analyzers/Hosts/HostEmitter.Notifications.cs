@@ -84,7 +84,9 @@ internal static partial class HostEmitter
     ///     <c>typeof(TNotification)</c>, which the JIT folds because value-type instantiations are not shared, and convert with
     ///     <c>Unsafe.As&lt;TNotification, X&gt;</c>, so dispatch never boxes a struct notification. Only a reference-type
     ///     <c>TNotification</c> dispatches on <c>GetType()</c> (above <see cref="DispatchThreshold" /> through a <c>FrozenDictionary</c>); a
-    ///     struct that arrives boxed (typed as an interface) is unboxed there. An unknown runtime type completes immediately.
+    ///     struct that arrives boxed (typed as an interface) is unboxed there. Notification types need not be sealed, so that branch keeps
+    ///     exact-type guards rather than type patterns (<see cref="ExactTypeDispatch" />). Each switch ends with <c>default: return default;</c>:
+    ///     an unknown runtime type completes immediately.
     /// </summary>
     private static IEnumerable<MemberDeclarationSyntax> GenericPublish(ImmutableArray<NotificationPipeline> active)
     {
@@ -127,17 +129,17 @@ internal static partial class HostEmitter
                 }
             }
 
-            var valueTypeDispatch = new List<StatementSyntax>();
+            StatementSyntax valueTypeDispatch = Return(DefaultLiteral());
             if (valueTypeSections.Count > 0)
             {
-                valueTypeDispatch.Add(SwitchStatement(TypeOf("TNotification"), List(valueTypeSections)));
+                valueTypeSections.Add(DefaultSection(Return(DefaultLiteral())));
+                valueTypeDispatch = SwitchStatement(TypeOf("TNotification"), List(valueTypeSections));
             }
 
-            valueTypeDispatch.Add(Return(DefaultLiteral()));
             statements.Add(IfStatement(Member(TypeOf("TNotification"), "IsValueType"), Block(valueTypeDispatch)));
             statements.Add(Var("notificationType", Invoke(Member(Id("notification"), "GetType"))));
             statements.AddRange(
-                Dispatch(
+                ExactTypeDispatch(
                     "notificationType",
                     "__NotificationIndex",
                     active.Select(static n => n.Notification.Type).ToImmutableArray(),

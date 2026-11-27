@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Keryx.Analyzers.Handlers;
 
@@ -7,6 +8,9 @@ namespace Keryx.Analyzers.Handlers;
 /// </summary>
 internal readonly struct MessageType
 {
+    private const string ClosedModifier = "closed";
+    private const string IsClosedTypeAttributeName = "IsClosedTypeAttribute";
+
     private MessageType(ITypeSymbol type, int requestClosings, int streamClosings, bool isNotification, ITypeSymbol? responseType, ITypeSymbol? itemType)
     {
         Type = type;
@@ -58,9 +62,57 @@ internal readonly struct MessageType
     public bool IsCoveredRequest => ( IsRequest || IsStream ) && IsConcrete && !IsUnsupportedShape;
 
     /// <summary>
-    ///     A concrete type: a non-abstract class or struct (a record is either).
+    ///     A concrete type: a non-abstract class or struct (a record is either). A closed class (C# 15 <c>closed</c>) is not concrete: the
+    ///     compiler makes it abstract, in source and in metadata.
     /// </summary>
     public bool IsConcrete => Type is INamedTypeSymbol { IsAbstract: false, IsStatic: false, TypeKind: TypeKind.Class or TypeKind.Struct };
+
+    /// <summary>
+    ///     Whether the type is a closed class (C# 15 <c>closed</c>): a base whose derived types are all declared in its own assembly, and
+    ///     which is implicitly abstract. The analyzers build against Roslyn 5.0, which has no API for it, so it is read from the declaring
+    ///     syntax (the <c>closed</c> modifier, by its text) for a type in source, and from the <c>IsClosedTypeAttribute</c> the compiler
+    ///     writes into metadata for a referenced type. Roslyn 5.12 does not return that attribute from <c>GetAttributes</c> (as with its other
+    ///     compiler-written attributes), so a referenced closed type is seen as what it also is, abstract (OQ-69); a closed type is abstract
+    ///     in source and metadata alike, so nothing but a message depends on telling the two apart.
+    /// </summary>
+    public static bool IsClosed(INamedTypeSymbol type)
+    {
+        if (type.TypeKind != TypeKind.Class)
+        {
+            return false;
+        }
+
+        foreach (var reference in type.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is not TypeDeclarationSyntax declaration)
+            {
+                continue;
+            }
+
+            foreach (var modifier in declaration.Modifiers)
+            {
+                if (modifier.Text == ClosedModifier)
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (!type.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (attribute.AttributeClass is { Name: IsClosedTypeAttributeName, ContainingNamespace: { Name: "CompilerServices", ContainingNamespace: { Name: "Runtime", ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } } } })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     ///     A type that cannot be a request, stream request or notification: it has type parameters, is nested in a generic type, or is a

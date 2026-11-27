@@ -89,12 +89,16 @@ public class StreamGeneratorTests : HostTest
                 private static IAsyncEnumerable<int> Handle(Ticks request) => throw new NotSupportedException();
             }
 
-            /// <summary>Not sealed: the typed overload checks the runtime type (OQ-31).</summary>
-            public record Shapes : IStreamRequest<int>;
-            public static partial class ShapesHandler
+            /// <summary>
+            ///     The sealed case of an abstract stream request base (KRX024): the base has no handler, and the case's typed overload calls its
+            ///     pipeline without a runtime type check.
+            /// </summary>
+            public abstract record Shapes : IStreamRequest<int>;
+            public sealed record Circles : Shapes;
+            public static partial class CirclesHandler
             {
                 [Behavior(typeof(Trace))]
-                private static IAsyncEnumerable<int> Handle(Shapes request) => throw new NotSupportedException();
+                private static IAsyncEnumerable<int> Handle(Circles request) => throw new NotSupportedException();
             }
             """,
             cancellationToken

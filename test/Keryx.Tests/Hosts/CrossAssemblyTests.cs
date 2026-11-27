@@ -311,6 +311,57 @@ public class CrossAssemblyTests : HostTest
     }
 
     [Test]
+    public async Task KRX038_For_A_Referenced_Request_Type_That_Is_Not_Sealed(CancellationToken cancellationToken)
+    {
+        // The library suppressed KRX024, which must not reach the host's dispatch (OQ-68): each referenced request and stream request type
+        // that is not sealed is KRX038, without a location, and is not composed. Its sealed request types, the sealed cases of its abstract
+        // and closed bases and its notification type (notifications need not be sealed) are composed and not reported. The host's own type
+        // that is not sealed is KRX024 in the host (suppressed here), not KRX038, and is not composed either.
+        var library = await CompileUnsealedLibraryAsync(cancellationToken);
+
+        var result = await HostBuilder.WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+                                      .WithAnalyzer<Analyzers.Diagnostics.MessageTypeAnalyzer>()
+                                      .AddGlobalOption("dotnet_diagnostic.KRX024.severity", "none")
+                                      .AddCompilationReferences(library)
+                                      .AddSources(
+                                           Usings
+                                         + """
+                                           namespace Sample;
+
+                                           public record Mine(int Id) : IRequest<string>;
+                                           public static partial class MineHandler { private static string Handle(Mine request) => "mine"; }
+
+                                           public sealed record Ours(int Id) : IRequest<string>;
+                                           public static partial class OursHandler { private static string Handle(Ours request) => "ours"; }
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        await Assert.That(result.AnalyzerResults[typeof(Analyzers.Diagnostics.MessageTypeAnalyzer)].Diagnostics).IsEmpty();
+        await Assert.That(Diagnostics(result).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX038: Request type 'Get' from assembly 'Open' is not sealed, so this host does not dispatch it; make it sealed in 'Open' (KRX024)",
+                             "KRX038: Stream request type 'Items' from assembly 'Open' is not sealed, so this host does not dispatch it; make it sealed in 'Open' (KRX024)",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+        await Assert.That(HostDiagnostics(result).All(static d => d.Severity == DiagnosticSeverity.Error)).IsTrue();
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        foreach (var unsealed in (string[])["global::Open.Get ", "global::Open.Get)", "GetHandler", "global::Open.Items", "global::Sample.Mine"])
+        {
+            await Assert.That(mediator).DoesNotContain(unsealed);
+        }
+
+        foreach (var composed in (string[])["Send(global::Open.Ping request", "Send(global::Open.Ship request", "Send(global::Open.Circle request", "Send(global::Sample.Ours request", "global::Open.Noted"])
+        {
+            await Assert.That(mediator).Contains(composed);
+        }
+    }
+
+    [Test]
     public async Task KRX030_For_A_Referenced_Request_Without_A_Handler(CancellationToken cancellationToken)
     {
         // A library with requests and no handlers: built without the analyzers here, as if KRX001 were suppressed there.

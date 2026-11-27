@@ -28,8 +28,7 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <summary>
@@ -420,76 +419,75 @@ namespace Sample
         public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            switch (requestType)
+            switch (request)
             {
-                case var _ when requestType == typeof(global::Sample.S00):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream0(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S00>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S01):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream1(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S01>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S02):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream2(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S02>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S03):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream3(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S03>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S04):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream4(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S04>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S05):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream5(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S05>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S06):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream6(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S06>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S07):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream7(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S07>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S08):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream8(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S08>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S09):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream9(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S09>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S10):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream10(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S10>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S11):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream11(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S11>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S12):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream12(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S12>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S13):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream13(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S13>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S14):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream14(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S14>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S15):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream15(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S15>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S16):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream16(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S16>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S17):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream17(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S17>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S18):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream18(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S18>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S19):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream19(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S19>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S20):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream20(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S20>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S21):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream21(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S21>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S22):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream22(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S22>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S23):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream23(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S23>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S24):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream24(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S24>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S25):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream25(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S25>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S26):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream26(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S26>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S27):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream27(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S27>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S28):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream28(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S28>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S29):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream29(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S29>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S30):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream30(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S30>(request), cancellationToken));
-                case var _ when requestType == typeof(global::Sample.S31):
-                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream31(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.S31>(request), cancellationToken));
+                case global::Sample.S00 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream0(r, cancellationToken));
+                case global::Sample.S01 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream1(r, cancellationToken));
+                case global::Sample.S02 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream2(r, cancellationToken));
+                case global::Sample.S03 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream3(r, cancellationToken));
+                case global::Sample.S04 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream4(r, cancellationToken));
+                case global::Sample.S05 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream5(r, cancellationToken));
+                case global::Sample.S06 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream6(r, cancellationToken));
+                case global::Sample.S07 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream7(r, cancellationToken));
+                case global::Sample.S08 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream8(r, cancellationToken));
+                case global::Sample.S09 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream9(r, cancellationToken));
+                case global::Sample.S10 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream10(r, cancellationToken));
+                case global::Sample.S11 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream11(r, cancellationToken));
+                case global::Sample.S12 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream12(r, cancellationToken));
+                case global::Sample.S13 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream13(r, cancellationToken));
+                case global::Sample.S14 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream14(r, cancellationToken));
+                case global::Sample.S15 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream15(r, cancellationToken));
+                case global::Sample.S16 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream16(r, cancellationToken));
+                case global::Sample.S17 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream17(r, cancellationToken));
+                case global::Sample.S18 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream18(r, cancellationToken));
+                case global::Sample.S19 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream19(r, cancellationToken));
+                case global::Sample.S20 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream20(r, cancellationToken));
+                case global::Sample.S21 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream21(r, cancellationToken));
+                case global::Sample.S22 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream22(r, cancellationToken));
+                case global::Sample.S23 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream23(r, cancellationToken));
+                case global::Sample.S24 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream24(r, cancellationToken));
+                case global::Sample.S25 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream25(r, cancellationToken));
+                case global::Sample.S26 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream26(r, cancellationToken));
+                case global::Sample.S27 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream27(r, cancellationToken));
+                case global::Sample.S28 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream28(r, cancellationToken));
+                case global::Sample.S29 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream29(r, cancellationToken));
+                case global::Sample.S30 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream30(r, cancellationToken));
+                case global::Sample.S31 r:
+                    return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Collections.Generic.IAsyncEnumerable<TItem>>(__Stream31(r, cancellationToken));
+                default:
+                    throw __HandlerNotFound(request.GetType());
             }
-
-            throw __HandlerNotFound(requestType);
         }
 
         /// <inheritdoc />

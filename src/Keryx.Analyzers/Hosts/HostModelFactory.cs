@@ -166,7 +166,8 @@ internal static class HostModelFactory
 
     /// <summary>
     ///     The host's model of one of its own handlers, or <see langword="null" /> when the handler generator generates nothing for it in a host
-    ///     (a rule is broken, or the class or its signature is narrower than <c>internal</c>; OQ-24, OQ-29).
+    ///     (a rule is broken, or the class or its signature is narrower than <c>internal</c>; OQ-24, OQ-29), or when it handles a request or
+    ///     stream request type that is not sealed (KRX024 suppressed in the host; OQ-68).
     /// </summary>
     public static HostHandlerModel? CreateHandler(IMethodSymbol method, BehaviorCatalog catalog)
     {
@@ -198,7 +199,9 @@ internal static class HostModelFactory
             }
         }
 
-        if (messageType is null)
+        // A request or stream request type that is not sealed is KRX024 in the host's own source; when that is suppressed, the host still
+        // composes no path that depends on it (OQ-68): the type is not dispatched.
+        if (messageType is null || ( model.Kind is HandlerKind.Request or HandlerKind.Stream && !IsSealed(messageType) ))
         {
             return null;
         }
@@ -217,7 +220,6 @@ internal static class HostModelFactory
             model.Kind,
             CSharpText.TypeOf(messageType),
             messageType.IsValueType,
-            messageType.IsValueType || messageType.IsSealed,
             model.ResponseType,
             model.StaticInvoker,
             services.ToImmutable(),
@@ -287,7 +289,6 @@ internal static class HostModelFactory
             kind,
             CSharpText.TypeOf(target),
             target.IsValueType,
-            target.IsValueType || target.IsSealed,
             responseType is null ? null : CSharpText.Type(responseType),
             staticInvoker,
             services.ToImmutable(),
@@ -298,6 +299,12 @@ internal static class HostModelFactory
             contextServices
         );
     }
+
+    /// <summary>
+    ///     Whether no other type can derive from a request or stream request type: a sealed class or a struct. Generic dispatch tests each
+    ///     composed request type with a type pattern, so the host composes only these (KRX024 in each assembly, KRX038 in the host; OQ-68).
+    /// </summary>
+    public static bool IsSealed(ITypeSymbol type) => type.IsValueType || type.IsSealed;
 
     /// <summary>
     ///     KRX009 as the host checks it for a referenced handler (ADR 0001, Diagnostics: KRX009 for behaviors a referenced handler's manifest

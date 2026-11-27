@@ -37,11 +37,6 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<string?> Send(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            if (request.GetType() != typeof(global::Sample.Animal))
-            {
-                return Send<string?>((global::Keryx.IRequest<string?>)request, cancellationToken);
-            }
-
             return __Send0(request, cancellationToken);
         }
 
@@ -108,51 +103,50 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            switch (requestType)
+            switch (request)
             {
-                case var _ when requestType == typeof(global::Sample.Animal):
-                    return __Dispatch0(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.CreateOrder.Command):
-                    return __Dispatch1(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.Lookup):
-                    return __Dispatch2(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.Ping.Query):
-                    return __Dispatch3(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.Tick):
-                    return __Dispatch4(request, cancellationToken);
-                case var _ when requestType == typeof(global::Sample.Touch):
-                    return __Dispatch5(request, cancellationToken);
+                case global::Sample.Animal r:
+                    return __Dispatch0<TResponse>(r, cancellationToken);
+                case global::Sample.CreateOrder.Command r:
+                    return __Dispatch1<TResponse>(r, cancellationToken);
+                case global::Sample.Lookup r:
+                    return __Dispatch2<TResponse>(r, cancellationToken);
+                case global::Sample.Ping.Query r:
+                    return __Dispatch3<TResponse>(r, cancellationToken);
+                case global::Sample.Tick:
+                    return __Dispatch4<TResponse>(request, cancellationToken);
+                case global::Sample.Touch r:
+                    return __Dispatch5<TResponse>(r, cancellationToken);
+                default:
+                    throw __HandlerNotFound(request.GetType());
             }
-
-            throw __HandlerNotFound(requestType);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch0<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch0<TResponse>(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send0(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Animal>(request), cancellationToken);
+            var response = __Send0(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<string?>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch1<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch1<TResponse>(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send1(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.CreateOrder.Command>(request), cancellationToken);
+            var response = __Send1(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<global::System.Guid>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch2<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch2<TResponse>(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send2(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Lookup>(request), cancellationToken);
+            var response = __Send2(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch3<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch3<TResponse>(global::Sample.Ping.Query request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send3(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Ping.Query>(request), cancellationToken);
+            var response = __Send3(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<string>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
@@ -164,9 +158,9 @@ namespace Sample
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch5<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken)
+        private global::System.Threading.Tasks.ValueTask<TResponse> __Dispatch5<TResponse>(global::Sample.Touch request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var response = __Send5(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Touch>(request), cancellationToken);
+            var response = __Send5(request, cancellationToken);
             return global::System.Runtime.CompilerServices.Unsafe.As<global::System.Threading.Tasks.ValueTask<global::Keryx.Unit>, global::System.Threading.Tasks.ValueTask<TResponse>>(ref response);
         }
 
@@ -174,8 +168,7 @@ namespace Sample
         public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <summary>
@@ -209,9 +202,9 @@ namespace Sample
             {
                 case var _ when notificationType == typeof(global::Sample.Placed):
                     return __Publish0(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Placed>((object)notification), cancellationToken);
+                default:
+                    return default;
             }
-
-            return default;
         }
 
         private global::System.Threading.Tasks.ValueTask<string?> __Send0(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken) =>

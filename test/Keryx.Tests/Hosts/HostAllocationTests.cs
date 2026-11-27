@@ -40,7 +40,7 @@ public class HostAllocationTests : HostTest
                 var name = new Name(1);
                 var touch = new Touch();
                 var done = new Done();
-                Base @base = new Base(1);
+                Base @case = new Case(1);
                 IRequest<int> boxedTick = tick;
                 IRequest<string> boxedName = name;
 
@@ -61,8 +61,8 @@ public class HostAllocationTests : HostTest
                     ["generic class, value response, injected handler"] = Region(() => sender.Send(count)),
                     ["generic IRequest, void handler"] = Region(() => sender.Send(touch)),
                     ["generic IRequest, completed ValueTask handler"] = Region(() => sender.Send(done)),
-                    ["typed non-sealed class, runtime type check"] = Region(() => mediator.Send(@base)),
-                    ["generic non-sealed class"] = Region(() => sender.Send(@base)),
+                    ["typed sealed case of an abstract request base"] = Region(() => mediator.Send((Case)@case)),
+                    ["generic sealed case of an abstract request base"] = Region(() => sender.Send(@case)),
                     ["generic on the mediator class, class request"] = Region(() => mediator.Send<string>(echo)),
                     ["generic struct, boxed by the caller beforehand, value response"] = Region(() => sender.Send(boxedTick)),
                     ["generic struct, boxed by the caller beforehand, reference response"] = Region(() => sender.Send(boxedName)),
@@ -128,9 +128,10 @@ public class HostAllocationTests : HostTest
         public sealed record Done : IRequest;
         public partial class DoneHandler { private static ValueTask Handle(Done request, Clock clock) => default; }
 
-        /// <summary>Not sealed: its typed overload checks the runtime type first (OQ-31).</summary>
-        public record Base(int Value) : IRequest<int>;
-        public static partial class BaseHandler { private static int Handle(Base request) => request.Value + 1; }
+        /// <summary>An abstract request base: its sealed case has its own handler (KRX024).</summary>
+        public abstract record Base(int Value) : IRequest<int>;
+        public sealed record Case(int Value) : Base(Value);
+        public static partial class CaseHandler { private static int Handle(Case request) => request.Value + 1; }
 
         public static class Registrations
         {

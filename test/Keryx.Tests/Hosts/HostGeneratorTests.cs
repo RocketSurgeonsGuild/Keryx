@@ -50,7 +50,7 @@ public class HostGeneratorTests : HostTest
             private static void Handle(Touch request) { }
         }
 
-        public record Animal(string Name) : IRequest<string?>;
+        public sealed record Animal(string Name) : IRequest<string?>;
 
         internal partial class AnimalHandler
         {
@@ -275,7 +275,7 @@ public class HostGeneratorTests : HostTest
                                            public readonly record struct OrphanStruct : IRequest;
                                            public sealed record OrphanStream : IStreamRequest<int>;
                                            public static class Outer { public sealed record Nested : IRequest<string>; }
-                                           public partial record Split : IRequest<int>;
+                                           public sealed partial record Split : IRequest<int>;
                                            public partial record Split { public int Value { get; init; } }
                                            """
                                        )

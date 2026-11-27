@@ -5,7 +5,8 @@ using Microsoft.CodeAnalysis;
 namespace Keryx.Tests.Diagnostics;
 
 /// <summary>
-///     KRX002-KRX007, KRX012 (handler classes), KRX013-KRX018, KRX023 and KRX040, each with a positive and a negative case.
+///     KRX002-KRX007 (KRX003 for request bases, abstract and closed), KRX012 (handler classes), KRX013-KRX018, KRX023 and KRX040, each with a
+///     positive and a negative case.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HandlerAnalyzerTests : AnalyzerTest
@@ -93,6 +94,73 @@ public class HandlerAnalyzerTests : AnalyzerTest
         var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(source, cancellationToken);
 
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX003"]);
+    }
+
+    [Test]
+    [Arguments("public abstract record Base : IRequest<int>;", "Base", "the abstract type 'Base'")]
+    [Arguments("public abstract class Query<T> : IRequest<T> { }", "Query<int>", "the abstract type 'Query<int>'")]
+    [Arguments("public closed record Base : IRequest<int>;", "Base", "the closed type 'Base'")]
+    [Arguments("public interface IQuery : IRequest<int> { }", "IQuery", "the interface 'IQuery'")]
+    public async Task KRX003_Handler_Of_A_Request_Base(string declaration, string parameter, string what, CancellationToken cancellationToken)
+    {
+        // A request base is never dispatched: each sealed case has its own handler (KRX024). 'closed' needs C# 15 (preview).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            TestSources.ClosedTypeAttribute + declaration + $" public static partial class H {{ private static int Handle({parameter} request) => 1; }}",
+            cancellationToken,
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo([$"Handler 'H.Handle({parameter})' must take a sealed request type, not {what}; each sealed request type has its own handler"]);
+    }
+
+    [Test]
+    [Arguments("public abstract record Items : IStreamRequest<int>;", "the abstract type 'Items'")]
+    [Arguments("public closed record Items : IStreamRequest<int>;", "the closed type 'Items'")]
+    public async Task KRX003_Handler_Of_A_Stream_Request_Base(string declaration, string what, CancellationToken cancellationToken)
+    {
+        // Stream request bases follow the request rule: each sealed stream request type has its own handler. 'closed' needs C# 15 (preview).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            TestSources.ClosedTypeAttribute + declaration + " public static partial class H { private static IAsyncEnumerable<int> Handle(Items request) => null!; }",
+            cancellationToken,
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo([$"Handler 'H.Handle(Items)' must take a sealed request type, not {what}; each sealed request type has its own handler"]);
+    }
+
+    [Test]
+    public async Task KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly(CancellationToken cancellationToken)
+    {
+        // A closed type in metadata is abstract, so it is a request base like an abstract one: the handler that takes it is KRX003, not
+        // KRX023 (which is about requests). Roslyn does not return the IsClosedTypeAttribute of a metadata type from GetAttributes, so the
+        // message cannot tell it from an abstract type (OQ-69).
+        var shapes = await CompileLibraryAsync(
+            "Shapes",
+            TestSources.ClosedTypeAttribute
+          + """
+            namespace Shapes
+            {
+                public closed record Shape : Keryx.IRequest<int>;
+                public sealed record Circle(int Radius) : Shape;
+                public static partial class CircleHandler { private static int Handle(Circle request) => request.Radius; }
+            }
+            """,
+            cancellationToken,
+            languageVersion: Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+        var result = await Builder.AddCompilationReferences(shapes)
+                                  .WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+                                  .WithAnalyzer<HandlerAnalyzer>()
+                                  .AddSources(Usings + "public static partial class H { private static int Handle(Shapes.Shape request) => 1; }")
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX003"]);
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo(["Handler 'H.Handle(Shape)' must take a sealed request type, not the abstract type 'Shape'; each sealed request type has its own handler"]);
     }
 
     [Test]

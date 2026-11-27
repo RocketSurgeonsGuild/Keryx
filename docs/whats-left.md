@@ -54,19 +54,34 @@ One commit per step, each with build and tests green:
   "switch-expression"): the expressions lost the arms' tail calls and measured slower (OQ-67).
 - **No code change, decision 4:** `next` stays a struct implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>`; typed next
   delegates are recorded as rejected in the ADR's Alternatives considered.
+- **2e8e4e1, dispatch snapshots (decision 15):** Verify snapshots of the generated mediator for each kind at and one above the jump-table
+  threshold, and of a host with every kind above it.
+- **Requests are sealed (decision 14, and decision 16 for OQ-67):** a request or stream request class or record that
+  is neither sealed nor abstract (or C# 15 `closed`) is the new error KRX024, with the code fix _Make sealed_; a handler of an abstract or
+  closed request base is KRX003; notifications are not affected. Generic `Send` and `Stream` are switch statements with a type pattern
+  per sealed request type (`case global::X r: return __Dispatch0<TResponse>(r, cancellationToken);`, `default: throw
+  __HandlerNotFound(request.GetType());`), the index switch above the threshold stays keyed on `GetType()`, typed overloads of sealed
+  requests have no runtime type check, and `Publish<T>` keeps exact-type guards ending `default: return default;`. A struct request's
+  section has no pattern variable and its arm unboxes, so every arm stays a tail call. OQ-67 is decided (switch statements), and so is
+  OQ-68 (decision 18): a request or stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is
+  the new host error KRX038. OQ-69 (a closed base from a referenced assembly) is open. The code fix _Make sealed_ is not offered for a
+  type that declares its own `virtual` or `protected` members.
 
 Measured in the second rework (Apple M4 Max, macOS 27.2, BenchmarkDotNet 0.15.8; details in the open-questions entries):
 
 - the Phase 4 gate prototype written with primary-constructor links: Tier 1 code byte for byte the same as before, 0 B at depths 1, 3
   and 8, depth 3 at 0.67x the nested calls ("Links with primary constructors");
 - generic dispatch: switch statements compile to the same code as the earlier `if` chains; switch expressions lost every tail call of
-  the linear `Send<int>` and cost up to about 0.3 ns per generic `Publish` and 0.3 to 1.8 ns per generic `Send` (OQ-67);
+  the linear `Send<int>` and cost up to about 0.3 ns per generic `Publish` and 0.3 to 1.8 ns per generic `Send` (OQ-67); the type
+  patterns on sealed requests keep every tail call (10, 43, 2 and 35 for linear and above-threshold `Send` and `Publish`), load the
+  method table once and compare it with each type, and shrink the linear `Send<int>` from 784 to 512 bytes; generic `Send` with a synchronous handler measured 0.4 to 0.7 ns faster, and
+  generic `Stream` at depth 0 20 to 60 ns slower (3 to 9%) for a reason not found in its code ("Requests are sealed");
 - generator time on a host of 300 requests: 66 to 384 ms for the host generator and 35 to 102 ms for the handler generator with the
   `SyntaxFactory` emitters, dominated by `NormalizeWhitespace` (OQ-66).
 
 ## Decisions for the owner
 
-Nine open questions came up while implementing the second rework ([open-questions.md](adr/open-questions.md), **Open**); the code follows
+Nine open questions are open from the second rework ([open-questions.md](adr/open-questions.md), **Open**); the code follows
 each one's **Interim** line:
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
@@ -88,12 +103,12 @@ each one's **Interim** line:
   parameters (CS9113 suppressed); drop such contexts and unread link parameters?
 - **OQ-66:** the one `NormalizeWhitespace` per compilation unit makes the host generator about six times slower on a large host; accept
   it, or build the syntax with its trivia and skip normalization?
-- **OQ-67:** keep switch statements for generic dispatch, or use the switch expressions as decided at their measured cost?
+- **OQ-69:** Roslyn does not return `IsClosedTypeAttribute` for a metadata type, so a referenced closed request base is treated (and named
+  in KRX003) as abstract; accept that?
 
-Next in the plan: the owner has answered OQ-65 to OQ-67 and asked for two more changes (request and stream request types sealed or part
-of a closed hierarchy, with type-pattern dispatch; Verify snapshots of generic dispatch at and above the jump-table threshold). They are
-scheduled for the step after this rework; until that step records them under **Decided** and folds them into the ADR, those three entries
-stay open and the code follows their interim.
+Next in the plan: the owner has answered OQ-65 and OQ-66 (decision 16: pipelines that resolve nothing get no context and links take only
+what they read; no `NormalizeWhitespace`). They are scheduled for the next step; until it records them under **Decided** and folds them
+into the ADR, those two entries stay open and the code follows their interim. OQ-67 is decided and applied.
 
 ## Gates and checks
 
@@ -122,7 +137,7 @@ stay open and the code follows their interim.
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64 and apply the scheduled answers to OQ-65 to OQ-67 (above).
+- Decide OQ-59 to OQ-64 and OQ-69, and apply the scheduled answers to OQ-65 and OQ-66 (above).
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

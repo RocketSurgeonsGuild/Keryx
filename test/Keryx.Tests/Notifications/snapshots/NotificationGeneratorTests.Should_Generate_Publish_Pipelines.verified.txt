@@ -33,16 +33,14 @@ namespace Sample
         public global::System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <inheritdoc />
         public global::System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, global::System.Threading.CancellationToken cancellationToken = default)
         {
             global::System.ArgumentNullException.ThrowIfNull(request);
-            var requestType = request.GetType();
-            throw __HandlerNotFound(requestType);
+            throw __HandlerNotFound(request.GetType());
         }
 
         /// <summary>
@@ -136,9 +134,9 @@ namespace Sample
                 {
                     case var _ when typeof(TNotification) == typeof(global::Sample.Tick):
                         return __Publish3(global::System.Runtime.CompilerServices.Unsafe.As<TNotification, global::Sample.Tick>(ref notification), cancellationToken);
+                    default:
+                        return default;
                 }
-
-                return default;
             }
 
             var notificationType = notification.GetType();
@@ -154,9 +152,9 @@ namespace Sample
                     return __Publish3((global::Sample.Tick)(object)notification, cancellationToken);
                 case var _ when notificationType == typeof(global::Sample.Unattended):
                     return __Publish4(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.Unattended>((object)notification), cancellationToken);
+                default:
+                    return default;
             }
-
-            return default;
         }
 
         private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.Broadcast notification, global::System.Threading.CancellationToken cancellationToken)
