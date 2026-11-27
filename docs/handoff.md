@@ -36,7 +36,7 @@ question, the interim behavior you are using and a proposal, continue with the s
   kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
   ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore` (`typeof` form only, naming the class), type name. No
   behavior instance exists: pipelines are flat link structs over a per-scope pipeline context that holds the handler and the behaviors'
-  injected services.
+  injected services, each distinct service (type and key) once. Generated code is built with `SyntaxFactory`.
 - Streams: a `[StreamBehavior]` wraps the stream (Immediate.Handlers `StreamingBehavior` model with a struct `IStreamNext<TItem>` link:
   get the inner stream from `next`, re-yield it with `await foreach`). There are no hook behaviors.
 - Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
@@ -139,8 +139,12 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
 
 Phases 0 to 8 were first built with interface-based behaviors. The design review of 2026-11-26 replaced them with static behaviors, and
 that rework landed as two further commits on the branch (7d2fd01: the C# 14 floor, the DI abstractions dependency, `ExternallyHandled`
-and KRX043; f54dc49: static behaviors, hook and per-handler behaviors removed). The phases below describe the static-behavior design as
-what each phase builds.
+and KRX043; f54dc49: static behaviors, hook and per-handler behaviors removed). The owner's second rework followed, one commit per step:
+d8ad015 (requests handled in their own assembly, KRX023; `KeryxContracts` and `ExternallyHandled` removed; the sample order requests moved
+next to their handlers; whitespace-only pre-commit formatting), 5afb535 (the `KeryxHost` MSBuild property replaces `KeryxHostAttribute`),
+4b0658f (every test compilation through the testing library 11.0.2; jump-table dispatch tests), eca51b5 (one context field per shared
+service) and 1fddbdd (`SyntaxFactory` emitters, switch-statement dispatch, primary-constructor links). The phases below describe the
+resulting design as what each phase builds.
 
 ## Phases
 
@@ -163,8 +167,11 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
 
 - **Behaviors.** The link interfaces `INext<T>`, `INext` and `IStreamNext<T>`, the `Phase` enum, and the three kind attributes
   `RequestBehaviorAttribute`, `StreamBehaviorAttribute` and `NotificationBehaviorAttribute`. There are no behavior interfaces and no
-  per-handler notification kind. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and `RunsBefore` target classes and methods;
-  `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type argument).
+  per-handler notification kind. `next` is a struct type argument constrained to a link interface, never a delegate: typed next
+  delegates were rejected (owner decision 4 of the second rework; ADR, Alternatives considered) because a delegate call is indirect and
+  not inlined, and a delegate bound to a pipeline context is allocated per scope. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and
+  `RunsBefore` target classes and methods; `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type
+  argument).
 - **Host attributes.** `ExcludeBehavior` and `ExcludeHandler`. There is no `KeryxContracts` or `ExternallyHandled`
   (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`), and no `KeryxHost` attribute: a host is the `KeryxHost`
   MSBuild property (Phase 3).
@@ -175,11 +182,10 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
 
 **Done when:** the abstractions compile for all three TFMs; unit tests cover `Unit` equality and `UnitAdapter` (including a zero-allocation
 test on net10+); the public API snapshot lists the three kind attributes and no behavior interface, `KeryxContractsAttribute`,
-`ExternallyHandledAttribute`,
-generic `RunsAfter<T>`/`RunsBefore<T>`, `PublishBehaviorAttribute` or `NotificationHandlerBehaviorAttribute`; the `KnownTypeNames` test
-passes; the packed `Keryx` package lists `Microsoft.Extensions.DependencyInjection.Abstractions` in the `net10.0` and `netstandard2.0`
-dependency groups with the versions above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.csproj` checks
-that in the packed nuspec after every pack.
+`ExternallyHandledAttribute`, `KeryxHostAttribute`, generic `RunsAfter<T>`/`RunsBefore<T>`, `PublishBehaviorAttribute` or
+`NotificationHandlerBehaviorAttribute`; the `KnownTypeNames` test passes; the packed `Keryx` package lists
+`Microsoft.Extensions.DependencyInjection.Abstractions` in the `net10.0` and `netstandard2.0` dependency groups with the versions
+above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.csproj` checks that in the packed nuspec after every pack.
 
 ### Phase 2: handlers, diagnostics, code fixes
 
@@ -319,7 +325,7 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
 ### Phase 5: streaming
 
 Stream dispatch (typed and generic), no-behavior pass-through (the handler's enumerable returned as is), `[StreamBehavior]` behavior
-methods that wrap the stream, called directly through flat `IStreamNext<TItem>` link structs (`StreamLink_k`) with their injected services
+methods that wrap the stream, called directly through flat `IStreamNext<TItem>` link structs (`StreamLinkK`) with their injected services
 read from the pipeline context (each distinct service once, shared as Phase 4's "Shared services" describes), the token rules (two tokens linked once, at the outermost element), synchronous validation of null and
 unknown requests. Stream behaviors use the same scopes, matching, ordering and diagnostics as request behaviors. There are no hook
 behaviors and no fused segments.
@@ -332,7 +338,7 @@ behaviors and no fused segments.
 - KRX019 tests cover the stream-kind shape cases (Phase 4 list);
 - scope tests (per target, `[assembly: Behavior]`, `[GlobalBehavior]`) and constraint-matching tests for open stream behavior methods,
   substituted with `TRequest`/`TItem`, and ordering tests by `Phase`, `Order` and `RunsAfter`/`RunsBefore`;
-- generator snapshot tests of stream pipelines at depths 0, 1, 3 and 8: the `StreamLink_k` structs and each behavior method called
+- generator snapshot tests of stream pipelines at depths 0, 1, 3 and 8: the `StreamLinkK` structs and each behavior method called
   directly with explicit type arguments;
 - allocation tests show 0 extra with no behaviors, one iterator per stream behavior per `Stream` call, and 0 per item; the two-token test
   asserts exactly one linked `CancellationTokenSource` in total with a stream behavior outermost when two distinct cancellable tokens are

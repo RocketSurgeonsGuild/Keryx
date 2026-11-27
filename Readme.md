@@ -198,7 +198,8 @@ public static class CheckQuantity
 ```
 
 `next` is a generated struct, and the generated pipeline calls each behavior method directly, with explicit type arguments: no behavior
-instance, no delegate, no closure and no virtual or generic virtual call per step. A behavior may call `next` more than once (retry) or
+instance, no delegate, no closure and no virtual or generic virtual call per step. Because `next` is a struct type argument rather than
+a delegate, each behavior method is compiled for its own link and the JIT can inline `next.InvokeAsync`. A behavior may call `next` more than once (retry) or
 not at all (short-circuit). A request with no response is `IRequest<Unit>`, so a request behavior sees `TResponse = Unit`.
 
 **Behavior methods.** The message, `next` and an optional `CancellationToken` are found by type, in any order; every other parameter is
@@ -460,7 +461,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
 | <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. For a behavior method it names the method and its kind; the class still applies through its other kinds. |
 | <a id="krx035"></a>KRX035      | Info     | Lists each global behavior the host applies, once per kind, and the assembly it comes from.                                                                   |
-| <a id="krx036"></a>KRX036      | Warning  | `ExcludeHandler` or `ExcludeBehavior` names a type that is not part of any pipeline.                                                                                                  |
+| <a id="krx036"></a>KRX036      | Warning  | An exclusion has no effect: `ExcludeHandler` names no referenced handler class the host would compose, or `ExcludeBehavior` names a type that is not part of any pipeline. |
 | <a id="krx037"></a>KRX037      | Info     | A struct notification is delivered to a handler typed as an interface or `INotification`, so it is boxed once per `Publish`.                                 |
 | <a id="krx040"></a>KRX040      | Warning  | `[HandlerOrder]` on a method that is not a notification handler.                                                                                              |
 | <a id="krx041"></a>KRX041      | Warning  | `[PublishStrategy]` on a type that is not a notification.                                                                                                     |

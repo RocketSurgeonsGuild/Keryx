@@ -18,7 +18,8 @@ raised while implementing it and are open, and OQ-61 and OQ-62 were raised while
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
 are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
-(decisions 5, 7 and 11) come last; OQ-65 to OQ-67 were raised while implementing them and are open.
+(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them and are open. "`next` stays a struct link
+interface" (decision 4, which keeps the design as it was) comes last.
 
 ## Open
 
@@ -1652,3 +1653,15 @@ before (112, 144 and 224 bytes; 6, 12 and 27 inlinees; the only call the context
 pass unchanged. Rejected shapes (stage-generic links, a runtime-provided generic link, composed chain types, a single index link) are in
 the ADR's Alternatives considered. Folded into the ADR (Generated pipeline shape, Streaming, Behavior methods, Injected parameters,
 Alternatives considered), the brief (Phase 4) and CONTEXT.md (link).
+
+### `next` stays a struct link interface (2026-11-26)
+
+Owner decision 4 of the second rework. `INext<TResponse>`, `INext` and `IStreamNext<TItem>` stay as they are: a behavior method takes
+`next` as a method type parameter constrained `struct` and the kind's interface, and the generated links are structs that implement it.
+Each closing of a behavior method over a link is its own specialization, so `next.InvokeAsync` is a direct call the JIT can inline, and
+nothing is allocated for `next` (the Phase 4 gate, OQ-36, re-run with the primary-constructor links: 0 B at depths 1, 3 and 8, every link
+and behavior method inlined). Typed next delegates (a `delegate ValueTask<TResponse> RequestNext<TResponse>(CancellationToken)` passed to
+the behavior method instead of `TNext`, and their stream and notification counterparts) were considered and rejected: a delegate call is
+an indirect call that the JIT does not inline, one per pipeline step, and each delegate bound to a pipeline context is a heap object
+allocated per scope (per pipeline and position, or per call when it captures the request). Nothing in the code changes. Folded into the
+ADR (Behavior kinds, Alternatives considered), the brief (Phase 1) and the README (Behaviors).
