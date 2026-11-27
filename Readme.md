@@ -421,10 +421,10 @@ types the host knows.
 Hosts are Native AOT and trimming safe: CI publishes the [sample host](samples/hosts/Keryx.Samples.Host) with `PublishAot=true`, fails
 on any trim or AOT warning and runs it.
 
-The generated sources are readable C#, laid out as the generators build them (nothing reformats them afterwards). On a host of 300
-requests with five behaviors each, 30 stream requests and 30 notifications, the host generator takes about 110 ms of a build and the
-handler generator about 50 ms, and neither runs again on an edit that changes no handler, behavior or message type (open-questions OQ-66
-and OQ-71).
+The generated sources are readable C#, written as text by the generators (nothing reformats them afterwards). On a host of 300
+requests with five behaviors each, 30 stream requests and 30 notifications, the host generator takes about 50 ms of a build and the
+handler generator about 30 ms, and neither runs again on an edit that changes no handler, behavior or message type (open-questions
+OQ-71).
 
 ## Contracts and handler libraries
 

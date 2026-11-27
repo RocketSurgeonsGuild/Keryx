@@ -1,7 +1,7 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 and 21 (2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -76,7 +76,7 @@ open-questions.md, CONTEXT.md and the README:
   `Publish<T>` keeps exact-type guards and ends `default: return default;`. A struct request's section has no pattern variable and its arm
   unboxes, so every arm stays a tail call. OQ-67 is decided (switch statements, not switch expressions), and so is OQ-68: a request or
   stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is the new host error KRX038. OQ-69
-  (a closed base from a referenced assembly) was raised and is open.
+  (a closed base from a referenced assembly) was raised, and decision 19 below answered it.
 - **bd2029b, pipelines that resolve nothing get no context (decision 16 for OQ-65):** a request or stream pipeline whose handler's invoker
   is static and whose behaviors inject nothing, and a publish pipeline without handlers whose behaviors inject nothing, have no pipeline
   context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
@@ -88,7 +88,7 @@ open-questions.md, CONTEXT.md and the README:
   names are parsed once per file and constant attribute lists built once. Every snapshot is byte for byte unchanged (a temporary two-way
   render of 7,472 generated files found no difference); two shapes no snapshot covers now read `int[,]` and `Dictionary<,>` where
   normalization wrote `int[, ]` and `Dictionary<, >`, and `GeneratedSyntaxTests` pins each layout rule against the helpers. OQ-66 is
-  decided; OQ-71 (generator time still above the target) was raised and is open.
+  decided; OQ-71 (generator time still above the target) was raised, and decision 21 below answered it.
 
 Measured in the second rework and its follow-up (Apple M4 Max, macOS 27.2, .NET SDK 11.0.100, BenchmarkDotNet 0.15.8 default job,
 net10.0; JIT code with `DOTNET_TieredCompilation=0` and `DOTNET_JitDisasm`; details in the open-questions entries named, raw results in
@@ -111,12 +111,27 @@ the session scratchpad of the follow-up, `followup-*/`, which is not kept in the
 - generator time on a host of 300 requests with five behaviors each, 30 stream requests and 30 notifications (`ReportAnalyzer`, Release,
   median of ten builds): 66 ms for the host generator and 35 ms for the handler generator with the text emitters, 384 ms and 102 ms with
   the normalized `SyntaxFactory` emitters (OQ-66); with the whitespace built in, 109 ms and 48 ms on a warm compiler server (372 ms and
-  93 ms before, measured the same way), still above the text emitters (OQ-71).
+  93 ms before, measured the same way). Re-measured on 2026-11-27 with ten extra warm-up builds (OQ-71): 97 ms and 46 ms with
+  `SyntaxFactory` and explicit trivia, 58 ms and 33 ms with the text emitters before 1fddbdd, 51 ms and 29 ms with the text emitters of
+  decision 21 (raw results in the session scratchpad, `text-before/` and `text-after/`).
+
+## Done: owner decisions 19 and 21 (2026-11-27)
+
+- **Text emitters (decision 21 for OQ-71):** every generator writes its source as text through `CodeWriter`
+  (`src/Keryx.Analyzers/CodeWriter.cs`, the writer removed in 1fddbdd, recovered and extended with the layout rules the `SyntaxFactory`
+  helpers had: blank lines between members, after a statement that ends with a block, the break after `=>`, one constructor parameter
+  per line, switch sections, directives at column 0). `GeneratedSyntax` is removed and `GeneratedSyntaxTests` became `CodeWriterTests`.
+  No snapshot changed; every source the test suite generates (734 distinct, on both target frameworks, plus three hosts of keywords,
+  unusual type shapes, escaped keys and literals, and every kind above the jump-table threshold, built for the check only), the large
+  host's 393 sources and the samples' and benchmark host's 168 are byte for byte what `SyntaxFactory` wrote. Decision 5 ("Generated code
+  is built with SyntaxFactory") and OQ-66's implementation are marked superseded.
+- **OQ-69 (decision 19):** accepted with no code change: a closed request base from a referenced assembly is treated, and named in
+  KRX003, as abstract; the attribute lookup stays in case a compiler returns it.
 
 ## Decisions for the owner
 
-Nine questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework and OQ-69 to OQ-71
-from its follow-up. The code follows each one's **Interim** line:
+Seven questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework and OQ-70 from
+its follow-up. The code follows each one's **Interim** line:
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
   referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
@@ -133,15 +148,10 @@ from its follow-up. The code follows each one's **Interim** line:
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
-- **OQ-69:** Roslyn does not return `IsClosedTypeAttribute` for a metadata type, so a referenced closed request base is treated (and named
-  in KRX003) as abstract; accept that?
 - **OQ-70:** a publish pipeline whose handlers all have static invokers and whose behaviors inject nothing resolves nothing but keeps
   its context, because the publish strategy is an instance method of it; make the strategy static and drop that context too?
-- **OQ-71:** with the whitespace built in (OQ-66), the generators take 109 ms and 48 ms on the large host, not the text emitters' 66 ms
-  and 35 ms the decision aimed for; most of the host generator's remaining time is outside the emitters. Accept it, or build repeated
-  subtrees once per file (or re-measure the text emitters' commit first)?
 
-OQ-65, OQ-66 and OQ-67 (decision 16) and OQ-68 (decision 18) are decided and applied.
+OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19) and OQ-71 (decision 21) are decided and applied.
 
 ## Gates and checks
 
@@ -172,7 +182,7 @@ OQ-65, OQ-66 and OQ-67 (decision 16) and OQ-68 (decision 18) are decided and app
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64 and OQ-69 to OQ-71.
+- Decide OQ-59 to OQ-64 and OQ-70.
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

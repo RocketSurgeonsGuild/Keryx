@@ -1,15 +1,12 @@
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Globalization;
+using System.Text;
 using Microsoft.CodeAnalysis.Text;
-using static Keryx.Analyzers.GeneratedSyntax;
-using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace Keryx.Analyzers.Handlers;
 
 /// <summary>
-///     Writes the generated half of a handler class (ADR 0001, Handlers, Example) and the assembly manifest, built with
-///     <see cref="SyntaxFactory" /> (<see cref="GeneratedSyntax" />).
+///     Writes the generated half of a handler class (ADR 0001, Handlers, Example) and the assembly manifest, as text through a
+///     <see cref="CodeWriter" />.
 /// </summary>
 internal static class HandlerEmitter
 {
@@ -24,12 +21,14 @@ internal static class HandlerEmitter
     private const string CancellationToken = "global::System.Threading.CancellationToken";
 
     /// <summary>The version in <c>[GeneratedCode("Keryx", version)]</c>.</summary>
-    public static string Version => GeneratedSyntax.Version;
+    public static string Version => CodeWriter.Version;
 
     /// <summary><c>[assembly: KeryxManifest(FormatVersion = n)]</c>, which marks an assembly whose handlers the host reads.</summary>
     public static SourceText Manifest()
     {
-        return Render(CompilationUnitOf("global::Keryx.Internal.KeryxManifest", Named("FormatVersion", Number(ManifestFormatVersion))), pragma: null);
+        var writer = new CodeWriter(pragma: null, capacity: 128);
+        writer.Line("[assembly: global::Keryx.Internal.KeryxManifest(FormatVersion = " + ManifestFormatVersion.ToString(CultureInfo.InvariantCulture) + ")]");
+        return writer.ToSourceText();
     }
 
     /// <summary>
@@ -47,158 +46,195 @@ internal static class HandlerEmitter
         // Member accessibility follows the signature alone: a signature that mentions internal types gets internal members, which compile
         // in a class of any accessibility (a public or protected internal class's public members could not take an internal type). Such a
         // handler stays out of the manifest with the host's other internal handlers.
-        var memberAccess = model.SignatureAccess == AccessLevel.Public ? SyntaxKind.PublicKeyword : SyntaxKind.InternalKeyword;
+        var memberAccess = model.SignatureAccess == AccessLevel.Public ? "public" : "internal";
         var inManifest = model is { ClassAccess: AccessLevel.Public, SignatureAccess: AccessLevel.Public };
 
-        // The depth of each declaration of the chain: the outermost one is in the namespace, if any.
-        var outer = model.Namespace is null ? 0 : 1;
-        var innermost = outer + model.Types.Count - 1;
-        MemberDeclarationSyntax declaration = Declaration(model.Types[^1]).WithBody(innermost, Members(model, memberAccess, innermost + 1));
-        if (inManifest)
+        var writer = new CodeWriter(capacity: 2048);
+        if (model.Namespace is { } ns)
         {
-            declaration = WithHandlerAttribute((TypeDeclarationSyntax)declaration, model);
+            writer.Namespace(ns);
         }
 
-        for (var i = model.Types.Count - 2; i >= 0; i--)
+        // The chain of partial declarations, outermost first; the last one is the handler class.
+        for (var i = 0; i < model.Types.Count; i++)
         {
-            declaration = Declaration(model.Types[i]).WithBody(outer + i, [declaration]);
+            writer.Member();
+            if (i == model.Types.Count - 1 && inManifest)
+            {
+                WriteHandlerAttribute(writer, model);
+            }
+
+            writer.Line(Declaration(model.Types[i]));
+            writer.Open();
         }
 
-        return Render(CompilationUnitOf(model.Namespace is { } ns ? Namespace(ns, declaration) : declaration));
+        WriteMembers(writer, model, memberAccess);
+
+        for (var i = 0; i < model.Types.Count; i++)
+        {
+            writer.Close();
+        }
+
+        if (model.Namespace is not null)
+        {
+            writer.Close();
+        }
+
+        return writer.ToSourceText();
     }
 
     /// <summary>The partial declaration of one type of the chain, with the modifiers and keyword the user declared it with.</summary>
-    private static TypeDeclarationSyntax Declaration(TypeDeclarationModel type)
-    {
-        // Each keyword of the text keeps the one space after it; the name has none, so the body's braces go on their own lines.
-        var modifiers = type.Modifiers.Length > 0 ? type.Modifiers + " " : "";
-        return (TypeDeclarationSyntax)ParseMemberDeclaration($"{modifiers}partial {type.Keyword} {type.Name}{{}}")!;
-    }
+    private static string Declaration(TypeDeclarationModel type) =>
+        type.Modifiers.Length > 0 ? $"{type.Modifiers} partial {type.Keyword} {type.Name}" : $"partial {type.Keyword} {type.Name}";
 
     /// <summary>
-    ///     The handler class with its <c>[KeryxHandler]</c> manifest entry. A <c>typeof</c> operand cannot carry a top-level nullable
-    ///     annotation, and dropping a nested one (<c>Tag&lt;Ping, string&gt;</c> for a request that responds with <c>string?</c>) breaks a
-    ///     nullable constraint (CS8631), so with behaviors the attribute is written with the nullable context disabled. Attribute metadata
-    ///     keeps no annotations anyway.
+    ///     The handler class's <c>[KeryxHandler]</c> manifest entry. A <c>typeof</c> operand cannot carry a top-level nullable annotation, and
+    ///     dropping a nested one (<c>Tag&lt;Ping, string&gt;</c> for a request that responds with <c>string?</c>) breaks a nullable constraint
+    ///     (CS8631), so with behaviors the attribute is written with the nullable context disabled (<c>#nullable disable</c> before it and
+    ///     <c>#nullable enable</c>, not <c>restore</c>, which returns to the project default, disabled for generated code, after it).
+    ///     Attribute metadata keeps no annotations anyway.
     /// </summary>
-    private static TypeDeclarationSyntax WithHandlerAttribute(TypeDeclarationSyntax declaration, HandlerModel model)
+    private static void WriteHandlerAttribute(CodeWriter writer, HandlerModel model)
     {
-        var arguments = new List<AttributeArgumentSyntax>
-        {
-            AttributeArgument(TypeOf(TypeOfOperand(model.MessageType))),
-            AttributeArgument(Qualified("global::Keryx.Internal.HandlerKind." + model.Kind)),
-        };
+        var attribute = new StringBuilder(256)
+                       .Append("[global::Keryx.Internal.KeryxHandler(typeof(")
+                       .Append(TypeOfOperand(model.MessageType))
+                       .Append("), global::Keryx.Internal.HandlerKind.")
+                       .Append(model.Kind.ToString());
         if (model.Behaviors.Count > 0)
         {
-            arguments.Add(Named("Behaviors", NewArray(TypeName("global::System.Type"), model.Behaviors.Select(static b => (ExpressionSyntax)TypeOf(b)))));
+            attribute.Append(", Behaviors = new global::System.Type[] { ");
+            for (var i = 0; i < model.Behaviors.Count; i++)
+            {
+                attribute.Append(i == 0 ? "typeof(" : ", typeof(").Append(model.Behaviors[i]).Append(')');
+            }
+
+            attribute.Append(" }");
         }
 
         if (model.Order != 0)
         {
-            arguments.Add(Named("Order", Integer(model.Order)));
+            attribute.Append(", Order = ").Append(model.Order.ToString(CultureInfo.InvariantCulture));
         }
 
         if (model.StaticInvoker)
         {
-            arguments.Add(Named("StaticInvoker", BooleanLiteral(true)));
+            attribute.Append(", StaticInvoker = true");
         }
 
-        var attributed = declaration.AddAttributeLists(AttributeOf("global::Keryx.Internal.KeryxHandler", [.. arguments]));
-        return model.Behaviors.Count == 0 ? attributed : attributed.WithNullableObliviousAttributes();
+        attribute.Append(")]");
+        if (model.Behaviors.Count == 0)
+        {
+            writer.Line(attribute.ToString());
+            return;
+        }
+
+        writer.Directive("#nullable disable");
+        writer.Line(attribute.ToString());
+        writer.Directive("#nullable enable");
     }
 
-    /// <summary>The members of the handler class's generated half, at <paramref name="depth" />.</summary>
-    private static IEnumerable<MemberDeclarationSyntax> Members(HandlerModel model, SyntaxKind memberAccess, int depth)
+    /// <summary>The members of the handler class's generated half: the fields and constructor of an injecting handler, then the invoker.</summary>
+    private static void WriteMembers(CodeWriter writer, HandlerModel model, string memberAccess)
     {
         var className = model.Types[^1].Name;
         var injected = model.Parameters.Where(static p => p.Role == ParameterRole.Injected).ToArray();
 
         foreach (var parameter in injected)
         {
-            yield return Field(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(parameter.Type), FieldName(parameter))
-               .AddAttributeLists(GeneratedCodeAttribute());
+            writer.Member();
+            writer.Line(CodeWriter.GeneratedCodeAttribute);
+            writer.Line($"private readonly {parameter.Type} {FieldName(parameter)};");
         }
 
         if (injected.Length > 0)
         {
-            yield return Constructor(
-                             depth,
-                             Modifiers(memberAccess),
-                             className,
-                             [.. injected.Select(ConstructorParameter)],
-                             injected.Select(static p => Assign(Id(FieldName(p)), Id(CSharpText.Identifier(p.Name))))
-                         )
-                        .AddAttributeLists(GeneratedCodeAttribute())
-                        .Documented("<summary>Creates the handler with the services its handler method injects.</summary>");
+            writer.Member();
+            writer.Documentation("<summary>Creates the handler with the services its handler method injects.</summary>");
+            writer.Line(CodeWriter.GeneratedCodeAttribute);
+            writer.Parameters(memberAccess + " " + className, [.. injected.Select(ConstructorParameter)]);
+            writer.Open();
+            foreach (var parameter in injected)
+            {
+                writer.Line($"{FieldName(parameter)} = {CSharpText.Identifier(parameter.Name)};");
+            }
+
+            writer.Close();
         }
 
         var messageName = model.Kind == HandlerKind.Notification ? "notification" : "request";
-        var call = Invoke(
-            Id(model.MethodName),
-            [
-                .. model.Parameters.Select(p => p.Role switch
-                    {
-                        ParameterRole.Message => Id(messageName),
-                        ParameterRole.CancellationToken => Id("cancellationToken"),
-                        ParameterRole.Injected or ParameterRole.Invalid => Id(FieldName(p)),
-                        _ => Id(FieldName(p)),
-                    }
-                ),
-            ]
-        );
-        ExpressionSyntax result = model.NullabilityDiffers ? NotNull(call) : call;
-
-        var invoker = Method(
-                          model.StaticInvoker ? Modifiers(memberAccess, SyntaxKind.StaticKeyword) : Modifiers(memberAccess),
-                          InvokerReturnType(model),
-                          HandlerAnalysis.InvokerName,
-                          Params(Param(TypeName(model.MessageType), messageName), Param(TypeName(CancellationToken), "cancellationToken"))
-                      )
-                     .AddAttributeLists(GeneratedCodeAttribute());
-
-        invoker = model.ReturnShape switch
+        var call = new StringBuilder(64).Append(model.MethodName).Append('(');
+        for (var i = 0; i < model.Parameters.Count; i++)
         {
-            ReturnShape.Void => invoker.Statements(
-                depth,
-                [
-                    Do(call),
-                    Return(New(TypeName($"{ValueTask}<{Unit}>"), Member(Qualified(Unit), "Value"))),
-                ]
-            ),
-            ReturnShape.ValueTaskOfT or ReturnShape.AsyncEnumerable => invoker.Expression(depth, result),
-            ReturnShape.TaskOfT or ReturnShape.Synchronous => invoker.Expression(depth, New(TypeName($"{ValueTask}<{model.ResponseType}>"), result)),
-            ReturnShape.ValueTask or ReturnShape.Task when model.Kind == HandlerKind.Request => invoker.Expression(
-                depth,
-                Invoke(Member(Qualified("global::Keryx.Internal.UnitAdapter"), "ToUnit"), call)
-            ),
-            ReturnShape.ValueTask => invoker.Expression(depth, call),
-            _ => invoker.Expression(depth, New(TypeName(ValueTask), call)),
-        };
+            var parameter = model.Parameters[i];
+            call.Append(i == 0 ? "" : ", ")
+                .Append(
+                     parameter.Role switch
+                     {
+                         ParameterRole.Message => messageName,
+                         ParameterRole.CancellationToken => "cancellationToken",
+                         ParameterRole.Injected or ParameterRole.Invalid => FieldName(parameter),
+                         _ => FieldName(parameter),
+                     }
+                 );
+        }
 
-        yield return invoker.Documented("<summary>Runs the handler only. No behaviors run.</summary>");
+        var invocation = call.Append(')').ToString();
+        var result = model.NullabilityDiffers ? invocation + "!" : invocation;
+
+        writer.Member();
+        writer.Documentation("<summary>Runs the handler only. No behaviors run.</summary>");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        var declaration =
+            $"{memberAccess}{( model.StaticInvoker ? " static" : "" )} {InvokerReturnType(model)} {HandlerAnalysis.InvokerName}({model.MessageType} {messageName}, {CancellationToken} cancellationToken)";
+        switch (model.ReturnShape)
+        {
+            case ReturnShape.Void:
+                writer.Line(declaration);
+                writer.Open();
+                writer.Line(invocation + ";");
+                writer.Line($"return new {ValueTask}<{Unit}>({Unit}.Value);");
+                writer.Close();
+                break;
+            case ReturnShape.ValueTaskOfT or ReturnShape.AsyncEnumerable:
+                writer.Arrow(declaration, result);
+                break;
+            case ReturnShape.TaskOfT or ReturnShape.Synchronous:
+                writer.Arrow(declaration, $"new {ValueTask}<{model.ResponseType}>({result})");
+                break;
+            case ReturnShape.ValueTask or ReturnShape.Task when model.Kind == HandlerKind.Request:
+                writer.Arrow(declaration, $"global::Keryx.Internal.UnitAdapter.ToUnit({invocation})");
+                break;
+            case ReturnShape.ValueTask:
+                writer.Arrow(declaration, invocation);
+                break;
+            default:
+                writer.Arrow(declaration, $"new {ValueTask}({invocation})");
+                break;
+        }
     }
 
-    private static TypeSyntax InvokerReturnType(HandlerModel model) =>
-        TypeName(
-            model.Kind switch
-            {
-                HandlerKind.Notification => ValueTask,
-                HandlerKind.Stream => $"global::System.Collections.Generic.IAsyncEnumerable<{model.ResponseType}>",
-                HandlerKind.Request => $"{ValueTask}<{model.ResponseType}>",
-                _ => $"{ValueTask}<{model.ResponseType}>",
-            }
-        );
+    private static string InvokerReturnType(HandlerModel model) =>
+        model.Kind switch
+        {
+            HandlerKind.Notification => ValueTask,
+            HandlerKind.Stream => $"global::System.Collections.Generic.IAsyncEnumerable<{model.ResponseType}>",
+            HandlerKind.Request => $"{ValueTask}<{model.ResponseType}>",
+            _ => $"{ValueTask}<{model.ResponseType}>",
+        };
 
-    private static ParameterSyntax ConstructorParameter(ParameterModel parameter)
+    /// <summary>
+    ///     A parameter of the generated constructor: the handler method's parameter with its <c>[FromKeyedServices]</c> key and default value.
+    /// </summary>
+    private static string ConstructorParameter(ParameterModel parameter)
     {
-        var syntax = Param(
-            TypeName(parameter.Type),
-            CSharpText.Identifier(parameter.Name),
-            parameter.DefaultValue is { } defaultValue ? Code(defaultValue) : null
-        );
-        return parameter.ServiceKey is { } key
-            ? syntax.WithAttribute(AttributeOf("global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute", AttributeArgument(Code(key))))
-            : syntax;
+        var text = $"{parameter.Type} {CSharpText.Identifier(parameter.Name)}";
+        if (parameter.DefaultValue is { } defaultValue)
+        {
+            text += " = " + defaultValue;
+        }
+
+        return parameter.ServiceKey is { } key ? $"[global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute({key})] {text}" : text;
     }
 
     private static string FieldName(ParameterModel parameter) => HandlerAnalysis.ReservedFieldPrefix + parameter.Name;

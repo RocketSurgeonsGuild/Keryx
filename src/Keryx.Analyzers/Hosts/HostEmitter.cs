@@ -1,23 +1,18 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Text;
 using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using Specular.Scanning;
-using static Keryx.Analyzers.GeneratedSyntax;
-using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
-///     Writes the host's generated types (ADR 0001, Generated host), built with <see cref="SyntaxFactory" /> (<see cref="GeneratedSyntax" />):
-///     the scoped <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request
-///     and stream request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for
-///     the pipelines that resolve something and flat link structs that take only what they read or pass on (ADR 0001, Generated pipeline
-///     shape), and
+///     Writes the host's generated types (ADR 0001, Generated host), as text through a <see cref="CodeWriter" />: the scoped
+///     <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request and stream
+///     request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for the pipelines
+///     that resolve something and flat link structs that take only what they read or pass on (ADR 0001, Generated pipeline shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
 ///     their behavior methods directly, and the pipeline contexts resolve their injected services.
 /// </summary>
@@ -51,22 +46,11 @@ internal static partial class HostEmitter
     /// <summary>The name of the pipeline context, as a local at the entry of a pipeline and as a parameter of its links.</summary>
     private const string PipelineName = "pipeline";
 
-    private const string CancellationTokenName = "cancellationToken";
+    /// <summary>The parameters every pipeline method, typed overload and link ends with, after the message.</summary>
+    private const string TokenParameter = CancellationToken + " cancellationToken";
 
-    /// <summary>
-    ///     The depth of the members of <c>KeryxMediator</c> and <c>KeryxServiceCollectionExtensions</c> (in the namespace, in the class), and of
-    ///     the pipeline contexts and link classes nested in the mediator: the statements of their bodies are one level deeper.
-    /// </summary>
-    private const int MemberDepth = 2;
-
-    /// <summary>The depth of the statements of a mediator method.</summary>
-    private const int StatementDepth = MemberDepth + 1;
-
-    /// <summary>The depth of the members of a pipeline context or link class, and of the links nested in it.</summary>
-    private const int ContextMemberDepth = MemberDepth + 1;
-
-    /// <summary>The depth of a link's <c>InvokeAsync</c>.</summary>
-    private const int LinkMemberDepth = ContextMemberDepth + 1;
+    /// <summary>The token parameter of a public entry point, which defaults.</summary>
+    private const string OptionalTokenParameter = TokenParameter + " = default";
 
     public static SourceText Mediator(HostSettings settings, HostComposition composition)
     {
@@ -74,15 +58,29 @@ internal static partial class HostEmitter
         var streams = composition.Streams;
         var notifications = composition.Notifications.Where(static n => n.IsActive).ToImmutableArray();
 
-        var members = new List<MemberDeclarationSyntax>
-        {
-            Field(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(ServiceProvider), "__serviceProvider"),
-        };
+        // About 2.5 KB of text per pipeline with a few behaviors, so the builder rarely grows.
+        var writer = new CodeWriter(capacity: 8192 + 2560 * ( requests.Length + streams.Length + composition.Notifications.Length ));
+        writer.Namespace(settings.Namespace);
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
+            "    notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so",
+            "    nothing is resolved or allocated per call after that. Registered by <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
+            "</summary>"
+        );
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal sealed partial class KeryxMediator : global::Keryx.IMediator");
+        writer.Open();
+
+        writer.Member(plainField: true);
+        writer.Line($"private readonly {ServiceProvider} __serviceProvider;");
         for (var i = 0; i < requests.Length; i++)
         {
             if (HasContext(requests[i]))
             {
-                members.Add(Field(Modifiers(SyntaxKind.PrivateKeyword), NullableType(Id(ContextName(i))), ContextField(i)));
+                writer.Member(plainField: true);
+                writer.Line($"private {ContextName(i)}? {ContextField(i)};");
             }
         }
 
@@ -90,7 +88,8 @@ internal static partial class HostEmitter
         {
             if (HasContext(streams[i]))
             {
-                members.Add(Field(Modifiers(SyntaxKind.PrivateKeyword), NullableType(Id(StreamContextName(i))), StreamContextField(i)));
+                writer.Member(plainField: true);
+                writer.Line($"private {StreamContextName(i)}? {StreamContextField(i)};");
             }
         }
 
@@ -98,75 +97,66 @@ internal static partial class HostEmitter
         {
             if (HasContext(notifications[i]))
             {
-                members.Add(Field(Modifiers(SyntaxKind.PrivateKeyword), NullableType(Id(NotificationContextName(i))), NotificationContextField(i)));
+                writer.Member(plainField: true);
+                writer.Line($"private {NotificationContextName(i)}? {NotificationContextField(i)};");
             }
         }
 
-        members.Add(
-            Constructor(
-                    MemberDepth,
-                    Modifiers(SyntaxKind.PublicKeyword),
-                    "KeryxMediator",
-                    [Param(TypeName(ServiceProvider), ServiceProviderName)],
-                    [Call(Qualified(ThrowIfNull), Id(ServiceProviderName)), Assign(Id("__serviceProvider"), Id(ServiceProviderName))]
-                )
-               .Documented(
-                    "<summary>Creates the mediator of one scope.</summary>",
-                    $"<param name=\"{ServiceProviderName}\">The scope's service provider. Pipeline contexts resolve handlers from it.</param>"
-                )
+        writer.Member();
+        writer.Documentation(
+            "<summary>Creates the mediator of one scope.</summary>",
+            $"<param name=\"{ServiceProviderName}\">The scope's service provider. Pipeline contexts resolve handlers from it.</param>"
         );
+        writer.Line($"public KeryxMediator({ServiceProvider} {ServiceProviderName})");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}({ServiceProviderName});");
+        writer.Line($"__serviceProvider = {ServiceProviderName};");
+        writer.Close();
 
         for (var i = 0; i < requests.Length; i++)
         {
-            members.Add(TypedSend(requests[i].Handler, i));
+            WriteTypedSend(writer, requests[i].Handler, i);
         }
 
-        members.AddRange(GenericSend(requests.Select(static p => p.Handler).ToImmutableArray()));
+        WriteGenericSend(writer, requests.Select(static p => p.Handler).ToImmutableArray());
 
         for (var i = 0; i < streams.Length; i++)
         {
-            members.Add(TypedStream(streams[i].Handler, i));
+            WriteTypedStream(writer, streams[i].Handler, i);
         }
 
-        members.AddRange(GenericStream(streams.Select(static p => p.Handler).ToImmutableArray()));
-        members.AddRange(Publish(composition.Notifications, notifications));
+        WriteGenericStream(writer, streams.Select(static p => p.Handler).ToImmutableArray());
+        WritePublish(writer, composition.Notifications, notifications);
 
         for (var i = 0; i < requests.Length; i++)
         {
-            members.AddRange(Core(requests[i], i));
+            WriteCore(writer, requests[i], i);
         }
 
         for (var i = 0; i < streams.Length; i++)
         {
-            members.AddRange(StreamCore(streams[i], i));
+            WriteStreamCore(writer, streams[i], i);
         }
 
         for (var i = 0; i < notifications.Length; i++)
         {
-            members.AddRange(PublishCore(notifications[i], i));
+            WritePublishCore(writer, notifications[i], i);
         }
 
         if (notifications.Any(static n => n.Notification.Parallel && !n.Handlers.IsEmpty))
         {
-            members.Add(WhenAllHandlers());
+            WriteWhenAllHandlers(writer);
         }
 
-        members.Add(
-            Method(
-                    Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword),
-                    TypeName("global::Keryx.KeryxHandlerNotFoundException"),
-                    "__HandlerNotFound",
-                    Params(Param(TypeName("global::System.Type"), "requestType"))
-                )
-               .AddAttributeLists(NoInliningAttribute())
-               .Expression(MemberDepth, TargetTypedNew(Id("requestType")))
-        );
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow("private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType)", "new(requestType)");
 
         for (var i = 0; i < requests.Length; i++)
         {
             if (HasContext(requests[i]) || !requests[i].Behaviors.IsEmpty)
             {
-                members.Add(Context(requests[i], i));
+                WriteContext(writer, requests[i], i);
             }
         }
 
@@ -174,143 +164,112 @@ internal static partial class HostEmitter
         {
             if (HasContext(streams[i]) || !streams[i].Behaviors.IsEmpty)
             {
-                members.Add(StreamContext(streams[i], i));
+                WriteStreamContext(writer, streams[i], i);
             }
         }
 
         for (var i = 0; i < notifications.Length; i++)
         {
-            members.Add(NotificationContext(notifications[i], i));
+            WriteNotificationContext(writer, notifications[i], i);
         }
 
-        var mediator = Class(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.SealedKeyword, SyntaxKind.PartialKeyword), "KeryxMediator", "global::Keryx.IMediator")
-                      .WithBody(MemberDepth - 1, members)
-                      .AddAttributeLists(GeneratedCodeAttribute())
-                      .Documented(
-                           "<summary>",
-                           "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
-                           "    notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so",
-                           "    nothing is resolved or allocated per call after that. Registered by <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
-                           "</summary>"
-                       );
-        return Render(InNamespace(settings, mediator));
+        writer.Close();
+        writer.Close();
+        return writer.ToSourceText();
     }
 
     public static SourceText ServiceCollectionExtensions(HostSettings settings, HostComposition composition)
     {
-        var statements = new List<StatementSyntax>
-        {
-            Call(Qualified(ThrowIfNull), Id("services")),
-            Call(Member(Qualified(DescriptorExtensions), "TryAddScoped"), Id("services"), Factory(New(Id("KeryxMediator"), Id(ServiceProviderName)))),
-        };
+        var writer = new CodeWriter(capacity: 4096 + 512 * composition.ConstructedHandlers.Length);
+        writer.Namespace(settings.Namespace);
+        writer.Member();
+        writer.Documentation("<summary>Registers this host's Keryx mediator and handlers.</summary>");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal static class KeryxServiceCollectionExtensions");
+        writer.Open();
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,",
+            "    <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), and every",
+            "    handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.",
+            "    Registrations that already exist are kept, so a second call does nothing.",
+            "</summary>",
+            "<param name=\"services\">The service collection.</param>",
+            "<returns>The same service collection.</returns>"
+        );
+        writer.Line($"public static {ServiceCollection} AddKeryx(this {ServiceCollection} services)");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}(services);");
+        writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
         foreach (var service in (string[])["global::Keryx.IMediator", "global::Keryx.ISender", "global::Keryx.IPublisher"])
         {
-            statements.Add(
-                Call(
-                    Member(Qualified(DescriptorExtensions), Generic("TryAddScoped", TypeName(service))),
-                    Id("services"),
-                    Factory(Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", Id("KeryxMediator"))), Id(ServiceProviderName)))
-                )
+            writer.Line(
+                $"{DescriptorExtensions}.TryAddScoped<{service}>(services, {Factory($"{ServiceProviderExtensions}.GetRequiredService<KeryxMediator>({ServiceProviderName})")});"
             );
         }
 
         foreach (var handler in composition.ConstructedHandlers)
         {
-            var arguments = new ExpressionSyntax[handler.Services.Count];
-            for (var i = 0; i < arguments.Length; i++)
+            var creation = new StringBuilder(256).Append("new ").Append(handler.HandlerClass).Append('(');
+            for (var i = 0; i < handler.Services.Count; i++)
             {
-                arguments[i] = Resolve(handler.Services[i], i);
+                creation.Append(i == 0 ? "" : ", ").Append(Resolve(handler.Services[i], i));
             }
 
-            statements.Add(Call(Member(Qualified(DescriptorExtensions), "TryAddScoped"), Id("services"), Factory(New(TypeName(handler.HandlerClass), arguments))));
+            writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory(creation.Append(')').ToString())});");
         }
 
-        statements.Add(Return(Id("services")));
-
-        var addKeryx = Method(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.StaticKeyword), TypeName(ServiceCollection), "AddKeryx", Params(Param(TypeName(ServiceCollection), "services").WithModifiers(Modifiers(SyntaxKind.ThisKeyword))))
-                      .Statements(MemberDepth, statements)
-                      .Documented(
-                           "<summary>",
-                           "    Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,",
-                           "    <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), and every",
-                           "    handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.",
-                           "    Registrations that already exist are kept, so a second call does nothing.",
-                           "</summary>",
-                           "<param name=\"services\">The service collection.</param>",
-                           "<returns>The same service collection.</returns>"
-                       );
-
-        var extensions = Class(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.StaticKeyword), "KeryxServiceCollectionExtensions")
-                        .WithBody(MemberDepth - 1, [addKeryx])
-                        .AddAttributeLists(GeneratedCodeAttribute())
-                        .Documented("<summary>Registers this host's Keryx mediator and handlers.</summary>");
-        return Render(InNamespace(settings, extensions));
+        writer.Line("return services;");
+        writer.Close();
+        writer.Close();
+        writer.Close();
+        return writer.ToSourceText();
     }
-
-    private static CompilationUnitSyntax InNamespace(HostSettings settings, MemberDeclarationSyntax type) => CompilationUnitOf(Namespace(settings.Namespace, type));
 
     /// <summary>A scoped registration's factory: <c>static serviceProvider =&gt; body</c>.</summary>
-    private static SimpleLambdaExpressionSyntax Factory(ExpressionSyntax body) => StaticLambda(ServiceProviderName, body);
+    private static string Factory(string body) => $"static {ServiceProviderName} => {body}";
 
-    private static MethodDeclarationSyntax TypedSend(HostHandlerModel request, int index)
+    private static void WriteTypedSend(CodeWriter writer, HostHandlerModel request, int index)
     {
-        var statements = new List<StatementSyntax>();
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            $"    Sends a <c>{Display(request.MessageType)}</c> through its pipeline to its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
+            "</summary>",
+            "<param name=\"request\">The request.</param>",
+            "<param name=\"cancellationToken\">The token passed to the handler.</param>",
+            "<returns>The handler's response.</returns>"
+        );
+        writer.Line($"public {ValueTask}<{request.ResponseType}> Send({request.MessageType} request, {OptionalTokenParameter})");
+        writer.Open();
         if (!request.MessageIsValueType)
         {
-            statements.Add(Call(Qualified(ThrowIfNull), Id("request")));
+            writer.Line($"{ThrowIfNull}(request);");
         }
 
-        statements.Add(Return(Invoke(Id(CoreName(index)), Id("request"), Id(CancellationTokenName))));
-        return Method(
-                   Modifiers(SyntaxKind.PublicKeyword),
-                   TypeName($"{ValueTask}<{request.ResponseType}>"),
-                   "Send",
-                   Params(Param(TypeName(request.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
-               )
-              .Statements(MemberDepth, statements)
-              .Documented(
-                   "<summary>",
-                   $"    Sends a <c>{Display(request.MessageType)}</c> through its pipeline to its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
-                   "</summary>",
-                   "<param name=\"request\">The request.</param>",
-                   "<param name=\"cancellationToken\">The token passed to the handler.</param>",
-                   "<returns>The handler's response.</returns>"
-               );
+        writer.Line($"return {CoreName(index)}(request, cancellationToken);");
+        writer.Close();
     }
 
-    private static IEnumerable<MemberDeclarationSyntax> GenericSend(ImmutableArray<HostHandlerModel> requests)
+    private static void WriteGenericSend(CodeWriter writer, ImmutableArray<HostHandlerModel> requests)
     {
-        yield return Method(
-                         Modifiers(SyntaxKind.PublicKeyword),
-                         TypeName($"{ValueTask}<TResponse>"),
-                         "Send",
-                         Params(Param(TypeName("global::Keryx.IRequest<TResponse>"), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
-                     )
-                    .WithTypeParameterList(TypeParameters("TResponse"))
-                    .Statements(
-                         MemberDepth,
-                         [
-                             Call(Qualified(ThrowIfNull), Id("request")),
-                             .. RequestDispatch(
-                                 requests,
-                                 "__RequestIndex",
-                                 static (_, i, request) => Invoke(Generic(DispatchName(i), TypeName("TResponse")), request, Id(CancellationTokenName))
-                             ),
-                         ]
-                     )
-                    .Documented("<inheritdoc />");
+        writer.Member();
+        writer.Documentation("<inheritdoc />");
+        writer.Line($"public {ValueTask}<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, {OptionalTokenParameter})");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}(request);");
+        WriteRequestDispatch(writer, requests, "__RequestIndex", static (_, i, request) => $"{DispatchName(i)}<TResponse>({request}, cancellationToken)");
+        writer.Close();
 
         if (requests.Length > DispatchThreshold)
         {
-            foreach (var member in TypeTable("request", "__requestTypes", "__RequestIndex", requests.Select(static h => h.MessageType).ToImmutableArray()))
-            {
-                yield return member;
-            }
+            WriteTypeTable(writer, "request", "__requestTypes", "__RequestIndex", requests.Select(static h => h.MessageType).ToImmutableArray());
         }
 
         for (var i = 0; i < requests.Length; i++)
         {
-            yield return DispatchArm(requests[i], i);
+            WriteDispatchArm(writer, requests[i], i);
         }
     }
 
@@ -329,49 +288,57 @@ internal static partial class HostEmitter
     ///     unboxes it itself: a pattern variable would unbox the struct into a local of the dispatching method, which the JIT zeroes in the
     ///     prolog of every call (it holds references) and whose copy keeps that arm from being a tail call.
     /// </remarks>
+    /// <param name="writer">The writer, in the dispatching method's body.</param>
     /// <param name="requests">The dispatched request or stream request types, in switch order.</param>
     /// <param name="lookup">The index method above the threshold.</param>
     /// <param name="arm">
     ///     The result of the section of type <c>i</c>, given the request: as its exact type for a class, as the interface-typed <c>request</c>
     ///     for a struct.
     /// </param>
-    private static StatementSyntax[] RequestDispatch(
+    private static void WriteRequestDispatch(
+        CodeWriter writer,
         ImmutableArray<HostHandlerModel> requests,
         string lookup,
-        Func<HostHandlerModel, int, ExpressionSyntax, ExpressionSyntax> arm
+        Func<HostHandlerModel, int, string, string> arm
     )
     {
         if (requests.IsEmpty)
         {
-            return [Throw(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))];
+            writer.Line("throw __HandlerNotFound(request.GetType());");
+            return;
         }
 
-        var sections = new List<SwitchSectionSyntax>(requests.Length + 1);
         if (requests.Length > DispatchThreshold)
         {
+            writer.Line("var requestType = request.GetType();");
+            writer.Switch(lookup + "(requestType)");
             for (var i = 0; i < requests.Length; i++)
             {
                 var request = requests[i];
-                var exact = request.MessageIsValueType ? Id("request") : Exact(request.MessageType, false, Id("request"));
-                sections.Add(ConstantSection(i, Return(arm(request, i, exact))));
+                writer.Section(Case(i), $"return {arm(request, i, request.MessageIsValueType ? "request" : Exact(request.MessageType, false, "request"))};");
             }
 
-            sections.Add(DefaultSection(Throw(Invoke(Id("__HandlerNotFound"), Id("requestType")))));
-            return [Var("requestType", Invoke(Member(Id("request"), "GetType"))), Switch(StatementDepth, Invoke(Id(lookup), Id("requestType")), sections)];
+            writer.Section("default:", "throw __HandlerNotFound(requestType);");
+            writer.CloseStatement();
+            return;
         }
 
+        writer.Switch("request");
         for (var i = 0; i < requests.Length; i++)
         {
             var request = requests[i];
-            sections.Add(
-                request.MessageIsValueType
-                    ? TypeSection(request.MessageType, null, Return(arm(request, i, Id("request"))))
-                    : TypeSection(request.MessageType, "r", Return(arm(request, i, Id("r"))))
-            );
+            if (request.MessageIsValueType)
+            {
+                writer.Section($"case {request.MessageType}:", $"return {arm(request, i, "request")};");
+            }
+            else
+            {
+                writer.Section($"case {request.MessageType} r:", $"return {arm(request, i, "r")};");
+            }
         }
 
-        sections.Add(DefaultSection(Throw(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))));
-        return [Switch(StatementDepth, Id("request"), sections)];
+        writer.Section("default:", "throw __HandlerNotFound(request.GetType());");
+        writer.CloseStatement();
     }
 
     /// <summary>
@@ -381,83 +348,83 @@ internal static partial class HostEmitter
     ///     types the sections keep exact-type guards, <c>switch (type) { case var _ when type == typeof(X): return ...; default: ... }</c>;
     ///     above it, <c>switch (Index(type)) { case 0: return ...; default: ... }</c>, which compiles to a jump table.
     /// </summary>
-    /// <param name="depth">The depth of the statements.</param>
+    /// <param name="writer">The writer, in the dispatching method's body.</param>
     /// <param name="typeVariable">The local that holds the runtime type.</param>
     /// <param name="lookup">The index method above the threshold.</param>
     /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
     /// <param name="arm">The result of the section of type <c>i</c>.</param>
     /// <param name="fallback">The statement of the <c>default</c> section.</param>
-    private static StatementSyntax[] ExactTypeDispatch(
-        int depth,
+    private static void WriteExactTypeDispatch(
+        CodeWriter writer,
         string typeVariable,
         string lookup,
         ImmutableArray<string> types,
-        Func<string, int, ExpressionSyntax> arm,
-        StatementSyntax fallback
+        Func<string, int, string> arm,
+        string fallback
     )
     {
         if (types.IsEmpty)
         {
-            return [fallback];
+            writer.Line(fallback);
+            return;
         }
 
-        var sections = new List<SwitchSectionSyntax>(types.Length + 1);
         if (types.Length > DispatchThreshold)
         {
+            writer.Switch($"{lookup}({typeVariable})");
             for (var i = 0; i < types.Length; i++)
             {
-                sections.Add(ConstantSection(i, Return(arm(types[i], i))));
+                writer.Section(Case(i), $"return {arm(types[i], i)};");
             }
-
-            sections.Add(DefaultSection(fallback));
-            return [Switch(depth, Invoke(Id(lookup), Id(typeVariable)), sections)];
         }
-
-        for (var i = 0; i < types.Length; i++)
+        else
         {
-            sections.Add(WhenSection(Equal(Id(typeVariable), TypeOf(types[i])), Return(arm(types[i], i))));
+            writer.Switch(typeVariable);
+            for (var i = 0; i < types.Length; i++)
+            {
+                writer.Section($"case var _ when {typeVariable} == typeof({types[i]}):", $"return {arm(types[i], i)};");
+            }
         }
 
-        sections.Add(DefaultSection(fallback));
-        return [Switch(depth, Id(typeVariable), sections)];
+        writer.Section("default:", fallback);
+        writer.CloseStatement();
     }
 
     /// <summary>
     ///     The <c>FrozenDictionary</c> generic dispatch uses above <see cref="DispatchThreshold" />, and the non-inlined lookup into it.
     /// </summary>
+    /// <param name="writer">The writer, in the mediator's body.</param>
     /// <param name="kind">"request", "stream request" or "notification", for the documentation.</param>
     /// <param name="table">The name of the static table.</param>
     /// <param name="lookup">The name of the lookup method.</param>
     /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
-    private static IEnumerable<MemberDeclarationSyntax> TypeTable(string kind, string table, string lookup, ImmutableArray<string> types)
+    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<string> types)
     {
-        const string pair = "global::System.Collections.Generic.KeyValuePair<global::System.Type, int>";
-        var entries = NewArray(TypeName(pair), types.Select(static (type, i) => (ExpressionSyntax)TargetTypedNew(TypeOf(type), Number(i))));
-        yield return Field(
-                         Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword, SyntaxKind.ReadOnlyKeyword),
-                         TypeName("global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int>"),
-                         table,
-                         Invoke(Member(Qualified("global::System.Collections.Frozen.FrozenDictionary"), "ToFrozenDictionary"), entries)
-                     )
-                    .Documented($"<summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
+        var entries = new StringBuilder(64 * types.Length + 64).Append("new global::System.Collections.Generic.KeyValuePair<global::System.Type, int>[] { ");
+        for (var i = 0; i < types.Length; i++)
+        {
+            entries.Append(i == 0 ? "new(typeof(" : ", new(typeof(").Append(types[i]).Append("), ").Append(Digits(i)).Append(')');
+        }
 
-        yield return Method(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword), Int(), lookup, Params(Param(TypeName("global::System.Type"), "requestType")))
-                    .AddAttributeLists(NoInliningAttribute())
-                    .Expression(
-                         MemberDepth,
-                         Conditional(
-                             Invoke(Member(Id(table), "TryGetValue"), [Argument(Id("requestType")), OutVarArgument("requestIndex")]),
-                             Id("requestIndex"),
-                             Integer(-1)
-                         )
-                     )
-                    .Documented($"<summary>The position of a {kind} type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
+        entries.Append(" }");
+
+        // A field without attributes: no blank line would separate it from another such field, but it follows a method.
+        writer.Member(plainField: true);
+        writer.Documentation($"<summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
+        writer.Line(
+            $"private static readonly global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int> {table} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary({entries});"
+        );
+
+        writer.Member();
+        writer.Documentation($"<summary>The position of a {kind} type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow($"private static int {lookup}(global::System.Type requestType)", $"{table}.TryGetValue(requestType, out var requestIndex) ? requestIndex : -1");
     }
 
     /// <summary>
     ///     One arm of generic dispatch: a class request arrives as its exact type (the switch section's type pattern, or above the threshold
     ///     the request reinterpreted with <c>Unsafe.As</c>); a struct request arrives as <c>IRequest&lt;TResponse&gt;</c> and is unboxed here,
-    ///     so the dispatching method holds no struct local (<see cref="RequestDispatch" />). It reinterprets the arm's
+    ///     so the dispatching method holds no struct local (<see cref="WriteRequestDispatch" />). It reinterprets the arm's
     ///     <c>ValueTask&lt;X&gt;</c> as <c>ValueTask&lt;TResponse&gt;</c>, which is the same type at run time because <c>IRequest&lt;&gt;</c>
     ///     is invariant and a request implements exactly one closing (KRX011). Never a cast through <c>object</c>, which would box the result.
     /// </summary>
@@ -466,57 +433,32 @@ internal static partial class HostEmitter
     ///     local per arm (or an <c>out</c> lookup local) in one method, the JIT zeroes every arm's <c>ValueTask</c> in the prolog of each call
     ///     and cannot tail-call the arms, which measured about 45 ns per <c>Send</c> under Dynamic PGO whatever the arm taken (OQ-15).
     /// </remarks>
-    private static MethodDeclarationSyntax DispatchArm(HostHandlerModel request, int index) =>
-        Method(
-                Modifiers(SyntaxKind.PrivateKeyword),
-                TypeName($"{ValueTask}<TResponse>"),
-                DispatchName(index),
-                Params(
-                    Param(TypeName(request.MessageIsValueType ? "global::Keryx.IRequest<TResponse>" : request.MessageType), "request"),
-                    Param(TypeName(CancellationToken), CancellationTokenName)
-                )
-            )
-           .WithTypeParameterList(TypeParameters("TResponse"))
-           .AddAttributeLists(NoInliningAttribute())
-           .Statements(
-                MemberDepth,
-                [
-                    Var(
-                        "response",
-                        Invoke(
-                            Id(CoreName(index)),
-                            request.MessageIsValueType ? Exact(request.MessageType, true, Id("request")) : Id("request"),
-                            Id(CancellationTokenName)
-                        )
-                    ),
-                    Return(
-                        Invoke(
-                            Member(Qualified(Unsafe), Generic("As", TypeName($"{ValueTask}<{request.ResponseType}>"), TypeName($"{ValueTask}<TResponse>"))),
-                            [RefArgument(Id("response"))]
-                        )
-                    ),
-                ]
-            );
+    private static void WriteDispatchArm(CodeWriter writer, HostHandlerModel request, int index)
+    {
+        var parameter = request.MessageIsValueType ? "global::Keryx.IRequest<TResponse>" : request.MessageType;
+        var argument = request.MessageIsValueType ? Exact(request.MessageType, true, "request") : "request";
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Line($"private {ValueTask}<TResponse> {DispatchName(index)}<TResponse>({parameter} request, {TokenParameter})");
+        writer.Open();
+        writer.Line($"var response = {CoreName(index)}({argument}, cancellationToken);");
+        writer.Line($"return {Unsafe}.As<{ValueTask}<{request.ResponseType}>, {ValueTask}<TResponse>>(ref response);");
+        writer.Close();
+    }
 
     /// <summary>A message typed as an interface, as its exact type: a class reinterpreted with <c>Unsafe.As</c>, a struct unboxed.</summary>
-    private static ExpressionSyntax Exact(string type, bool isValueType, ExpressionSyntax message) =>
-        isValueType
-            ? Cast(TypeName(type), Cast(Object(), message))
-            : Invoke(Member(Qualified(Unsafe), Generic("As", TypeName(type))), message);
+    private static string Exact(string type, bool isValueType, string message) =>
+        isValueType ? $"({type})(object){message}" : $"{Unsafe}.As<{type}>({message})";
 
     /// <summary>
     ///     The pipeline of one request, without checks: the typed overload and generic dispatch both call it. Without behaviors it calls the
     ///     handler's invoker; with behaviors it calls the outermost behavior method directly, with explicit type arguments and the first link.
     /// </summary>
-    private static IEnumerable<MemberDeclarationSyntax> Core(HostPipeline pipeline, int index) =>
-        PipelineCore(
+    private static void WriteCore(CodeWriter writer, HostPipeline pipeline, int index) =>
+        WritePipelineCore(
+            writer,
             pipeline,
-            Method(
-                Modifiers(SyntaxKind.PrivateKeyword),
-                TypeName($"{ValueTask}<{pipeline.Handler.ResponseType}>"),
-                CoreName(index),
-                Params(Param(TypeName(pipeline.Handler.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName))
-            ),
+            $"private {ValueTask}<{pipeline.Handler.ResponseType}> {CoreName(index)}({pipeline.Handler.MessageType} request, {TokenParameter})",
             ContextName(index),
             ContextField(index),
             CreateContextName(index),
@@ -528,9 +470,10 @@ internal static partial class HostEmitter
     ///     with the first link, and, when the pipeline has a context, the non-inlined method that creates it. A pipeline without a context
     ///     (<see cref="HasContext(HostPipeline)" />) reads no field: the method calls the outermost behavior method with <c>new(request)</c>.
     /// </summary>
-    private static IEnumerable<MemberDeclarationSyntax> PipelineCore(
+    private static void WritePipelineCore(
+        CodeWriter writer,
         HostPipeline pipeline,
-        MethodDeclarationSyntax core,
+        string declaration,
         string contextName,
         string contextField,
         string createName,
@@ -539,37 +482,60 @@ internal static partial class HostEmitter
     {
         var request = pipeline.Handler;
         var hasContext = HasContext(pipeline);
-        var context = Coalesce(Invoke(Member(Qualified("global::System.Threading.Volatile"), "Read"), [RefArgument(Id(contextField))]), Invoke(Id(createName)));
+        var context = ContextRead(contextField, createName);
+        writer.Member();
         if (pipeline.Behaviors.IsEmpty)
         {
-            ExpressionSyntax target = hasContext ? Member(ParenthesizedExpression(context), "Handler") : Qualified(request.HandlerClass);
-            yield return core.Expression(MemberDepth, Invoke(Member(target, HandlerAnalysis.InvokerName), Id("request"), Id(CancellationTokenName)));
+            var target = hasContext ? $"({context}).Handler" : request.HandlerClass;
+            writer.Arrow(declaration, $"{target}.{HandlerAnalysis.InvokerName}(request, cancellationToken)");
         }
         else
         {
             var links = LinkCaptures(pipeline.Behaviors, End(pipeline));
-            yield return core.WithBody(
-                Entry(
-                    Return(BehaviorCall(pipeline.Behaviors[0], request.ContextServices, TypeName(contextName + "." + firstLink), links[0], "request")),
-                    CallCaptures(pipeline.Behaviors[0], links[0]),
-                    context,
-                    pipeline.Behaviors[0].ObliviousFit
-                )
+            writer.Line(declaration);
+            WriteEntry(
+                writer,
+                "return " + BehaviorCall(pipeline.Behaviors[0], request.ContextServices, contextName + "." + firstLink, links[0], "request") + ";",
+                CallCaptures(pipeline.Behaviors[0], links[0]),
+                context,
+                pipeline.Behaviors[0].ObliviousFit
             );
         }
 
         if (hasContext)
         {
-            yield return CreateContext(contextName, contextField, createName);
+            WriteCreateContext(writer, contextName, contextField, createName);
         }
     }
 
+    /// <summary><c>Volatile.Read(ref field) ?? Create()</c>: the pipeline context of the scope, created on first use.</summary>
+    private static string ContextRead(string contextField, string createName) => $"global::System.Threading.Volatile.Read(ref {contextField}) ?? {createName}()";
+
     /// <summary>
     ///     The body of a pipeline method with behaviors: the call of the outermost behavior method, after <c>var pipeline = ...;</c> when
-    ///     that call reads the context or passes it on.
+    ///     that call reads the context or passes it on; with nullable warnings disabled around the call through an oblivious fit (OQ-58).
     /// </summary>
-    private static BlockSyntax Entry(StatementSyntax call, Captures captures, ExpressionSyntax context, bool obliviousFit) =>
-        Body(MemberDepth, ( captures & Captures.Pipeline ) != 0 ? [Var(PipelineName, context), call] : [call], nullableIsland: obliviousFit);
+    private static void WriteEntry(CodeWriter writer, string call, Captures captures, string context, bool obliviousFit)
+    {
+        writer.Open();
+        if (( captures & Captures.Pipeline ) != 0)
+        {
+            writer.Line($"var {PipelineName} = {context};");
+        }
+
+        if (obliviousFit)
+        {
+            writer.Directive("#nullable disable warnings");
+            writer.Line(call);
+            writer.Directive("#nullable restore warnings");
+        }
+        else
+        {
+            writer.Line(call);
+        }
+
+        writer.Close();
+    }
 
     /// <summary>
     ///     What a link or a behavior method call needs from where it is written (ADR 0001, Generated pipeline shape): the pipeline context, the
@@ -631,19 +597,15 @@ internal static partial class HostEmitter
     ///     The non-inlined method that creates a pipeline context on first use in a scope. Under concurrent first use every caller ends up with
     ///     the context that won the exchange (ADR 0001, Mediator).
     /// </summary>
-    private static MethodDeclarationSyntax CreateContext(string contextName, string contextField, string createName) =>
-        Method(Modifiers(SyntaxKind.PrivateKeyword), Id(contextName), createName, Params())
-           .AddAttributeLists(NoInliningAttribute())
-           .Expression(
-                MemberDepth,
-                Coalesce(
-                    Invoke(
-                        Member(Qualified("global::System.Threading.Interlocked"), "CompareExchange"),
-                        [RefArgument(Id(contextField)), Argument(New(Id(contextName), Id("__serviceProvider"))), Argument(NullLiteral())]
-                    ),
-                    NotNull(Id(contextField))
-                )
-            );
+    private static void WriteCreateContext(CodeWriter writer, string contextName, string contextField, string createName)
+    {
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow(
+            $"private {contextName} {createName}()",
+            $"global::System.Threading.Interlocked.CompareExchange(ref {contextField}, new {contextName}(__serviceProvider), null) ?? {contextField}!"
+        );
+    }
 
     /// <summary>
     ///     The pipeline context of one request: its handler (unless the invoker is static) and the injected services of its behavior methods,
@@ -652,14 +614,23 @@ internal static partial class HostEmitter
     ///     handler's invoker. A pipeline with nothing to resolve (a static invoker and no injected services) has no context: its links are
     ///     nested in a static class of the same name and take only the request.
     /// </summary>
-    private static ClassDeclarationSyntax Context(HostPipeline pipeline, int index) =>
-        PipelineContext(pipeline, ContextName(index), "pipeline", LinkName, $"global::Keryx.INext<{pipeline.Handler.ResponseType}>", $"{ValueTask}<{pipeline.Handler.ResponseType}>");
+    private static void WriteContext(CodeWriter writer, HostPipeline pipeline, int index) =>
+        WritePipelineContext(
+            writer,
+            pipeline,
+            ContextName(index),
+            "pipeline",
+            LinkName,
+            $"global::Keryx.INext<{pipeline.Handler.ResponseType}>",
+            $"{ValueTask}<{pipeline.Handler.ResponseType}>"
+        );
 
     /// <summary>
     ///     The pipeline context class of a request or stream request, with its links; for a pipeline without a context, the static class
     ///     that holds its links.
     /// </summary>
-    private static ClassDeclarationSyntax PipelineContext(
+    private static void WritePipelineContext(
+        CodeWriter writer,
         HostPipeline pipeline,
         string contextName,
         string description,
@@ -669,70 +640,70 @@ internal static partial class HostEmitter
     )
     {
         var request = pipeline.Handler;
-        var hasContext = HasContext(pipeline);
-        var members = new List<MemberDeclarationSyntax>();
-        if (hasContext)
+        writer.Member();
+        if (HasContext(pipeline))
         {
-            var resolution = new List<StatementSyntax>();
+            writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
+            writer.Line($"private sealed class {contextName}");
+            writer.Open();
+            var resolution = new List<string>(request.ContextServices.Count + 1);
             if (!request.StaticInvoker)
             {
-                members.Add(Field(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(request.HandlerClass), "Handler"));
-                resolution.Add(
-                    Assign(Id("Handler"), Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(request.HandlerClass))), Id(ServiceProviderName)))
-                );
+                writer.Member(plainField: true);
+                writer.Line($"public readonly {request.HandlerClass} Handler;");
+                resolution.Add($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
             }
 
-            members.AddRange(ServiceFields(request.ContextServices));
-            resolution.AddRange(ServiceResolution(request.ContextServices));
-            members.Add(ContextConstructor(contextName, resolution));
+            WriteServiceFields(writer, request.ContextServices, resolution);
+            WriteContextConstructor(writer, contextName, resolution);
+        }
+        else
+        {
+            writer.Documentation(
+                $"<summary>The links of the {description} of <c>{Display(request.MessageType)}</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>"
+            );
+            writer.Line($"private static class {contextName}");
+            writer.Open();
         }
 
         var links = pipeline.Behaviors.IsEmpty ? [] : LinkCaptures(pipeline.Behaviors, End(pipeline));
         for (var k = 0; k < pipeline.Behaviors.Length; k++)
         {
             var isLast = k == pipeline.Behaviors.Length - 1;
-            ExpressionSyntax body = !isLast
-                ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, Id(linkName(k + 1)), links[k + 1], "request")
-                : Invoke(
-                    Member(request.StaticInvoker ? Qualified(request.HandlerClass) : Member(Id(PipelineName), "Handler"), HandlerAnalysis.InvokerName),
-                    Id("request"),
-                    Id(CancellationTokenName)
-                );
-            members.Add(
-                Link(
-                    linkName(k),
-                    contextName,
-                    links[k],
-                    request.MessageType,
-                    "request",
-                    nextInterface,
-                    returnType,
-                    body,
-                    !isLast && pipeline.Behaviors[k + 1].ObliviousFit,
-                    NextSummary(pipeline.Behaviors, k, "the handler")
-                )
+            var body = !isLast
+                ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, linkName(k + 1), links[k + 1], "request")
+                : $"{( request.StaticInvoker ? request.HandlerClass : PipelineName + ".Handler" )}.{HandlerAnalysis.InvokerName}(request, cancellationToken)";
+            WriteLink(
+                writer,
+                linkName(k),
+                contextName,
+                links[k],
+                request.MessageType,
+                "request",
+                nextInterface,
+                returnType,
+                body,
+                !isLast && pipeline.Behaviors[k + 1].ObliviousFit,
+                NextSummary(pipeline.Behaviors, k, "the handler")
             );
         }
 
-        return hasContext
-            ? ContextClass(contextName, members, $"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>")
-            : LinksClass(
-                contextName,
-                members,
-                $"<summary>The links of the {description} of <c>{Display(request.MessageType)}</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>"
-            );
+        writer.Close();
     }
 
-    /// <summary>A pipeline context class: sealed, created once per scope.</summary>
-    private static ClassDeclarationSyntax ContextClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
-        Class(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.SealedKeyword), name).WithBody(MemberDepth, members).Documented(summary);
+    /// <summary>The constructor of a pipeline context, which resolves what it holds from the scope.</summary>
+    private static void WriteContextConstructor(CodeWriter writer, string contextName, List<string> resolution)
+    {
+        writer.Member();
+        writer.Line($"public {contextName}({ServiceProvider} {ServiceProviderName})");
+        writer.Open();
+        foreach (var statement in resolution)
+        {
+            writer.Line(statement);
+        }
 
-    /// <summary>The static class that holds the links of a pipeline without a context: nothing is created or resolved for it.</summary>
-    private static ClassDeclarationSyntax LinksClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
-        Class(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword), name).WithBody(MemberDepth, members).Documented(summary);
-
-    private static ConstructorDeclarationSyntax ContextConstructor(string contextName, IEnumerable<StatementSyntax> resolution) =>
-        Constructor(ContextMemberDepth, Modifiers(SyntaxKind.PublicKeyword), contextName, [Param(TypeName(ServiceProvider), ServiceProviderName)], resolution);
+        writer.Close();
+    }
 
     /// <summary>
     ///     One link (ADR 0001, Generated pipeline shape): a <c>readonly struct</c> with a primary constructor over what its <c>InvokeAsync</c>
@@ -741,7 +712,8 @@ internal static partial class HostEmitter
     ///     A call through a nullable-oblivious fit (OQ-58) is written with nullable warnings disabled: generated code names that type without
     ///     an annotation, so the call would warn where the oblivious declaration does not.
     /// </summary>
-    private static StructDeclarationSyntax Link(
+    private static void WriteLink(
+        CodeWriter writer,
         string name,
         string contextName,
         Captures captures,
@@ -749,27 +721,36 @@ internal static partial class HostEmitter
         string messageName,
         string nextInterface,
         string returnType,
-        ExpressionSyntax body,
+        string body,
         bool obliviousFit,
         string summary
     )
     {
-        var parameters = new List<ParameterSyntax>(2);
-        if (( captures & Captures.Pipeline ) != 0)
+        var parameters = ( captures & ( Captures.Pipeline | Captures.Message ) ) switch
         {
-            parameters.Add(Param(Id(contextName), PipelineName));
+            Captures.Pipeline | Captures.Message => $"({contextName} {PipelineName}, {messageType} {messageName})",
+            Captures.Pipeline => $"({contextName} {PipelineName})",
+            Captures.Message => $"({messageType} {messageName})",
+            _ => "",
+        };
+
+        writer.Member();
+        writer.Documentation(summary);
+        writer.Line($"public readonly struct {name}{parameters} : {nextInterface}");
+        writer.Open();
+        writer.Member();
+        var invoke = $"public {returnType} InvokeAsync({TokenParameter})";
+        if (obliviousFit)
+        {
+            writer.NullableObliviousArrow(invoke, body);
+            writer.Directive("#nullable restore warnings");
+        }
+        else
+        {
+            writer.Arrow(invoke, body);
         }
 
-        if (( captures & Captures.Message ) != 0)
-        {
-            parameters.Add(Param(TypeName(messageType), messageName));
-        }
-
-        var invoke = Method(Modifiers(SyntaxKind.PublicKeyword), TypeName(returnType), "InvokeAsync", Params(Param(TypeName(CancellationToken), CancellationTokenName)));
-        invoke = obliviousFit ? invoke.NullableObliviousExpression(LinkMemberDepth, body) : invoke.Expression(LinkMemberDepth, body);
-        return Struct(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), name, parameters.Count == 0 ? null : Params([.. parameters]), nextInterface)
-              .WithBody(ContextMemberDepth, [invoke], restoreNullableWarnings: obliviousFit)
-              .Documented(summary);
+        writer.Close();
     }
 
     /// <summary>The one-line summary of link <paramref name="position" />: whose <c>next</c> it is, and where it goes.</summary>
@@ -789,50 +770,57 @@ internal static partial class HostEmitter
     /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
     /// <param name="linkCaptures">What that link takes (<see cref="LinkCaptures" />).</param>
     /// <param name="message">The name of the request or notification.</param>
-    private static InvocationExpressionSyntax BehaviorCall(
+    private static string BehaviorCall(
         PipelineBehaviorModel behavior,
         EquatableArray<ContextServiceModel> services,
-        TypeSyntax link,
+        string link,
         Captures linkCaptures,
         string message
     )
     {
-        var linkArguments = new List<ExpressionSyntax>(2);
-        if (( linkCaptures & Captures.Pipeline ) != 0)
+        var call = new StringBuilder(256).Append(behavior.Class).Append('.').Append(behavior.Method).Append('<');
+        for (var i = 0; i < behavior.TypeArguments.Count; i++)
         {
-            linkArguments.Add(Id(PipelineName));
+            var argument = behavior.TypeArguments[i];
+            call.Append(i == 0 ? "" : ", ").Append(argument.Length == 0 ? link : argument);
         }
 
-        if (( linkCaptures & Captures.Message ) != 0)
-        {
-            linkArguments.Add(Id(message));
-        }
-
-        var typeArguments = behavior.TypeArguments.Select(t => t.Length == 0 ? link : TypeName(t)).ToArray();
-        var arguments = new List<ExpressionSyntax>(behavior.Parameters.Count);
+        call.Append(">(");
         var service = 0;
-        foreach (var role in behavior.Parameters)
+        for (var i = 0; i < behavior.Parameters.Count; i++)
         {
-            if (role == BehaviorParameterRole.Service)
+            call.Append(i == 0 ? "" : ", ");
+            switch (behavior.Parameters[i])
             {
-                var slot = behavior.ServiceSlots[service];
-                arguments.Add(ServiceArgument(services[slot], slot, behavior.Services[service]));
-                service++;
-                continue;
+                case BehaviorParameterRole.Service:
+                    var slot = behavior.ServiceSlots[service];
+                    call.Append(ServiceArgument(services[slot], slot, behavior.Services[service]));
+                    service++;
+                    break;
+                case BehaviorParameterRole.Message:
+                    call.Append(message);
+                    break;
+                case BehaviorParameterRole.Next:
+                    call.Append(
+                        ( linkCaptures & ( Captures.Pipeline | Captures.Message ) ) switch
+                        {
+                            Captures.Pipeline | Captures.Message => $"new({PipelineName}, {message})",
+                            Captures.Pipeline => $"new({PipelineName})",
+                            Captures.Message => $"new({message})",
+                            _ => "new()",
+                        }
+                    );
+                    break;
+                case BehaviorParameterRole.CancellationToken:
+                    call.Append("cancellationToken");
+                    break;
+                default:
+                    call.Append("default");
+                    break;
             }
-
-            arguments.Add(
-                role switch
-                {
-                    BehaviorParameterRole.Message => Id(message),
-                    BehaviorParameterRole.Next => TargetTypedNew([.. linkArguments]),
-                    BehaviorParameterRole.CancellationToken => Id(CancellationTokenName),
-                    _ => DefaultLiteral(),
-                }
-            );
         }
 
-        return Invoke(Member(Qualified(behavior.Class), Generic(behavior.Method, typeArguments)), [.. arguments]);
+        return call.Append(')').ToString();
     }
 
     /// <summary>
@@ -844,14 +832,14 @@ internal static partial class HostEmitter
     /// <param name="service">The parameter's service.</param>
     /// <param name="slot">Its index in the context.</param>
     /// <param name="parameter">The parameter.</param>
-    private static ExpressionSyntax ServiceArgument(ContextServiceModel service, int slot, ServiceParameterModel parameter)
+    private static string ServiceArgument(ContextServiceModel service, int slot, ServiceParameterModel parameter)
     {
-        var field = Member(Id(PipelineName), ServiceField(slot));
+        var field = PipelineName + "." + ServiceField(slot);
         return service.Required || parameter.DefaultValue is not { } defaultValue || defaultValue == "null"
             ? field
             : service.IsValueType && defaultValue == "default"
-            ? Invoke(Member(field, "GetValueOrDefault"))
-            : Coalesce(field, Code(defaultValue));
+            ? field + ".GetValueOrDefault()"
+            : $"{field} ?? {defaultValue}";
     }
 
     /// <summary>What a pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
@@ -863,26 +851,28 @@ internal static partial class HostEmitter
     /// <summary>
     ///     One field per service the pipeline context shares (ADR 0001, Injected parameters), in order of first use: the service type for a
     ///     service resolved as required, the nullable service type for one whose consumers are all optional (<see langword="null" /> when the
-    ///     service is missing; each call site applies its own default).
+    ///     service is missing; each call site applies its own default). Adds the statement that resolves each from the scope, once, to
+    ///     <paramref name="resolution" />.
     /// </summary>
-    private static IEnumerable<FieldDeclarationSyntax> ServiceFields(EquatableArray<ContextServiceModel> services) =>
-        services.Select(static (service, i) => Field(
-                            Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword),
-                            TypeName(service.Required || service.NullableUnderlyingType is not null ? service.ServiceType : service.ServiceType + "?"),
-                            ServiceField(i)
-                        )
-        );
-
-    /// <summary>Resolves each service the pipeline context shares from the scope, once, in order of first use.</summary>
-    private static IEnumerable<StatementSyntax> ServiceResolution(EquatableArray<ContextServiceModel> services) =>
-        services.Select(static (service, i) => (StatementSyntax)Assign(Id(ServiceField(i)), ResolveShared(service, i)));
+    private static void WriteServiceFields(CodeWriter writer, EquatableArray<ContextServiceModel> services, List<string> resolution)
+    {
+        for (var i = 0; i < services.Count; i++)
+        {
+            var service = services[i];
+            writer.Member(plainField: true);
+            writer.Line(
+                $"public readonly {( service.Required || service.NullableUnderlyingType is not null ? service.ServiceType : service.ServiceType + "?" )} {ServiceField(i)};"
+            );
+            resolution.Add($"{ServiceField(i)} = {ResolveShared(service, i)};");
+        }
+    }
 
     /// <summary>
     ///     The resolution of a shared service: as required (<see cref="Resolve" /> without a default) when any consumer is required;
     ///     otherwise <c>GetService</c>/<c>GetKeyedService</c>, <see langword="null" /> for a missing service (a value type is matched with
     ///     the type pattern of <see cref="Resolve" />, once, into a <c>Nullable&lt;T&gt;</c> field).
     /// </summary>
-    private static ExpressionSyntax ResolveShared(ContextServiceModel service, int slot)
+    private static string ResolveShared(ContextServiceModel service, int slot)
     {
         if (service.Required || !service.IsValueType)
         {
@@ -902,11 +892,7 @@ internal static partial class HostEmitter
 
         var variable = "__value" + Digits(slot);
         var nullable = service.NullableUnderlyingType is null ? service.ServiceType + "?" : service.ServiceType;
-        return Conditional(
-            Is(ServiceLookup(service.ServiceType, service.ServiceKey), Declaration(TypeName(service.NullableUnderlyingType ?? service.ServiceType), variable)),
-            Cast(TypeName(nullable), Id(variable)),
-            NullLiteral()
-        );
+        return $"{ServiceLookup(service.ServiceType, service.ServiceKey)} is {service.NullableUnderlyingType ?? service.ServiceType} {variable} ? ({nullable}){variable} : null";
     }
 
     /// <summary>
@@ -914,37 +900,33 @@ internal static partial class HostEmitter
     ///     <c>GetKeyedService(Type, object)</c> is an extension only from Microsoft.Extensions.DependencyInjection.Abstractions 9.0; the interface
     ///     method exists from 8.0, the floor for keyed services (ADR 0001, Injected parameters).
     /// </summary>
-    private static ExpressionSyntax ServiceLookup(string type, string? key) =>
+    private static string ServiceLookup(string type, string? key) =>
         key is null
-            ? Invoke(Member(Id(ServiceProviderName), "GetService"), TypeOf(type))
-            : ConditionalAccessExpression(
-                ParenthesizedExpression(As(Id(ServiceProviderName), TypeName(KeyedServiceProvider))),
-                Invoke(MemberBindingExpression(Id("GetKeyedService")), TypeOf(type), Code(key))
-            );
+            ? $"{ServiceProviderName}.GetService(typeof({type}))"
+            : $"({ServiceProviderName} as {KeyedServiceProvider})?.GetKeyedService(typeof({type}), {key})";
 
     /// <summary>
     ///     The resolution of one injected parameter (ADR 0001, Injected parameters). No reflection: optional value types are matched with a
     ///     type pattern on <c>GetService(typeof(T))</c>, which neither allocates nor activates anything.
     /// </summary>
-    internal static ExpressionSyntax Resolve(ServiceParameterModel parameter, int index)
+    internal static string Resolve(ServiceParameterModel parameter, int index)
     {
-        var provider = Id(ServiceProviderName);
         if (parameter is { ServiceKey: null, IsServiceProvider: true })
         {
-            return provider;
+            return ServiceProviderName;
         }
 
-        var key = parameter.ServiceKey is { } keyText ? Code(keyText) : null;
+        var key = parameter.ServiceKey;
         if (parameter.DefaultValue is not { } defaultValue)
         {
             // Nullable<T> does not satisfy the notnull constraint of GetRequiredService<T>, so it is resolved by type and unboxed.
             return parameter.NullableUnderlyingType is not null
                 ? key is null
-                    ? Cast(TypeName(parameter.Type), Invoke(Member(Qualified(ServiceProviderExtensions), "GetRequiredService"), provider, TypeOf(parameter.Type)))
-                    : Cast(TypeName(parameter.Type), Invoke(Member(Qualified(KeyedServiceProviderExtensions), "GetRequiredKeyedService"), provider, TypeOf(parameter.Type), key))
+                    ? $"({parameter.Type}){ServiceProviderExtensions}.GetRequiredService({ServiceProviderName}, typeof({parameter.Type}))"
+                    : $"({parameter.Type}){KeyedServiceProviderExtensions}.GetRequiredKeyedService({ServiceProviderName}, typeof({parameter.Type}), {key})"
                 : key is null
-                ? Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(parameter.ServiceType))), provider)
-                : Invoke(Member(Qualified(KeyedServiceProviderExtensions), Generic("GetRequiredKeyedService", TypeName(parameter.ServiceType))), provider, key);
+                ? $"{ServiceProviderExtensions}.GetRequiredService<{parameter.ServiceType}>({ServiceProviderName})"
+                : $"{KeyedServiceProviderExtensions}.GetRequiredKeyedService<{parameter.ServiceType}>({ServiceProviderName}, {key})";
         }
 
         if (!parameter.IsValueType)
@@ -952,19 +934,15 @@ internal static partial class HostEmitter
             // GetService<T> already returns null for a missing service; any other default (including the null! of a parameter that is not
             // annotated) is applied with ??.
             var lookup = key is null
-                ? Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetService", TypeName(parameter.ServiceType))), provider)
-                : Invoke(Member(Qualified(KeyedServiceProviderExtensions), Generic("GetKeyedService", TypeName(parameter.ServiceType))), provider, key);
-            return defaultValue == "null" ? lookup : Coalesce(lookup, Code(defaultValue));
+                ? $"{ServiceProviderExtensions}.GetService<{parameter.ServiceType}>({ServiceProviderName})"
+                : $"{KeyedServiceProviderExtensions}.GetKeyedService<{parameter.ServiceType}>({ServiceProviderName}, {key})";
+            return defaultValue == "null" ? lookup : $"{lookup} ?? {defaultValue}";
         }
 
         var variable = "__value" + Digits(index);
         return parameter.NullableUnderlyingType is { } underlying
-            ? Conditional(
-                Is(ServiceLookup(parameter.Type, parameter.ServiceKey), Declaration(TypeName(underlying), variable)),
-                Cast(TypeName(parameter.Type), Id(variable)),
-                Code(defaultValue)
-            )
-            : Conditional(Is(ServiceLookup(parameter.Type, parameter.ServiceKey), Declaration(TypeName(parameter.Type), variable)), Id(variable), Code(defaultValue));
+            ? $"{ServiceLookup(parameter.Type, key)} is {underlying} {variable} ? ({parameter.Type}){variable} : {defaultValue}"
+            : $"{ServiceLookup(parameter.Type, key)} is {parameter.Type} {variable} ? {variable} : {defaultValue}";
     }
 
     /// <summary>
@@ -974,6 +952,9 @@ internal static partial class HostEmitter
     ///     its links, nested in a static class, take only the request.
     /// </summary>
     private static bool HasContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || pipeline.Handler.ContextServices.Count > 0;
+
+    /// <summary>The label of the switch section of jump-table position <paramref name="position" />.</summary>
+    private static string Case(int position) => "case " + Digits(position) + ":";
 
     /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
     private static string ServiceField(int slot) => "Service" + Digits(slot);
@@ -994,7 +975,6 @@ internal static partial class HostEmitter
 
     /// <summary>A type name for documentation text: without <c>global::</c>, with the angle brackets of type arguments escaped for XML.</summary>
     private static string Display(string type) => type.Replace("global::", "").Replace("<", "&lt;").Replace(">", "&gt;");
-
 }
 
 /// <summary>

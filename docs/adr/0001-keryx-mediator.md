@@ -26,8 +26,8 @@ request declared in another assembly is the new error KRX023, and host KRX030 co
 rework removes `[assembly: KeryxHost]`: a project is a host when its `KeryxHost` MSBuild property is `true`, which the package's
 `build/Keryx.targets` defaults for executables and test projects, and host diagnostics without a source location of their own are reported
 without a location. In the same rework a pipeline context resolves each distinct service its behavior methods inject once, into one
-field shared by every behavior method of the pipeline; the generators build their output with Roslyn's `SyntaxFactory` instead of text,
-with its whitespace built in rather than normalized afterwards (open-questions OQ-66, decided);
+field shared by every behavior method of the pipeline; the generators built their output with Roslyn's `SyntaxFactory` instead of text
+for a time, with its whitespace built in rather than normalized afterwards (open-questions OQ-66, decided), until the sixth amendment;
 generic dispatch is written as `switch` statements, not switch expressions, so the arms keep their tail calls (open-questions OQ-67,
 decided); request and stream request types are sealed, or abstract or closed bases of sealed ones (KRX024, with a code fix), a handler
 of an abstract or closed request type is KRX003, a host composes only sealed request types (a referenced one that is not sealed is
@@ -35,6 +35,9 @@ KRX038, open-questions OQ-68, decided), and generic `Send` and `Stream` test eac
 (`Publish` keeps exact-type guards, because notification types need not be sealed); links are written with primary constructors and target-typed `new(...)`, a pipeline that resolves nothing has no pipeline context, and
 each link takes only what it reads or passes on (open-questions OQ-65, decided); and `next` stays a struct
 implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>` (typed next delegates rejected).
+Amended a sixth time 2026-11-27 (owner decisions 19 and 21): a closed request base from a referenced assembly is treated, and named in
+KRX003, as abstract (open-questions OQ-69, decided); and the generators write their output as text through an indented writer again
+(`CodeWriter`), every generated source unchanged, because `SyntaxFactory` measured slower (open-questions OQ-71, decided).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -201,8 +204,9 @@ and each sealed case has its own handler; a handler that takes the base is KRX00
 API for closed types, so a closed type is recognized by its `closed` modifier (the token text) on the declaring syntax, and by the
 `IsClosedTypeAttribute` the compiler writes into metadata for a type from a referenced assembly. The compiler makes a closed type
 abstract, in source and in metadata, so every rule treats it as an abstract request base; telling the two apart only changes the wording
-of KRX003. Roslyn does not return the metadata attribute from `GetAttributes`, so a referenced closed base is named as abstract there
-(open-questions OQ-69). KRX024 is an analyzer diagnostic, so a project can still turn it off; turning it off cannot reach dispatch: a
+of KRX003. Roslyn does not return the metadata attribute from `GetAttributes`, so a referenced closed base is treated, and named in
+KRX003, as abstract (open-questions OQ-69, decided: only the wording differs; the attribute is still read in case a compiler returns
+it). KRX024 is an analyzer diagnostic, so a project can still turn it off; turning it off cannot reach dispatch: a
 host composes only sealed request and stream request types, and leaves one that is not sealed out (no typed overload, no dispatch
 section, so sending it throws `KeryxHandlerNotFoundException`). A referenced one is the host error KRX038; the host's own one is its
 KRX024 (owner decision 18, open-questions OQ-68). Notifications are not restricted:
@@ -1278,23 +1282,20 @@ generator reads attributes through Roslyn, which ignores `Inherited`, so it has 
   `WithIncrementalTracking()`), reruns it after an unrelated edit (`RerunAsync` with a new file that has no Keryx types), and asserts
   that every named step after the scan step, and every source output, reports `Cached` or `Unchanged`. It also asserts the reverse: swapping in a reference with a changed manifest produces `Modified`. Steps fed
   directly by `CompilationProvider` always run and are not asserted.
-- Generated code is built with Roslyn's `SyntaxFactory` through shared helpers (`GeneratedSyntax`), the pattern Dovetail's generators use,
-  never as concatenated text (decided 2026-11-26). Syntax is built only inside `RegisterSourceOutput`: the models carry strings, never
-  syntax. The syntax is built with its whitespace and written as built: nothing normalizes it afterwards, neither `NormalizeWhitespace`
-  nor a layout pass (open-questions OQ-66, decided). Within a line, each helper creates its tokens with the spaces they need
-  (`public `, `return `, `, `, an `=` with a space on each side); type names keep the text of the models (`typeof(int?)`, `string?[]`, `int?[]?`). Lines are laid out
-  by the containers, from the depth they are given (four spaces per level, `\n` line endings): a type body puts each member on its own
-  line, with a blank line between two members unless both are fields without attributes, and each documentation comment line and
-  attribute list at the member's depth; a block puts each statement on its own line one level deeper than its braces, with a blank line
-  after a statement that ends with a block (`if`, `try`, `foreach`, `switch`) when another follows; a switch puts each label one level and
-  each statement two levels deeper; an expression-bodied member breaks after `=>` with the body one level deeper; a constraint clause is
-  on its own line; and a constructor with more than one parameter takes one per line. `GeneratedSyntax.Render` writes the header
-  (`// <auto-generated/>`, `#nullable enable`, the `#pragma` for obsolete types) and then the tree. Each type name is parsed once per file.
-  For every snapshot this writes, byte for byte, what normalizing the same tree once and fixing its layout wrote before. Two shapes no
-  snapshot covers changed, both for the better and with the same meaning: normalization wrote a multi-dimensional rank as `int[, ]` (now
-  `int[,]`), and an unbound generic `typeof` in a service key as `Dictionary<, >` (now `Dictionary<,>`). No warning other than the
-  obsolete-type ones is suppressed: no link has an unread primary constructor parameter (OQ-65). No type declaration carries a stray `;`,
-  and a nullable type renders `T?`.
+- Generated code is written as text through an indented writer, `CodeWriter` (owner decision 21, 2026-11-27, open-questions OQ-71), in
+  every generator; nothing builds, parses or normalizes syntax for the output. A writer exists only inside `RegisterSourceOutput`, for one
+  file: the models carry strings (types and names fully qualified with `global::`, default values and service keys as C# expressions,
+  identifiers already `@`-escaped, literals already escaped), and the emitters write them as they are, building each expression as a
+  string where it is used. The writer lays out the lines (four spaces per level, `\n` line endings): the header (`// <auto-generated/>`,
+  `#nullable enable`, the `#pragma` for obsolete types) and a blank line; each member of a type on its own line, with a blank line between
+  two members unless both are fields without attributes, its documentation comment lines and attribute lists at its depth; a block's
+  statements one level deeper than its braces, with a blank line after a statement that ends with a block (`if`, `try`, `foreach`,
+  `switch`) when another follows; a switch's labels one level and their statements two levels deeper; an expression-bodied member breaks
+  after `=>` with the body one level deeper; a constraint clause on its own line; a constructor with more than one parameter takes one per
+  line; preprocessor directives (the `#nullable` islands of OQ-58) at column 0. Type names keep the text of the models (`typeof(int?)`,
+  `string?[]`, `int?[]?`, `int[,]`, `Dictionary<,>`). No warning other than the obsolete-type ones is suppressed: no link has an unread
+  primary constructor parameter (OQ-65). No type declaration carries a stray `;`. Code fixes edit the user's Roslyn syntax; that is not
+  emission and is unaffected.
 - Generated code is deterministic (ordinal sorting everywhere, no timestamps or GUIDs), starts with `// <auto-generated/>`, enables
   nullable and uses `global::`-qualified names. `[GeneratedCode("Keryx", version)]` goes on each generated member of a user's partial type,
   and at type level only on types Keryx owns outright (see Handlers, Example). A snapshot test asserts that a user's partial declaration
@@ -1505,15 +1506,21 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - **Ignoring the host-only assembly attributes outside a host** (open-questions OQ-54): the interim rule until 2026-11-26. In a library
   or contracts assembly, `ExternallyHandled` (since removed), `ExcludeHandler` and `ExcludeBehavior` had no effect and nothing was
   reported. Replaced by warning KRX043.
-- **Generated source written as text** (a line-by-line `CodeWriter` of interpolated strings): the emitters until the owner's second rework
-  on 2026-11-26 (decision 5), replaced by syntax built with `SyntaxFactory`, the pattern Dovetail's generators use (Incremental
-  generation rules).
+- **Generated source built with Roslyn's `SyntaxFactory`** (shared helpers in `GeneratedSyntax`, the pattern Dovetail's generators use):
+  owner decision 5 of the second rework (2026-11-26), in place from then until owner decision 21 (2026-11-27, open-questions OQ-71)
+  returned to text. Tried and rejected for generator time: it wrote the same bytes (once normalization was replaced by syntax built with
+  its whitespace, OQ-66), but on a host of 300 requests with five behaviors each, 30 stream requests and 30 notifications (`ReportAnalyzer`,
+  Release, median of ten warm builds), the host generator went from 66 ms with the text emitters to 384 ms with one `NormalizeWhitespace`
+  per compilation unit and 109 ms with the whitespace built in, the handler generator from 35 ms to 102 ms and 48 ms. Re-measured on one
+  machine on 2026-11-27 with ten extra warm-up builds: 97 ms and 46 ms with `SyntaxFactory` and explicit trivia, 58 ms and 33 ms with the
+  text emitters before decision 5, 51 ms and 29 ms with the text emitters of decision 21. Each node of a tree and the type names it
+  parses cost more than appending the text the models already hold.
 - **Normalizing the generated syntax** (one `NormalizeWhitespace` per compilation unit, then a layout pass for what normalization writes
   badly: blank lines between members, the break after `=>`, `T? []`, `)is`): how the `SyntaxFactory` emitters laid out their output from
   decision 5 until OQ-66 was decided (2026-11-26, owner decision 16). On a host of 300 requests with five behaviors each, it made the host
   generator about six times slower than the text emitters (open-questions OQ-66). Replaced by syntax built with its whitespace, which
   writes the same bytes for every snapshot (it differs only in writing `int[,]` and `Dictionary<,>` where normalization wrote `int[, ]`
-  and `Dictionary<, >`).
+  and `Dictionary<, >`), and that in turn by text (see the entry above).
 - **`if` chains for generic dispatch** (`if (requestType == typeof(X)) { return __Dispatch0(...); }` per type, and a `switch` statement on
   the index above the threshold): the generated shape until 2026-11-26. Decision 7 of the second rework replaced them with switch
   expressions with exact-type `when` guards and an index switch expression. The compiled dispatch of the `if` chains and of switch

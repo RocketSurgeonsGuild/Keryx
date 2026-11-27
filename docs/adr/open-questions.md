@@ -20,9 +20,10 @@ raised while implementing it and are open, and OQ-61 and OQ-62 were raised while
 are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
 (decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
-(decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, OQ-69 is open, and OQ-68, decided by the owner (decision 18),
+(decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, and OQ-68, decided by the owner (decision 18),
 follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised while implementing it and is open. OQ-66, decided by
-the owner (decision 16), comes last; OQ-71 was raised while implementing it and is open.
+the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69 and OQ-71, decided by the owner on 2026-11-27 (decisions
+19 and 21), come last; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
 
 ## Open
 
@@ -125,23 +126,6 @@ text and the order of the model's `ContextServices`.
   pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
   stability clause from the decision. Needs a decision.
 
-### OQ-69: A closed request base from a referenced assembly
-
-Owner decision 14 ("Requests are sealed", at the end) says to detect closed types without new Roslyn APIs: the `closed` modifier's text on
-the declaring syntax for a type in source, and `IsClosedTypeAttribute` in metadata for a referenced type. Checked with Roslyn 5.12 (the
-tests' compiler; the .NET 11 SDK's compiler was not checked): `GetAttributes()` of a metadata type does not return `IsClosedTypeAttribute`, as it does not
-return the compiler's other marker attributes, so a closed type from a referenced assembly cannot be told from an abstract one through
-the Roslyn 5.0 API. The compiler makes a closed type abstract (`IsAbstract` is `true` in source and in metadata), so every rule (not a
-request, no handler, KRX003 for a handler that takes it, no KRX024) already treats it as a request base; only KRX003's wording ("the
-closed type" or "the abstract type") depends on telling them apart. Also observed: a closed type in a compilation against .NET 10 reference
-assemblies needs `System.Runtime.CompilerServices.IsClosedTypeAttribute` defined (CS0656 otherwise); the tests add it on .NET 10.
-
-- **Interim:** `MessageType.IsClosed` reads the modifier from syntax and, for a metadata type, looks for the attribute anyway (so it works
-  with a compiler that returns it); today a referenced closed base is treated, and named in KRX003, as abstract.
-  `HandlerAnalyzerTests.KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly` pins that.
-- **Proposal:** accept: the behavior is right and only a message differs. Alternatives: read Roslyn's own closed-type API through
-  reflection when the running compiler has it, or raise the analyzers' Roslyn floor to a version that exposes it. Needs a decision.
-
 ### OQ-70: A publish pipeline whose handlers resolve nothing
 
 Owner decision 16 decided OQ-65 by adopting its proposal: a pipeline that resolves nothing gets no context. The proposal named the
@@ -159,24 +143,6 @@ changes the publish code (every `PublishTo` comparison benchmark is such a pipel
   __NotificationN`, the entry (or the last link) calls `__NotificationN.RunHandlers(notification, cancellationToken)`, and the mediator has
   no `__notificationN` field and no `__CreateNotificationN`; measure `PublishTo1` and `PublishTo5` (typed and generic) before and after.
   Alternative: keep the interim (one empty context per scope and type, a `Volatile.Read` per publish). Needs a decision.
-
-### OQ-71: Generator time after OQ-66
-
-Owner decision 16 decided OQ-66: build the syntax with its whitespace, with generator time "back near the 66 ms / 35 ms baseline" on the
-large host (300 requests with five behaviors each, 30 stream requests, 30 notifications) as the target. With the whitespace built in, no
-normalization and each type name parsed once per file, the output is byte for byte what it was for every snapshot (two shapes no snapshot covers now read `int[,]` and `Dictionary<,>`
-where normalization wrote `int[, ]` and `Dictionary<, >`; OQ-66) and the generators measured 109 ms (host)
-and 48 ms (handler) once the compiler server had JIT-compiled the analyzer, against 372 ms and 93 ms before (OQ-66, at the end). In
-process, about 60 ms of the host generator is outside the emitters (handler models, composition, the reference scan, adding the 29,000-line
-mediator to the compilation) and unchanged by OQ-66; building the mediator's tree takes about 37 ms and writing it 13 ms. The 66 ms
-baseline was measured with the text emitters at an earlier commit, so how much of the difference is `SyntaxFactory` itself (one node and
-its red wrapper per construct, where the text emitters appended strings) and how much is code added since is not separated.
-
-- **Interim:** as implemented: the whitespace built in, type names parsed once per file, constant attribute lists built once.
-- **Proposal:** accept the time: the emitters are now under half of the host generator's time, the source output runs only when the
-  composition changes, and a host of this size is far above the samples. Alternatives: build repeated subtrees once per file (the
-  parameter lists and link shapes every pipeline repeats) for perhaps a further 10 to 20 ms, or measure the text emitters' commit again on
-  this machine to separate the costs before deciding. Needs a decision.
 
 ## Decided
 
@@ -1577,6 +1543,9 @@ Behavior methods, Generated pipeline shape, Mediator), the brief (Phases 4, 5 an
 
 ### Generated code is built with SyntaxFactory (2026-11-26)
 
+**Superseded** (2026-11-27) by owner decision 21 (OQ-71, at the end): the generators write text through `CodeWriter` again and
+`GeneratedSyntax` is removed. The history follows.
+
 Owner decision 5 of the second rework. `HandlerEmitter` and `HostEmitter` (with `HostEmitter.Streams` and `HostEmitter.Notifications`) build
 their sources with Roslyn's `SyntaxFactory`, following Dovetail (`Joinery.Dovetail.Analyzers/Helpers.cs`, `Support/ExportDovetails.cs`,
 `Support/ImportDovetails.cs`); `CodeWriter` is gone. The shared helpers are `src/Keryx.Analyzers/GeneratedSyntax.cs`: types and names from
@@ -1715,7 +1684,7 @@ affected.
   allowed as request bases. The compiler makes a closed type abstract, in source and in metadata, so every rule treats it as an abstract
   base. The analyzers build against Roslyn 5.0, so `MessageType.IsClosed` reads the `closed` modifier's token text on the declaring
   syntax and, for a metadata type, looks for `IsClosedTypeAttribute`; Roslyn 5.12 does not return that attribute from `GetAttributes`,
-  so a referenced closed base is named as abstract (OQ-69, open).
+  so a referenced closed base is named as abstract (OQ-69, decided at the end: accepted).
 - A handler of an abstract or closed request base reuses **KRX003** ("Handler 'H.Handle(Shape)' must take a sealed request type, not the
   closed type 'Shape'; each sealed request type has its own handler"; "the abstract type", "the interface" for the other shapes); each
   sealed case has its own handler (KRX001).
@@ -1918,5 +1887,77 @@ cached), so the cost is paid on a full build and on edits to the pipelines.
   ten more warm-up builds: host 372 to 109 ms, handler 93 to 48 ms. In process (the same generators on the same host, run 40 times, median
   of the last 20), the host generator spends 50 ms in `HostEmitter.Mediator` (13 ms of it writing the text) instead of 350 to 420 ms, and
   about 60 ms outside the emitters, the same before and after (handler models, composition, the reference scan, the generated source added
-  to the compilation). So the target of about 66 ms and 35 ms is not reached: OQ-71 (open). Folded into the ADR (status, Incremental
+  to the compilation). So the target of about 66 ms and 35 ms is not reached: OQ-71 (then open). Folded into the ADR (status, Incremental
   generation rules, Alternatives considered), the brief (Engineering rules) and the README (Hosts).
+- **Superseded** (2026-11-27): owner decision 21 (OQ-71, at the end) replaced the `SyntaxFactory` emitters, and with them this
+  implementation, by text emitters that write the same bytes; the measurements above stay as the record of why.
+
+### OQ-69: A closed request base from a referenced assembly (2026-11-27)
+
+Owner decision 14 ("Requests are sealed", at the end) says to detect closed types without new Roslyn APIs: the `closed` modifier's text on
+the declaring syntax for a type in source, and `IsClosedTypeAttribute` in metadata for a referenced type. Checked with Roslyn 5.12 (the
+tests' compiler; the .NET 11 SDK's compiler was not checked): `GetAttributes()` of a metadata type does not return `IsClosedTypeAttribute`, as it does not
+return the compiler's other marker attributes, so a closed type from a referenced assembly cannot be told from an abstract one through
+the Roslyn 5.0 API. The compiler makes a closed type abstract (`IsAbstract` is `true` in source and in metadata), so every rule (not a
+request, no handler, KRX003 for a handler that takes it, no KRX024) already treats it as a request base; only KRX003's wording ("the
+closed type" or "the abstract type") depends on telling them apart. Also observed: a closed type in a compilation against .NET 10 reference
+assemblies needs `System.Runtime.CompilerServices.IsClosedTypeAttribute` defined (CS0656 otherwise); the tests add it on .NET 10.
+
+- **Interim:** `MessageType.IsClosed` reads the modifier from syntax and, for a metadata type, looks for the attribute anyway (so it works
+  with a compiler that returns it); today a referenced closed base is treated, and named in KRX003, as abstract.
+  `HandlerAnalyzerTests.KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly` pins that.
+- **Proposal:** accept: the behavior is right and only a message differs. Alternatives: read Roslyn's own closed-type API through
+  reflection when the running compiler has it, or raise the analyzers' Roslyn floor to a version that exposes it. Needs a decision.
+- **Decision:** accept (owner decision 19, 2026-11-27): a closed request base from a referenced assembly is treated, and named in KRX003,
+  as abstract. The interim stays as the implementation: `MessageType.IsClosed` reads the `closed` modifier from syntax and, for a metadata
+  type, still looks for `IsClosedTypeAttribute`, so a compiler that returns it gets the closed wording. No code changed. Folded into the
+  ADR (Requests are sealed) and the brief (Phase 2); the README's KRX003 row already names abstract and closed bases alike.
+
+### OQ-71: Generator time after OQ-66 (2026-11-27)
+
+Owner decision 16 decided OQ-66: build the syntax with its whitespace, with generator time "back near the 66 ms / 35 ms baseline" on the
+large host (300 requests with five behaviors each, 30 stream requests, 30 notifications) as the target. With the whitespace built in, no
+normalization and each type name parsed once per file, the output is byte for byte what it was for every snapshot (two shapes no snapshot covers now read `int[,]` and `Dictionary<,>`
+where normalization wrote `int[, ]` and `Dictionary<, >`; OQ-66) and the generators measured 109 ms (host)
+and 48 ms (handler) once the compiler server had JIT-compiled the analyzer, against 372 ms and 93 ms before (OQ-66, at the end). In
+process, about 60 ms of the host generator is outside the emitters (handler models, composition, the reference scan, adding the 29,000-line
+mediator to the compilation) and unchanged by OQ-66; building the mediator's tree takes about 37 ms and writing it 13 ms. The 66 ms
+baseline was measured with the text emitters at an earlier commit, so how much of the difference is `SyntaxFactory` itself (one node and
+its red wrapper per construct, where the text emitters appended strings) and how much is code added since is not separated.
+
+- **Interim:** as implemented: the whitespace built in, type names parsed once per file, constant attribute lists built once.
+- **Proposal:** accept the time: the emitters are now under half of the host generator's time, the source output runs only when the
+  composition changes, and a host of this size is far above the samples. Alternatives: build repeated subtrees once per file (the
+  parameter lists and link shapes every pipeline repeats) for perhaps a further 10 to 20 ms, or measure the text emitters' commit again on
+  this machine to separate the costs before deciding. Needs a decision.
+- **Decision:** text emitters everywhere (owner decision 21, 2026-11-27, "Use text-based emitters everywhere"). It supersedes owner
+  decision 5 ("Generated code is built with SyntaxFactory", above) and the implementation of OQ-66's decision (syntax built with explicit
+  trivia, above); both entries keep their history with a note. Every generator writes its source as text through `CodeWriter`
+  (`src/Keryx.Analyzers/CodeWriter.cs`), the indented writer removed in 1fddbdd, recovered and extended: it writes the header, lines at
+  the current depth (four spaces, `\n`), `{`/`}` blocks, `///` documentation lines, directives at column 0, a blank line between members
+  unless both are fields without attributes (`Member`), a blank line after a statement that ends with a block when another follows
+  (`CloseStatement`), the break after `=>` (`Arrow`, and `NullableObliviousArrow` for the OQ-58 island), a constructor's parameters one
+  per line from two (`Parameters`), and switch sections (`Switch`, `Section`). The emitters (`HandlerEmitter`, `HostEmitter`,
+  `HostEmitter.Streams`, `HostEmitter.Notifications`) build each expression as a string from the models' strings, which are written as
+  they are (no parsing). `GeneratedSyntax` and its `SyntaxFactory` helpers are removed; `GeneratedSyntaxTests` became `CodeWriterTests`
+  (the header and pragma, the manifest, switch sections, the blank-line rules, the break after `=>`, constructor parameters, documentation
+  and attribute lines, a nested type without `;`, the nullable islands, and, through a generated host, `string?[]`, `int?[]?`, `int[,]`,
+  `int[][,]`, the `where` line of generic `Publish`, a `Dictionary<,>` service key, escaped string and char keys and an `@`-escaped
+  parameter). Code fixes keep editing Roslyn syntax; that is not emission.
+  Output: no Verify snapshot changed and none was re-accepted. A temporary check (not committed) wrote every source the generators
+  produced during the whole test suite, on net10.0 and net11.0, at HEAD and with the text emitters, and compared them: 734 distinct
+  sources (6,056 files at HEAD), identical byte for byte, including three hosts added for the check only (keywords as the root namespace,
+  namespaces, types, records, parameters and handler classes; `string?[]`, `int?[]?`, `int[,]`, `int[][,]`, nested generics and tuples
+  as responses and items; `typeof(Dictionary<,>)`, `typeof(List<>)` and `typeof(int?)` service keys; string and char keys with quotes,
+  backslashes, control characters and U+2028; enum and `long` keys; `NaN`, infinity, `decimal`, `long.MinValue` and `'\0'` defaults; struct
+  requests and notifications, boxed and parallel handlers; 34 of each kind, above the jump-table threshold). The large host below (393
+  files) and the solution's own builds (the samples and the benchmark host, 168 files) generate the same bytes too.
+  Measured on the large host (300 requests with five behaviors each, 30 stream requests, 30 notifications; `ReportAnalyzer`, Release,
+  median of runs 2 to 11 of `time_gen.sh` with `gen_bighost.py`; Apple M4 Max, macOS 27.2, .NET SDK 11.0.100, 2026-11-27; results in the
+  session scratchpad under `text-before/` and `text-after/`, not kept in the repository), with ten extra warm-up builds so the compiler
+  server has JIT-compiled the analyzer: host generator 97 ms with `SyntaxFactory` and explicit trivia (HEAD), 58 ms with the text
+  emitters of eca51b5 (the commit before 1fddbdd, re-measured on this machine to compare like with like), 51 ms with the new text
+  emitters; handler generator 46, 33 and 29 ms. With step 5's method (one warm-up build): 150, 57 and 78 ms, and 54, 32 and 40 ms; the
+  new emitters were still getting faster during those runs (278 ms at run 2, 52 ms at run 11) while the server JIT-compiled them. So the
+  target of the 66 ms / 35 ms baseline is met. Folded into the ADR (status, Incremental generation rules, Alternatives considered), the
+  brief (Summary, Engineering rules), the README (Hosts) and whats-left.md.
