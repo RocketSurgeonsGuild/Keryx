@@ -58,6 +58,9 @@ public sealed class StructRequestAnalyzer : DiagnosticAnalyzer
                     $"ISender.{method.Name}"
                 )
             );
+
+            // Only the request argument binds to parameter 0.
+            return;
         }
     }
 }

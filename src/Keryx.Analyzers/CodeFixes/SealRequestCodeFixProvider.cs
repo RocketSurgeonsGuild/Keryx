@@ -97,6 +97,8 @@ public sealed class SealRequestCodeFixProvider : CodeFixProvider
     /// </summary>
     private static IEnumerable<SyntaxToken> AddSealed(SyntaxTokenList modifiers)
     {
+        // No break: the position is after the LAST matching modifier, since an accessibility can be two tokens (protected internal) and
+        // new can come before or after it.
         var position = 0;
         for (var i = 0; i < modifiers.Count; i++)
         {

@@ -187,11 +187,20 @@ internal static class HostComposer
 
             foreach (var (exclusion, _, type) in handlerExclusions)
             {
-                if (SymbolEqualityComparer.Default.Equals(type, method.ContainingType) && usedHandlerExclusions.Add(exclusion.Operand))
+                if (!SymbolEqualityComparer.Default.Equals(type, method.ContainingType))
+                {
+                    continue;
+                }
+
+                // Every entry naming this class has the same operand, so the first one decides (a repeated one is neither reported
+                // here nor as unused).
+                if (usedHandlerExclusions.Add(exclusion.Operand))
                 {
                     var stream = method.Parameters.Any(p => MessageType.Classify(p.Type, symbols).IsStream);
                     context.Report(Descriptors.ExcludedRequestHandler, exclusion.Location, exclusion.Display, stream ? "stream request" : "request");
                 }
+
+                break;
             }
         }
 

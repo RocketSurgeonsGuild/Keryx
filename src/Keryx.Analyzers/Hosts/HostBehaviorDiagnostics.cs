@@ -32,9 +32,10 @@ internal static class HostBehaviorDiagnostics
                         // outside, RunsBefore X puts X inside.
                         var (outer, inner) = edge.Edge.RunsAfter ? (target, behavior) : (behavior, target);
                         var kind = KindText(behavior, target);
+                        // A pipeline holds each behavior class once, so no other target matches this edge.
                         if (Compare(outer, inner) <= 0 || !reported.Add($"{outer.Identity}|{inner.Identity}|{kind}"))
                         {
-                            continue;
+                            break;
                         }
 
                         yield return new(
@@ -42,6 +43,7 @@ internal static class HostBehaviorDiagnostics
                             edge.Location,
                             new([Display(behavior.Identity), Contradiction(behavior, edge.Edge.RunsAfter, target, kind)])
                         );
+                        break;
                     }
                 }
             }
@@ -69,24 +71,28 @@ internal static class HostBehaviorDiagnostics
             return null;
         }
 
-        LocationInfo? location = null;
-        foreach (var behavior in cycle)
-        {
-            foreach (var edge in behavior.Edges)
-            {
-                if (location is null && edge.Location is { } declared && cycle.Any(other => !ReferenceEquals(other, behavior) && edge.Edge.Matches(other.Key)))
-                {
-                    location = declared;
-                }
-            }
-        }
-
         var names = string.Join(", ", cycle.Select(static b => $"'{Display(b.Identity)}'"));
         return new(
             Descriptors.InvalidBehaviorOrdering,
-            location,
+            FirstEdgeLocation(cycle),
             new([Display(cycle[0].Identity), BehaviorOrderingText.Cycle(names, KindText([.. cycle]))])
         );
+
+        static LocationInfo? FirstEdgeLocation(ImmutableArray<PipelineBehaviorModel> cycle)
+        {
+            foreach (var behavior in cycle)
+            {
+                foreach (var edge in behavior.Edges)
+                {
+                    if (edge.Location is { } declared && cycle.Any(other => !ReferenceEquals(other, behavior) && edge.Edge.Matches(other.Key)))
+                    {
+                        return declared;
+                    }
+                }
+            }
+
+            return null;
+        }
     }
 
     /// <summary>Compares two behaviors by (phase, order), the position edges must agree with.</summary>

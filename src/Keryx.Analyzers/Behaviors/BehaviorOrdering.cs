@@ -44,6 +44,7 @@ internal static class BehaviorOrdering
                 if (named is { Key: "Order", Value.Value: int number })
                 {
                     order = number;
+                    break;
                 }
             }
 
@@ -141,6 +142,9 @@ internal static class BehaviorOrdering
                             outgoing[from].Add(to);
                             incoming[to]++;
                         }
+
+                        // A pipeline holds each behavior class once, so no other node matches this edge.
+                        break;
                     }
                 }
             }
