@@ -204,11 +204,14 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     Whether a publish pipeline has a context (created once per scope): only when it resolves something, a handler whose invoker is not
-    ///     static (the context holds it) or a service its behaviors inject (ADR 0001, Generated pipeline shape; OQ-70). Otherwise its publish
-    ///     strategy and its links are static members of a static class, and the mediator has no field for it.
+    ///     static (the context holds it) or a service its behaviors inject, the unkeyed <c>IServiceProvider</c> included (ADR 0001, Generated
+    ///     pipeline shape; OQ-70, OQ-63). Otherwise its publish strategy and its links are static members of a static class, and the mediator
+    ///     has no field for it.
     /// </summary>
     private static bool HasContext(NotificationPipeline pipeline) =>
-        pipeline.Notification.ContextServices.Count > 0 || pipeline.Handlers.Any(static entry => !entry.Handler.StaticInvoker);
+        pipeline.Notification.ContextServices.Count > 0
+     || pipeline.Notification.ContextServiceProvider
+     || pipeline.Handlers.Any(static entry => !entry.Handler.StaticInvoker);
 
     /// <summary>
     ///     What the end of a publish pipeline reads: the notification, for its publish strategy, and the context when the strategy runs on it;
@@ -304,7 +307,7 @@ internal static partial class HostEmitter
             );
             writer.Line($"private sealed class {context}");
             writer.Open();
-            var resolution = new List<string>(pipeline.Handlers.Length + notification.ContextServices.Count);
+            var resolution = new List<string>(pipeline.Handlers.Length + notification.ContextServices.Count + 1);
             for (var i = 0; i < pipeline.Handlers.Length; i++)
             {
                 var handler = pipeline.Handlers[i].Handler;
@@ -316,7 +319,7 @@ internal static partial class HostEmitter
                 }
             }
 
-            WriteServiceFields(writer, notification.ContextServices, resolution);
+            WriteServiceFields(writer, notification.ContextServices, notification.ContextServiceProvider, resolution);
             WriteContextConstructor(writer, context, resolution);
         }
         else

@@ -18,7 +18,7 @@ raised while implementing it and were decided by the owner on 2026-11-27 (at the
 were decided by the owner on 2026-11-27 (at the end).
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
-are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
+were decided by the owner on 2026-11-27 (at the end). "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
 (decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, and OQ-68, decided by the owner (decision 18),
@@ -26,41 +26,12 @@ follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised wh
 the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69, OQ-71 and OQ-70, decided by the owner on 2026-11-27
 (decisions 19, 21 and 20), follow; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
 "Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) follows. OQ-61 and OQ-62, decided by the owner on
-2026-11-27 (decisions 25 and 26), follow, and OQ-59 and OQ-60 (decisions 23 and 24, the same day) come last.
+2026-11-27 (decisions 25 and 26), follow, then OQ-59 and OQ-60 (decisions 23 and 24, the same day), and OQ-63 and OQ-64 (decisions 27
+and 28, the same day) come last.
 
 ## Open
 
-### OQ-63: A behavior's `IServiceProvider` in a pipeline context
-
-Owner decision 9 ("A pipeline context resolves each shared service once", at the end) says that `IServiceProvider` needs no field. A
-behavior method's unkeyed `IServiceProvider` parameter receives the scope's provider (ADR, Injected parameters), which is resolved by
-nothing: it is the provider the pipeline context is built with. But the links that call behavior methods reach only the pipeline context
-and the message, and the context does not otherwise keep the provider, so the call site has nowhere else to read it from.
-
-- **Interim:** the provider is a shared service like any other: one `ServiceN` field (assigned `serviceProvider` in the constructor, never
-  resolved, always counted as required), shared by every behavior method of the pipeline that injects it. A context whose behaviors do
-  not inject it has no such field. A keyed `IServiceProvider` is an ordinary keyed service. The ADR (Injected parameters) says so.
-- **Proposal:** keep the interim (one field, only when used, consistent with the other shared services). Alternative: give every pipeline
-  context whose behaviors inject `IServiceProvider` a fixed `ServiceProvider` field outside the numbered services, or reach the provider
-  through the mediator (the context would hold the mediator instead). Needs a decision.
-
-### OQ-64: Shared service field names and set-preserving edits
-
-Owner decision 9 ("A pipeline context resolves each shared service once", at the end) names a pipeline context's fields "by service, in
-first-use order (e.g. Service0, Service1), stable across edits that do not change the set". The two cannot both hold: numbering by first
-use depends on the order of the behaviors and their parameters, not only on the set. A pipeline whose behaviors inject `IClock`, `ILog` and
-`IStore` (`Service0` to `Service2`) gains an outermost behavior injecting (`IClock`, `IStore`): the set and the service used first are
-unchanged, but the first-use order becomes `IClock`, `IStore`, `ILog`, so `Service1` and `Service2` swap. Behavior is unaffected (each
-behavior parameter still receives its own service, and the fields are private to the generated context); what changes is the generated
-text and the order of the model's `ContextServices`.
-
-- **Interim:** first-use order, as the decision's naming rule says. Names are stable for edits that change neither the set nor the order
-  of first uses. `SharedServiceTests.Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Renumbers_The_Context_Services` pins
-  the swap. The ADR (Injected parameters) and the brief (Phase 4) state the narrower guarantee.
-- **Proposal:** number the services by a stable ordinal sort of (service type, key) instead of first use, so any edit that keeps the set
-  keeps every name (the incremental test would then assert unchanged `ContextServices`). Cost: the numbering no longer follows the
-  pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
-  stability clause from the decision. Needs a decision.
+None.
 
 ## Decided
 
@@ -1443,8 +1414,9 @@ and reads each argument by slot.
 - Fields are named `Service0`, `Service1`, ... in order of first use. Names stay stable across edits that change neither the set of
   services nor the order of their first uses (adding a behavior that injects only `IClock` to a pipeline that already shares it changes no
   field). An edit that keeps the set but changes that order renumbers the fields, which the decision's "stable across edits that do not
-  change the set" does not allow; that conflict is OQ-64 (open).
-- The unkeyed `IServiceProvider` is the context's own provider, never resolved; where it is held is OQ-63 (open).
+  change the set" does not allow; that conflict is OQ-64 (decided at the end: numbered by a stable sort of type and key since).
+- The unkeyed `IServiceProvider` is the context's own provider, never resolved; where it is held is OQ-63 (decided at the end: a
+  dedicated `ServiceProvider` field since).
 - Consequence: a transient service that several behavior methods of one pipeline inject is one instance per pipeline context (per scope
   and pipeline), not one per behavior method.
 
@@ -2087,3 +2059,74 @@ from before KRX023).
   `AnalyzerReleases.Unshipped.md` only changes KRX005's notes: the rule stays, and nothing has shipped, so there is no "Removed Rules" or
   "Changed Rules" entry to add. Folded into the ADR (status; the host-rule list and ID ranges; KRX005 row; Host control; Alternatives
   considered), the brief (Phase 7), the README (KRX005), future-requirements.md and whats-left.md.
+
+### OQ-63: A behavior's `IServiceProvider` in a pipeline context (2026-11-27)
+
+Owner decision 9 ("A pipeline context resolves each shared service once", at the end) says that `IServiceProvider` needs no field. A
+behavior method's unkeyed `IServiceProvider` parameter receives the scope's provider (ADR, Injected parameters), which is resolved by
+nothing: it is the provider the pipeline context is built with. But the links that call behavior methods reach only the pipeline context
+and the message, and the context does not otherwise keep the provider, so the call site has nowhere else to read it from.
+
+- **Interim:** the provider is a shared service like any other: one `ServiceN` field (assigned `serviceProvider` in the constructor, never
+  resolved, always counted as required), shared by every behavior method of the pipeline that injects it. A context whose behaviors do
+  not inject it has no such field. A keyed `IServiceProvider` is an ordinary keyed service. The ADR (Injected parameters) says so.
+- **Proposal:** keep the interim (one field, only when used, consistent with the other shared services). Alternative: give every pipeline
+  context whose behaviors inject `IServiceProvider` a fixed `ServiceProvider` field outside the numbered services, or reach the provider
+  through the mediator (the context would hold the mediator instead). Needs a decision.
+- **Decision:** a fixed `ServiceProvider` field (owner decision 27, 2026-11-27). A pipeline context (request, stream, publish) whose
+  behavior methods inject the unkeyed `IServiceProvider` (required or optional) holds it in a dedicated `ServiceProvider` field, assigned
+  from the constructor's provider and never resolved, outside the numbered `ServiceN` services and shared by every behavior method that
+  injects it; a context whose behaviors do not inject it has no such field. A behavior that injects only the provider gives its pipeline
+  a context (a static handler's pipeline included). The same rule applies to handlers: a handler's injected `IServiceProvider` is the
+  provider directly (the generated factory already passed `serviceProvider` to the constructor, and the handler's own field holds it), so
+  nothing changed there. A keyed `IServiceProvider` is an ordinary keyed service. `IServiceScope` is not supported as a special case: it
+  is not injectable through DI, and an injected one stays an ordinary resolved service. In the model, `PipelineBehaviors.ShareServices`
+  leaves the unkeyed provider out of `ContextServices`, gives its parameters the slot `PipelineBehaviors.ServiceProviderSlot` (-1) and
+  sets `ContextServiceProvider` on `HostHandlerModel`/`HostNotificationModel`; `ContextServiceModel` lost `IsServiceProvider` (only the
+  unkeyed provider was special, and it is no longer a context service). Tests (`Behaviors/SharedServiceTests`):
+  `Should_Hold_The_Scope_Provider_In_One_ServiceProvider_Field` (snapshot: request, stream and publish pipelines with static handlers and
+  two behaviors each injecting the provider, one required and one optional; one field per context, six reads, no `ServiceN`, nothing
+  resolves `IServiceProvider`); `Should_Resolve_A_Keyed_IServiceProvider_As_An_Ordinary_Keyed_Service` (a keyed provider, required and
+  optional, is `Service0` resolved with `GetRequiredKeyedService`, beside the unkeyed `ServiceProvider`);
+  `Should_Pass_The_Scope_Provider_To_A_Handler_That_Injects_It` (the factory passes `serviceProvider` and resolves the keyed one; no
+  `ServiceProvider` field in a context whose behaviors do not inject it); `Should_Give_A_Service_Four_Behaviors_Share_One_Field` asserts
+  no `ServiceProvider` field; `Should_Resolve_A_Service_With_A_Required_Consumer_As_Required_For_All` reads `pipeline.ServiceProvider`
+  instead of `Service3`; at run time every behavior's provider (request, stream and publish, required and optional) and a request and a
+  notification handler's provider are the scope's (`Behaviors_Of_One_Pipeline_Receive_The_Same_Instance_Of_A_Transient`).
+  `PipelineAllocationTests`' injecting behaviors also take the provider: still 0 B at depths 1, 3 and 8. The link and context shapes are
+  unchanged (one more field read), so `--prototype-disasm` was not re-run. Folded into the ADR (status; Injected parameters; Generated
+  pipeline shape), the brief (Phase 4), CONTEXT.md (pipeline context), the README (Injected parameters, Behavior methods) and
+  whats-left.md.
+
+### OQ-64: Shared service field names and set-preserving edits (2026-11-27)
+
+Owner decision 9 ("A pipeline context resolves each shared service once", at the end) names a pipeline context's fields "by service, in
+first-use order (e.g. Service0, Service1), stable across edits that do not change the set". The two cannot both hold: numbering by first
+use depends on the order of the behaviors and their parameters, not only on the set. A pipeline whose behaviors inject `IClock`, `ILog` and
+`IStore` (`Service0` to `Service2`) gains an outermost behavior injecting (`IClock`, `IStore`): the set and the service used first are
+unchanged, but the first-use order becomes `IClock`, `IStore`, `ILog`, so `Service1` and `Service2` swap. Behavior is unaffected (each
+behavior parameter still receives its own service, and the fields are private to the generated context); what changes is the generated
+text and the order of the model's `ContextServices`.
+
+- **Interim:** first-use order, as the decision's naming rule says. Names are stable for edits that change neither the set nor the order
+  of first uses. `SharedServiceTests.Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Renumbers_The_Context_Services` pins
+  the swap. The ADR (Injected parameters) and the brief (Phase 4) state the narrower guarantee.
+- **Proposal:** number the services by a stable ordinal sort of (service type, key) instead of first use, so any edit that keeps the set
+  keeps every name (the incremental test would then assert unchanged `ContextServices`). Cost: the numbering no longer follows the
+  pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
+  stability clause from the decision. Needs a decision.
+- **Decision:** a stable ordinal sort (owner decision 28, 2026-11-27). A pipeline context's services are numbered by (service type's fully
+  qualified name without a top-level nullable annotation, ordinally; then the key: none first, then the key's C# literal text ordinally),
+  so any edit that keeps the set keeps every name; `Service0` is no longer necessarily the outermost behavior's first service.
+  `PipelineBehaviors.ShareServices` collects the distinct services (merging required consumers as before), sorts them with
+  `PipelineBehaviors.CompareServices` and indexes each behavior's parameters into the sorted list; it no longer sorts the behaviors.
+  `SharedServiceTests.Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Renumbers_The_Context_Services` is replaced by
+  `Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Keeps_The_Context_Services` (the rerun's `ContextServices` equal the
+  first run's, and so do the fields), and `Should_Number_The_Services_By_Type_And_Key_Not_By_First_Use` pins the order (types, then no key,
+  then keys). Snapshots that changed, each reviewed: `Should_Keep_Keyed_And_Unkeyed_Services_Of_One_Type_Apart` (`"earth"` is now
+  `Service1` and `"utc"` `Service2`), `Should_Resolve_A_Service_With_Only_Optional_Consumers_Once_And_Apply_Each_Default` (fields sorted
+  by type: `IClock?`, `TimeSpan?`, `int?`, `int?` for `int?`, `string?`; the call sites read the renumbered fields with the same
+  defaults) and `Should_Resolve_A_Service_With_A_Required_Consumer_As_Required_For_All` (OQ-63's change only; its three services were
+  already in sorted order). No other host snapshot changed: their pipelines share one service, or already used them in sorted order.
+  Folded into the ADR (status; Injected parameters; Generated pipeline shape), the brief (Phase 4), CONTEXT.md (pipeline context), the
+  README (Behavior methods) and whats-left.md.

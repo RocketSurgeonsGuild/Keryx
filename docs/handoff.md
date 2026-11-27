@@ -314,11 +314,16 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   without a context is static, in that class (Phase 6). The gate prototype is written the same way and `--prototype-disasm` must still show
   0 B and every link inlined.
 - **Shared services** (owner decision 9 of the second rework; ADR, Injected parameters). Every pipeline context (request, stream, publish)
-  resolves each distinct service (type and key) once, into one field (`Service0`, `Service1`, ... in order of first use), whatever the
-  number of behavior parameters that inject it. The model computes this (`PipelineBehaviors.ShareServices`: the pipeline model's
-  `ContextServices`, and each behavior's `ServiceSlots` indexing into it); the emitter only writes it. A required consumer makes the
-  service required for all; when every consumer is optional it is resolved once into a nullable field and each call site applies its own
-  default. A transient shared by several behavior methods is one instance per scope and pipeline.
+  resolves each distinct service (type and key) once, into one field, whatever the number of behavior parameters that inject it. The
+  fields are `Service0`, `Service1`, ... numbered by a stable ordinal sort of (service type, then key: none first, then the key's literal
+  text), so any edit that keeps the set of services keeps every name (owner decision 28, OQ-64). The model computes this
+  (`PipelineBehaviors.ShareServices`: the pipeline model's `ContextServices`, and each behavior's `ServiceSlots` indexing into it); the
+  emitter only writes it. A required consumer makes the service required for all; when every consumer is optional it is resolved once
+  into a nullable field and each call site applies its own default. A transient shared by several behavior methods is one instance per
+  scope and pipeline. The unkeyed `IServiceProvider` is not a numbered service (owner decision 27, OQ-63): a context whose behaviors
+  inject it holds the provider it is built with in a `ServiceProvider` field (never resolved; the model's `ContextServiceProvider`, slot
+  `PipelineBehaviors.ServiceProviderSlot`), and has no such field otherwise; a handler's injected `IServiceProvider` is the provider
+  directly too. A keyed `IServiceProvider` is an ordinary keyed service; `IServiceScope` has no special case.
 
 **Done when:**
 
@@ -342,7 +347,8 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   sort rule and every KRX008 case with `typeof` edges, a method-level `[BehaviorOrder]` and `[RunsAfter]` overriding the class's for one
   kind, a two-kind class whose method overrides `[RunsAfter]` (KRX008 reported per kind), and `[GlobalBehavior]` on a method only;
   `ExcludeBehavior` removes a class from pipelines of every kind;
-- allocation tests show 0 B per `Send` at depths 1, 3 and 8 (typed and generic), with behaviors that take injected services and with
+- allocation tests show 0 B per `Send` at depths 1, 3 and 8 (typed and generic), with behaviors that take injected services (and the
+  scope's `IServiceProvider`) and with
   `async` behaviors whose work completes synchronously, on an optimized (Release) test host;
 - `PipelineGeneratorTests.Should_Give_No_Context_To_A_Pipeline_That_Resolves_Nothing` snapshots request, stream and publish pipelines
   that resolve nothing (no context, links in a static class) beside ones that resolve a service, with every link taking only what it
@@ -350,10 +356,12 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
 - `Behaviors/SharedServiceTests`: a snapshot of request, stream and publish pipelines whose four behaviors each inject `IClock` shows one
   field per context; keyed and unkeyed services of one type stay separate; a required consumer makes a service required for optional
   consumers too; consumers that are all optional keep their own defaults (generated code and at run time); every behavior of a pipeline
-  receives the same instance of a transient, and a required and an optional `IServiceProvider` both receive the scope's provider; and
-  adding a behavior that injects only a service the pipeline already shares, without changing the order of first uses, leaves the
-  pipeline's context services (model and fields) unchanged, while an edit that keeps the set but changes that order renumbers the fields
-  (`open-questions.md` OQ-64, open);
+  receives the same instance of a transient, and every `IServiceProvider` (required or optional, of request, stream and publish behaviors
+  and of request and notification handlers) receives the scope's provider; a snapshot of request, stream and publish pipelines whose
+  behaviors inject only `IServiceProvider` shows one `ServiceProvider` field per context and no `ServiceN`, a keyed `IServiceProvider` is
+  a numbered keyed service beside it, and a handler's factory passes the scope's provider (OQ-63); services are numbered by type and key,
+  not first use, and adding a behavior that injects services the pipeline already shares, in any order, leaves the pipeline's context
+  services (model and fields) unchanged (OQ-64);
 - the gate's three criteria are recorded in the phase summary and in `open-questions.md`. A failed gate does not block this line: if
   criterion 1 (0 B at depths 1, 3 and 8) failed, follow `open-questions.md` OQ-22 for the 0 B allocation tests.
 

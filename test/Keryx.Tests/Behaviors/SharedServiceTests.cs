@@ -12,10 +12,11 @@ namespace Keryx.Tests.Behaviors;
 
 /// <summary>
 ///     A pipeline context resolves each service its behavior methods inject once (ADR 0001, Injected parameters): one field per distinct
-///     (service type, key), named <c>Service0</c>, <c>Service1</c>, ... in order of first use, in request, stream and notification pipeline
-///     contexts. A service with a required consumer is resolved as required for every consumer; one whose consumers are all optional is
-///     resolved once as optional, and each call site applies its own default. A transient shared by several behavior methods is one instance
-///     per pipeline context.
+///     (service type, key), named <c>Service0</c>, <c>Service1</c>, ... in a stable ordinal order of (service type, key) (OQ-64), in request,
+///     stream and notification pipeline contexts. A service with a required consumer is resolved as required for every consumer; one whose
+///     consumers are all optional is resolved once as optional, and each call site applies its own default. A transient shared by several
+///     behavior methods is one instance per pipeline context. The unkeyed <c>IServiceProvider</c> is not a numbered service: the context
+///     holds the provider it is built with in its <c>ServiceProvider</c> field, only when a behavior method injects it (OQ-63).
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public partial class SharedServiceTests : HostTest
@@ -33,6 +34,8 @@ public partial class SharedServiceTests : HostTest
         );
         await Assert.That(Count(mediator, "GetRequiredService<global::Sample\\.IClock>")).IsEqualTo(3);
         await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service0\\)")).IsEqualTo(12);
+        // No behavior injects IServiceProvider, so no context holds it.
+        await Assert.That(mediator).DoesNotContain("ServiceProvider ServiceProvider;");
         await VerifyHost(result);
     }
 
@@ -48,14 +51,16 @@ public partial class SharedServiceTests : HostTest
             cancellationToken
         );
 
+        // One type, so the key orders them: no key first, then the keys' literal text ordinally ("earth" before "utc"), whatever the order
+        // of first use (OQ-64).
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(Fields(mediator)).IsEquivalentTo(
             ["global::Sample.IClock Service0", "global::Sample.IClock Service1", "global::Sample.IClock Service2"],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
         await Assert.That(mediator).Contains("Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);");
-        await Assert.That(mediator).Contains("Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"utc\");");
-        await Assert.That(mediator).Contains("Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"earth\");");
+        await Assert.That(mediator).Contains("Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"earth\");");
+        await Assert.That(mediator).Contains("Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"utc\");");
         await VerifyHost(result);
     }
 
@@ -64,7 +69,7 @@ public partial class SharedServiceTests : HostTest
     {
         // The optional consumers come first in the pipeline; the required one still decides the resolution, and every consumer receives the
         // resolved instance as is (no default at the call site). Value types and Nullable<T> share the same way; an IServiceProvider, even
-        // an optional one, is always the scope's provider.
+        // an optional one, is always the scope's provider, held in the context's ServiceProvider field (OQ-63).
         var result = await GenerateAsync(
             Behavior("Maybe", 1, "IClock? clock = null, int retries = 3, int? limit = null, IServiceProvider? services = null")
           + Behavior("Must", 2, "IClock clock, int retries, int? limit, IServiceProvider services")
@@ -75,15 +80,16 @@ public partial class SharedServiceTests : HostTest
 
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(Fields(mediator)).IsEquivalentTo(
-            ["global::Sample.IClock Service0", "int Service1", "int? Service2", "global::System.IServiceProvider Service3"],
+            ["global::Sample.IClock Service0", "int Service1", "int? Service2"],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
         await Assert.That(mediator).Contains("Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);");
         await Assert.That(mediator).Contains("Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<int>(serviceProvider);");
         await Assert.That(mediator).Contains("Service2 = (int?)global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(serviceProvider, typeof(int?));");
         // The scope's IServiceProvider is never resolved: the context holds the provider it was built with (open-questions OQ-63).
-        await Assert.That(mediator).Contains("Service3 = serviceProvider;");
-        await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service0, _?pipeline\\.Service1, _?pipeline\\.Service2, _?pipeline\\.Service3\\)")).IsEqualTo(3);
+        await Assert.That(mediator).Contains("public readonly global::System.IServiceProvider ServiceProvider;");
+        await Assert.That(mediator).Contains("ServiceProvider = serviceProvider;");
+        await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service0, _?pipeline\\.Service1, _?pipeline\\.Service2, _?pipeline\\.ServiceProvider\\)")).IsEqualTo(3);
         await Assert.That(mediator).DoesNotContain("GetService");
         await VerifyHost(result);
     }
@@ -98,21 +104,22 @@ public partial class SharedServiceTests : HostTest
             cancellationToken
         );
 
-        // One nullable field per service, resolved once with GetService/GetKeyedService; each call site applies its own default.
+        // One nullable field per service, resolved once with GetService/GetKeyedService; each call site applies its own default. The fields
+        // are numbered by service type ordinally (OQ-64), not in the order the behaviors use them.
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
         await Assert.That(Fields(mediator)).IsEquivalentTo(
-            ["string? Service0", "int? Service1", "int? Service2", "global::Sample.IClock? Service3", "global::System.TimeSpan? Service4"],
+            ["global::Sample.IClock? Service0", "global::System.TimeSpan? Service1", "int? Service2", "int? Service3", "string? Service4"],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
-        await Assert.That(mediator).Contains("Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<string>(serviceProvider, \"suffix\");");
-        await Assert.That(mediator).Contains("Service1 = serviceProvider.GetService(typeof(int)) is int __value1 ? (int?)__value1 : null;");
-        await Assert.That(mediator).Contains("Service2 = serviceProvider.GetService(typeof(int?)) is int __value2 ? (int?)__value2 : null;");
-        await Assert.That(mediator).Contains("Service3 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);");
+        await Assert.That(mediator).Contains("Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);");
+        await Assert.That(mediator).Contains("Service2 = serviceProvider.GetService(typeof(int)) is int __value2 ? (int?)__value2 : null;");
+        await Assert.That(mediator).Contains("Service3 = serviceProvider.GetService(typeof(int?)) is int __value3 ? (int?)__value3 : null;");
+        await Assert.That(mediator).Contains("Service4 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<string>(serviceProvider, \"suffix\");");
         await Assert.That(mediator).Contains(
-            "cancellationToken, pipeline.Service0 ?? \"!\", pipeline.Service1 ?? 3, pipeline.Service2, pipeline.Service3, pipeline.Service4.GetValueOrDefault())"
+            "cancellationToken, pipeline.Service4 ?? \"!\", pipeline.Service2 ?? 3, pipeline.Service3, pipeline.Service0, pipeline.Service1.GetValueOrDefault())"
         );
         await Assert.That(mediator).Contains(
-            "cancellationToken, pipeline.Service0 ?? \"?\", pipeline.Service1 ?? 5, pipeline.Service2 ?? 7, pipeline.Service3, pipeline.Service4.GetValueOrDefault())"
+            "cancellationToken, pipeline.Service4 ?? \"?\", pipeline.Service2 ?? 5, pipeline.Service3 ?? 7, pipeline.Service0, pipeline.Service1.GetValueOrDefault())"
         );
         await VerifyHost(result);
     }
@@ -133,20 +140,22 @@ public partial class SharedServiceTests : HostTest
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         _ = await mediator.Send((IRequest<int>)Create(host, "Sample.Ping"), cancellationToken);
         _ = await mediator.Send((IRequest<int>)Create(host, "Sample.Ping"), cancellationToken);
+        _ = await mediator.Send((IRequest<int>)Create(host, "Sample.Probe"), cancellationToken);
         await foreach (var _ in mediator.Stream((IStreamRequest<int>)Create(host, "Sample.Feed"), cancellationToken)) { }
 
         await mediator.Publish((INotification)Create(host, "Sample.Placed"), cancellationToken);
 
         // Each pipeline context resolved the transient Clock once (and the keyed one once): every behavior of the pipeline saw that
-        // instance, on every call in the scope; keyed and unkeyed are different instances. The required and the optional IServiceProvider
-        // both received the scope's own provider (open-questions OQ-63).
+        // instance, on every call in the scope; keyed and unkeyed are different instances. Every IServiceProvider, required or optional,
+        // of a request, stream or publish behavior and of a request or notification handler, received the scope's own provider (OQ-63).
         var seen = Seen(host);
         await Assert.That(seen).IsEquivalentTo(
             [
                 "request.first 1 utc 2 scope", "request.second 1 scope", "request.third 1 utc 2",
                 "request.first 1 utc 2 scope", "request.second 1 scope", "request.third 1 utc 2",
-                "stream.first 3", "stream.second 3",
-                "publish.first 4", "publish.second 4",
+                "request.handler scope",
+                "stream.first 3", "stream.second 3 scope",
+                "publish.first 4", "publish.second 4 scope", "publish.handler scope",
             ],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
@@ -221,9 +230,8 @@ public partial class SharedServiceTests : HostTest
     }
 
     [Test]
-    public async Task Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Renumbers_The_Context_Services(CancellationToken cancellationToken)
+    public async Task Adding_A_Behavior_That_Uses_Shared_Services_In_Another_Order_Keeps_The_Context_Services(CancellationToken cancellationToken)
     {
-        const string LogAndStore = "public interface ILog { }\n\npublic interface IStore { }\n\n";
         var first = await HostBuilder.WithNullableContext(NullableContextOptions.Enable)
                                      .WithIncrementalTracking()
                                      .AddSource(
@@ -239,8 +247,8 @@ public partial class SharedServiceTests : HostTest
                                      .Build()
                                      .GenerateAsync(cancellationToken);
 
-        // A global behavior, outermost, that injects IClock and IStore: the set of services and the service used first are unchanged, but
-        // fields are numbered in order of first use, so IStore (now used second) and ILog swap names (open-questions OQ-64).
+        // A global behavior, outermost, that injects IClock and IStore: the order of first use becomes IClock, IStore, ILog, but the set is
+        // unchanged, and the services are numbered by (service type, key), so every name stays (OQ-64).
         var second = await first.RerunWithSourceAsync(
             "Outer.cs",
             Usings
@@ -260,23 +268,234 @@ public partial class SharedServiceTests : HostTest
             cancellationToken
         );
 
-        await Assert.That(Services(first).Select(static s => s.ServiceType)).IsEquivalentTo(
+        var before = Services(first);
+        await Assert.That(before.Select(static s => s.ServiceType)).IsEquivalentTo(
             ["global::Sample.IClock", "global::Sample.ILog", "global::Sample.IStore"],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
-        await Assert.That(Services(second).Select(static s => s.ServiceType)).IsEquivalentTo(
-            ["global::Sample.IClock", "global::Sample.IStore", "global::Sample.ILog"],
-            TUnit.Assertions.Enums.CollectionOrdering.Matching
-        );
+        await Assert.That(Services(second)).IsEquivalentTo(before, TUnit.Assertions.Enums.CollectionOrdering.Matching);
 
-        await Assert.That(Fields(first.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName])).IsEquivalentTo(
+        var mediator = second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName];
+        await Assert.That(Fields(mediator)).IsEquivalentTo(
             ["global::Sample.IClock Service0", "global::Sample.ILog Service1", "global::Sample.IStore Service2"],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
-        await Assert.That(Fields(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName])).IsEquivalentTo(
-            ["global::Sample.IClock Service0", "global::Sample.IStore Service1", "global::Sample.ILog Service2"],
+        await Assert.That(Fields(first.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName])).IsEquivalentTo(
+            Fields(mediator),
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
+        await Assert.That(mediator).Contains(
+            "global::Sample.Outer.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), pipeline.Service0, pipeline.Service2, cancellationToken)"
+        );
+    }
+
+    [Test]
+    public async Task Should_Number_The_Services_By_Type_And_Key_Not_By_First_Use(CancellationToken cancellationToken)
+    {
+        // First use: IStore, keyed ILog "b", ILog, keyed ILog "a", IClock. Stable order: IClock, ILog, ILog "a", ILog "b", IStore. The same
+        // set in a request, a stream request and a notification pipeline: each context numbers them the same way.
+        const string outer = "IStore store, [FromKeyedServices(\"b\")] ILog b";
+        const string middle = "ILog log, [FromKeyedServices(\"a\")] ILog a";
+        const string inner = "IClock clock, IStore store";
+        var result = await GenerateAsync(
+            LogAndStore
+          + Behavior("Outer", 1, outer)
+          + Behavior("Middle", 2, middle)
+          + Behavior("Inner", 3, inner)
+          + StreamBehavior("StreamOuter", 1, outer)
+          + StreamBehavior("StreamMiddle", 2, middle)
+          + StreamBehavior("StreamInner", 3, inner)
+          + PublishBehavior("PublishOuter", 1, outer)
+          + PublishBehavior("PublishMiddle", 2, middle)
+          + PublishBehavior("PublishInner", 3, inner)
+          + Ping("Outer", "Middle", "Inner")
+          + Feed("StreamOuter", "StreamMiddle", "StreamInner")
+          + Placed("PublishOuter", "PublishMiddle", "PublishInner"),
+            cancellationToken
+        );
+
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        string[] context =
+        [
+            "global::Sample.IClock Service0", "global::Sample.ILog Service1", "global::Sample.ILog Service2", "global::Sample.ILog Service3",
+            "global::Sample.IStore Service4",
+        ];
+        await Assert.That(Fields(mediator)).IsEquivalentTo([.. context, .. context, .. context], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(Count(mediator, "Service2 = global::Microsoft\\.Extensions\\.DependencyInjection\\.ServiceProviderKeyedServiceExtensions\\.GetRequiredKeyedService<global::Sample\\.ILog>\\(serviceProvider, \"a\"\\);")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "Service3 = global::Microsoft\\.Extensions\\.DependencyInjection\\.ServiceProviderKeyedServiceExtensions\\.GetRequiredKeyedService<global::Sample\\.ILog>\\(serviceProvider, \"b\"\\);")).IsEqualTo(3);
+        // Each behavior reads the same slots in all three pipelines (request, stream and publish links).
+        await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service4, _?pipeline\\.Service3\\)")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service1, _?pipeline\\.Service2\\)")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "cancellationToken, _?pipeline\\.Service0, _?pipeline\\.Service4\\)")).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task Should_Keep_Keys_Of_Different_Primitive_Types_Apart(CancellationToken cancellationToken)
+    {
+        // (byte)1 and 1, (short)-1 and -1 are different keys to MS.DI (object.Equals of the boxed values): four services, each key written
+        // with its own type, ordered by the key's literal text.
+        var result = await GenerateAsync(
+            Behavior("Narrow", 1, "[FromKeyedServices((byte)1)] IClock a, [FromKeyedServices((short)-1)] IClock c")
+          + Behavior("Wide", 2, "[FromKeyedServices(1)] IClock b, [FromKeyedServices(-1)] IClock d")
+          + Ping("Narrow", "Wide"),
+            cancellationToken
+        );
+
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(Fields(mediator)).IsEquivalentTo(
+            ["global::Sample.IClock Service0", "global::Sample.IClock Service1", "global::Sample.IClock Service2", "global::Sample.IClock Service3"],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching
+        );
+        await Assert.That(mediator).Contains("Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, (byte)1);");
+        await Assert.That(mediator).Contains("Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, (short)-1);");
+        await Assert.That(mediator).Contains("Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, -1);");
+        await Assert.That(mediator).Contains("Service3 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, 1);");
+        await Assert.That(mediator).Contains("cancellationToken, pipeline.Service0, pipeline.Service1)");
+        await Assert.That(mediator).Contains("cancellationToken, pipeline.Service3, pipeline.Service2)");
+    }
+
+    [Test]
+    public async Task Behaviors_And_Handlers_Receive_The_Registration_Of_Their_Own_Key_Type(CancellationToken cancellationToken)
+    {
+        var host = await CompileHostAsync(KeyTypes, cancellationToken);
+        await using var provider = BuildProvider(
+            host,
+            services => services.AddKeyedSingleton<string>((byte)1, "byte 1")
+                                .AddKeyedSingleton<string>(1, "int 1")
+                                .AddKeyedSingleton<string>((short)-1, "short -1")
+                                .AddKeyedSingleton<string>(-1, "int -1")
+        );
+        _ = Seen(host);
+
+        await using var scope = provider.CreateAsyncScope();
+        _ = await scope.ServiceProvider.GetRequiredService<ISender>().Send((IRequest<int>)Create(host, "Sample.Ping"), cancellationToken);
+
+        await Assert.That(Seen(host)).IsEquivalentTo(
+            ["narrow byte 1, short -1", "wide int 1, int -1", "handler byte 1, int 1"],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching
+        );
+    }
+
+    [Test]
+    public async Task Should_Hold_The_Scope_Provider_In_One_ServiceProvider_Field(CancellationToken cancellationToken)
+    {
+        // Two behaviors per pipeline (request, stream, publish) inject the unkeyed IServiceProvider, one required, one optional; the
+        // handlers' invokers are static, so the provider is all each context holds.
+        var result = await GenerateAsync(
+            Behavior("RequestOne", 1, "IServiceProvider services")
+          + Behavior("RequestTwo", 2, "IServiceProvider? services = null")
+          + """
+            [StreamBehavior]
+            [BehaviorOrder(Phase.Default, Order = 1)]
+            public static class StreamOne
+            {
+                public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, IServiceProvider services, CancellationToken cancellationToken)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
+            }
+
+            [StreamBehavior]
+            [BehaviorOrder(Phase.Default, Order = 2)]
+            public static class StreamTwo
+            {
+                public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, IServiceProvider? services = null)
+                    where TRequest : IStreamRequest<TItem>
+                    where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
+            }
+
+            [NotificationBehavior]
+            [BehaviorOrder(Phase.Default, Order = 1)]
+            public static class PublishOne
+            {
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, IServiceProvider services, CancellationToken cancellationToken)
+                    where TNotification : INotification
+                    where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+            }
+
+            [NotificationBehavior]
+            [BehaviorOrder(Phase.Default, Order = 2)]
+            public static class PublishTwo
+            {
+                public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken, IServiceProvider? services = null)
+                    where TNotification : INotification
+                    where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+            }
+
+            public sealed record Feed : IStreamRequest<int>;
+            public static partial class FeedHandler
+            {
+                [Behavior(typeof(StreamOne))]
+                [Behavior(typeof(StreamTwo))]
+                private static IAsyncEnumerable<int> Handle(Feed request) => throw new NotSupportedException();
+            }
+
+            [Behavior(typeof(PublishOne))]
+            [Behavior(typeof(PublishTwo))]
+            public sealed record Placed : INotification;
+            public static partial class OnPlaced { private static ValueTask Handle(Placed notification) => default; }
+
+            """
+          + Ping("RequestOne", "RequestTwo"),
+            cancellationToken
+        );
+
+        // One ServiceProvider field per context, assigned the provider the context is built with (never resolved), read by both calls of
+        // each pipeline; no numbered service.
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(Count(mediator, "public readonly global::System\\.IServiceProvider ServiceProvider;")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "ServiceProvider = serviceProvider;")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "_?pipeline\\.ServiceProvider[,)]")).IsEqualTo(6);
+        await Assert.That(Fields(mediator)).IsEmpty();
+        await Assert.That(mediator).DoesNotContain("<global::System.IServiceProvider>");
+        await VerifyHost(result);
+    }
+
+    [Test]
+    public async Task Should_Resolve_A_Keyed_IServiceProvider_As_An_Ordinary_Keyed_Service(CancellationToken cancellationToken)
+    {
+        var result = await GenerateAsync(
+            Behavior("Root", 1, "IServiceProvider services, [FromKeyedServices(\"root\")] IServiceProvider root")
+          + Behavior("MaybeRoot", 2, "[FromKeyedServices(\"root\")] IServiceProvider? root = null")
+          + Ping("Root", "MaybeRoot"),
+            cancellationToken
+        );
+
+        // The keyed provider is a numbered service, resolved as required (Root's consumer is) and shared; the unkeyed one is the context's
+        // ServiceProvider field.
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(Fields(mediator)).IsEquivalentTo(["global::System.IServiceProvider Service0"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(mediator).Contains(
+            "Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\");"
+        );
+        await Assert.That(mediator).Contains("ServiceProvider = serviceProvider;");
+        await Assert.That(mediator).Contains("cancellationToken, pipeline.ServiceProvider, pipeline.Service0)");
+        await Assert.That(mediator).Contains("cancellationToken, pipeline.Service0)");
+    }
+
+    [Test]
+    public async Task Should_Pass_The_Scope_Provider_To_A_Handler_That_Injects_It(CancellationToken cancellationToken)
+    {
+        var result = await GenerateAsync(
+            """
+            public sealed record Probe : IRequest<int>;
+            public partial class ProbeHandler
+            {
+                private static int Handle(Probe request, IServiceProvider services, [FromKeyedServices("root")] IServiceProvider root) => 1;
+            }
+
+            """,
+            cancellationToken
+        );
+
+        // The handler's factory passes the scope's provider itself to the unkeyed parameter and resolves the keyed one; the handler holds
+        // what it receives. No behavior injects IServiceProvider, so the pipeline context holds only the handler.
+        var addKeryx = TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName);
+        await Assert.That(addKeryx).Contains(
+            "static serviceProvider => new global::Sample.ProbeHandler(serviceProvider, global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\"))"
+        );
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).DoesNotContain("ServiceProvider ServiceProvider;");
+        await Assert.That(Fields(mediator)).IsEmpty();
     }
 
     /// <summary>
@@ -289,8 +508,9 @@ public partial class SharedServiceTests : HostTest
     ///     A host whose behaviors log the transient <c>Clock</c> instances they receive (<c>Seen</c>): <c>Ping</c> through <c>First</c> (a
     ///     required <c>Clock</c> and a keyed one), <c>Second</c> (an optional <c>Clock</c>) and <c>Third</c>; <c>Feed</c> and <c>Placed</c>
     ///     through two behaviors each; and <c>Lookup</c> through two behaviors whose injected services (keyed and unkeyed, reference and
-    ///     value types) are all optional, with different defaults. <c>First</c> and <c>Second</c> also log whether their
-    ///     <c>IServiceProvider</c> (required in <c>First</c>, optional in <c>Second</c>) is <c>Seen.Provider</c>.
+    ///     value types) are all optional, with different defaults. <c>First</c>, <c>Second</c>, <c>StreamSecond</c> and <c>PublishSecond</c>
+    ///     also log whether their <c>IServiceProvider</c> (optional in <c>Second</c>, required in the others) is <c>Seen.Provider</c>, and so do
+    ///     the handlers of <c>Probe</c> and <c>OnPlacedWithProvider</c>, which inject it.
     /// </summary>
     private const string Runtime = """
         namespace Sample;
@@ -377,11 +597,11 @@ public partial class SharedServiceTests : HostTest
         [BehaviorOrder(Phase.Default, Order = 2)]
         public static class StreamSecond
         {
-            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, Clock clock, CancellationToken cancellationToken)
+            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, Clock clock, IServiceProvider services, CancellationToken cancellationToken)
                 where TRequest : IStreamRequest<TItem>
                 where TNext : struct, IStreamNext<TItem>
             {
-                Seen.Write("stream.second " + clock);
+                Seen.Write("stream.second " + clock + " " + Seen.Which(services));
                 return next.InvokeAsync(cancellationToken);
             }
         }
@@ -415,11 +635,11 @@ public partial class SharedServiceTests : HostTest
         [BehaviorOrder(Phase.Default, Order = 2)]
         public static class PublishSecond
         {
-            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, Clock clock, CancellationToken cancellationToken)
+            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, Clock clock, IServiceProvider services, CancellationToken cancellationToken)
                 where TNotification : INotification
                 where TNext : struct, INext
             {
-                Seen.Write("publish.second " + clock);
+                Seen.Write("publish.second " + clock + " " + Seen.Which(services));
                 return next.InvokeAsync(cancellationToken);
             }
         }
@@ -428,6 +648,25 @@ public partial class SharedServiceTests : HostTest
         [Behavior(typeof(PublishSecond))]
         public sealed record Placed : INotification;
         public static partial class OnPlaced { private static ValueTask Handle(Placed notification) => default; }
+
+        public partial class OnPlacedWithProvider
+        {
+            private static ValueTask Handle(Placed notification, IServiceProvider services)
+            {
+                Seen.Write("publish.handler " + Seen.Which(services));
+                return default;
+            }
+        }
+
+        public sealed record Probe : IRequest<int>;
+        public partial class ProbeHandler
+        {
+            private static int Handle(Probe request, IServiceProvider services)
+            {
+                Seen.Write("request.handler " + Seen.Which(services));
+                return 1;
+            }
+        }
 
         [RequestBehavior]
         [BehaviorOrder(Phase.Default, Order = 1)]
@@ -478,11 +717,67 @@ public partial class SharedServiceTests : HostTest
         }
         """;
 
+    /// <summary>
+    ///     A host whose behaviors and handler inject <c>string</c> services under keys of different primitive types with equal values
+    ///     (<c>(byte)1</c> and <c>1</c>, <c>(short)-1</c> and <c>-1</c>), and log what they receive (<c>Seen</c>).
+    /// </summary>
+    private const string KeyTypes = """
+        namespace Sample;
+
+        public static class Seen
+        {
+            public static readonly List<string> Entries = [];
+            public static void Write(string entry) { lock (Entries) { Entries.Add(entry); } }
+            public static string[] Take() { lock (Entries) { var entries = Entries.ToArray(); Entries.Clear(); return entries; } }
+        }
+
+        [RequestBehavior]
+        [BehaviorOrder(Phase.Default, Order = 1)]
+        public static class Narrow
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, [FromKeyedServices((byte)1)] string a, [FromKeyedServices((short)-1)] string c)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Seen.Write("narrow " + a + ", " + c);
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        [RequestBehavior]
+        [BehaviorOrder(Phase.Default, Order = 2)]
+        public static class Wide
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, [FromKeyedServices(1)] string b, [FromKeyedServices(-1)] string d)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Seen.Write("wide " + b + ", " + d);
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        public sealed record Ping : IRequest<int>;
+        public partial class PingHandler
+        {
+            [Behavior(typeof(Narrow))]
+            [Behavior(typeof(Wide))]
+            private static int Handle(Ping request, [FromKeyedServices((byte)1)] string a, [FromKeyedServices(1)] string b)
+            {
+                Seen.Write("handler " + a + ", " + b);
+                return 1;
+            }
+        }
+        """;
+
     private Task<GeneratorTestResults> GenerateAsync(string source, CancellationToken cancellationToken) =>
         GenerateCheckedAsync(HostBuilder.AddSources(Usings + Clock + source).Build(), cancellationToken);
 
     /// <summary>The namespace the test sources declare, and the <c>IClock</c> service.</summary>
     private const string Clock = "namespace Sample;\n\npublic interface IClock { }\n\n";
+
+    /// <summary>The <c>ILog</c> and <c>IStore</c> services.</summary>
+    private const string LogAndStore = "public interface ILog { }\n\npublic interface IStore { }\n\n";
 
     private static async Task<GeneratorTestResults> GenerateCheckedAsync(GeneratorTestContext context, CancellationToken cancellationToken)
     {
@@ -516,60 +811,67 @@ public partial class SharedServiceTests : HostTest
       + string.Concat(behaviors.Select(static b => $"    [Behavior(typeof({b}))]\n"))
       + "    private static int Handle(Ping request) => 1;\n}\n";
 
+    /// <summary>A stream behavior <paramref name="name" /> at <c>Order = order</c> whose open behavior method injects <paramref name="services" />.</summary>
+    private static string StreamBehavior(string name, int order, string services) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $$"""
+              [StreamBehavior]
+              [BehaviorOrder(Phase.Default, Order = {{order}})]
+              public static class {{name}}
+              {
+                  public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, {{services}})
+                      where TRequest : IStreamRequest<TItem>
+                      where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
+              }
+
+
+              """
+        );
+
+    /// <summary>A notification behavior <paramref name="name" /> at <c>Order = order</c> whose open behavior method injects <paramref name="services" />.</summary>
+    private static string PublishBehavior(string name, int order, string services) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $$"""
+              [NotificationBehavior]
+              [BehaviorOrder(Phase.Default, Order = {{order}})]
+              public static class {{name}}
+              {
+                  public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken, {{services}})
+                      where TNotification : INotification
+                      where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+              }
+
+
+              """
+        );
+
+    /// <summary>The <c>Feed</c> stream request and its handler, with the behaviors attached.</summary>
+    private static string Feed(params string[] behaviors) =>
+        "public sealed record Feed : IStreamRequest<int>;\n\npublic static partial class FeedHandler\n{\n"
+      + string.Concat(behaviors.Select(static b => $"    [Behavior(typeof({b}))]\n"))
+      + "    private static IAsyncEnumerable<int> Handle(Feed request) => throw new NotSupportedException();\n}\n";
+
+    /// <summary>The <c>Placed</c> notification, with the behaviors attached, and its handler.</summary>
+    private static string Placed(params string[] behaviors) =>
+        string.Concat(behaviors.Select(static b => $"[Behavior(typeof({b}))]\n"))
+      + "public sealed record Placed : INotification;\n\npublic static partial class OnPlaced { private static ValueTask Handle(Placed notification) => default; }\n";
+
     private static string BuildFourClocks()
     {
         var builder = new StringBuilder();
         for (var k = 1; k <= 4; k++)
         {
-            builder.Append(Behavior("Request" + k.ToString(CultureInfo.InvariantCulture), k, "IClock clock"));
-            builder.Append(
-                CultureInfo.InvariantCulture,
-                $$"""
-                  [StreamBehavior]
-                  [BehaviorOrder(Phase.Default, Order = {{k}})]
-                  public static class Stream{{k}}
-                  {
-                      public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, IClock clock)
-                          where TRequest : IStreamRequest<TItem>
-                          where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
-                  }
-
-                  [NotificationBehavior]
-                  [BehaviorOrder(Phase.Default, Order = {{k}})]
-                  public static class Publish{{k}}
-                  {
-                      public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken, IClock clock)
-                          where TNotification : INotification
-                          where TNext : struct, INext => next.InvokeAsync(cancellationToken);
-                  }
-
-
-                  """
-            );
+            var name = k.ToString(CultureInfo.InvariantCulture);
+            builder.Append(Behavior("Request" + name, k, "IClock clock"));
+            builder.Append(StreamBehavior("Stream" + name, k, "IClock clock"));
+            builder.Append(PublishBehavior("Publish" + name, k, "IClock clock"));
         }
 
         builder.Append(Ping("Request1", "Request2", "Request3", "Request4"));
-        builder.Append(
-            """
-
-            public sealed record Feed : IStreamRequest<int>;
-            public static partial class FeedHandler
-            {
-                [Behavior(typeof(Stream1))]
-                [Behavior(typeof(Stream2))]
-                [Behavior(typeof(Stream3))]
-                [Behavior(typeof(Stream4))]
-                private static IAsyncEnumerable<int> Handle(Feed request) => throw new NotSupportedException();
-            }
-
-            [Behavior(typeof(Publish1))]
-            [Behavior(typeof(Publish2))]
-            [Behavior(typeof(Publish3))]
-            [Behavior(typeof(Publish4))]
-            public sealed record Placed : INotification;
-            public static partial class OnPlaced { private static ValueTask Handle(Placed notification) => default; }
-            """
-        );
+        builder.Append(Feed("Stream1", "Stream2", "Stream3", "Stream4"));
+        builder.Append(Placed("Publish1", "Publish2", "Publish3", "Publish4"));
         return builder.ToString();
     }
 

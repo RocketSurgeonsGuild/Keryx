@@ -79,7 +79,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<int> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline0) ?? __CreatePipeline0();
-            return global::Sample.Low.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service0 ?? "!", pipeline.Service1 ?? 3, pipeline.Service2, pipeline.Service3, pipeline.Service4.GetValueOrDefault());
+            return global::Sample.Low.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service4 ?? "!", pipeline.Service2 ?? 3, pipeline.Service3, pipeline.Service0, pipeline.Service1.GetValueOrDefault());
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -93,26 +93,26 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Ping</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly string? Service0;
-            public readonly int? Service1;
+            public readonly global::Sample.IClock? Service0;
+            public readonly global::System.TimeSpan? Service1;
             public readonly int? Service2;
-            public readonly global::Sample.IClock? Service3;
-            public readonly global::System.TimeSpan? Service4;
+            public readonly int? Service3;
+            public readonly string? Service4;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<string>(serviceProvider, "suffix");
-                Service1 = serviceProvider.GetService(typeof(int)) is int __value1 ? (int?)__value1 : null;
-                Service2 = serviceProvider.GetService(typeof(int?)) is int __value2 ? (int?)__value2 : null;
-                Service3 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);
-                Service4 = serviceProvider.GetService(typeof(global::System.TimeSpan)) is global::System.TimeSpan __value4 ? (global::System.TimeSpan?)__value4 : null;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);
+                Service1 = serviceProvider.GetService(typeof(global::System.TimeSpan)) is global::System.TimeSpan __value1 ? (global::System.TimeSpan?)__value1 : null;
+                Service2 = serviceProvider.GetService(typeof(int)) is int __value2 ? (int?)__value2 : null;
+                Service3 = serviceProvider.GetService(typeof(int?)) is int __value3 ? (int?)__value3 : null;
+                Service4 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<string>(serviceProvider, "suffix");
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Low</c>: <c>Sample.High</c>.</summary>
             public readonly struct Link1(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.High.Handle<global::Sample.Ping, int, Link2>(request, new(request), cancellationToken, pipeline.Service0 ?? "?", pipeline.Service1 ?? 5, pipeline.Service2 ?? 7, pipeline.Service3, pipeline.Service4.GetValueOrDefault());
+                    global::Sample.High.Handle<global::Sample.Ping, int, Link2>(request, new(request), cancellationToken, pipeline.Service4 ?? "?", pipeline.Service2 ?? 5, pipeline.Service3 ?? 7, pipeline.Service0, pipeline.Service1.GetValueOrDefault());
             }
 
             /// <summary>The <c>next</c> of <c>Sample.High</c>: the handler.</summary>

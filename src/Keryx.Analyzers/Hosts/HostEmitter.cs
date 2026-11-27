@@ -646,7 +646,7 @@ internal static partial class HostEmitter
             writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
             writer.Line($"private sealed class {contextName}");
             writer.Open();
-            var resolution = new List<string>(request.ContextServices.Count + 1);
+            var resolution = new List<string>(request.ContextServices.Count + 2);
             if (!request.StaticInvoker)
             {
                 writer.Member(plainField: true);
@@ -654,7 +654,7 @@ internal static partial class HostEmitter
                 resolution.Add($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
             }
 
-            WriteServiceFields(writer, request.ContextServices, resolution);
+            WriteServiceFields(writer, request.ContextServices, request.ContextServiceProvider, resolution);
             WriteContextConstructor(writer, contextName, resolution);
         }
         else
@@ -766,7 +766,10 @@ internal static partial class HostEmitter
     ///     call's token, and its injected services read from the context's shared fields.
     /// </summary>
     /// <param name="behavior">The behavior.</param>
-    /// <param name="services">The pipeline context's services, which the behavior's <see cref="PipelineBehaviorModel.ServiceSlots" /> index.</param>
+    /// <param name="services">
+    ///     The pipeline context's services, which the behavior's <see cref="PipelineBehaviorModel.ServiceSlots" /> index; the unkeyed
+    ///     <c>IServiceProvider</c> (<see cref="PipelineBehaviors.ServiceProviderSlot" />) reads the context's <c>ServiceProvider</c> field.
+    /// </param>
     /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
     /// <param name="linkCaptures">What that link takes (<see cref="LinkCaptures" />).</param>
     /// <param name="message">The name of the request or notification.</param>
@@ -794,7 +797,11 @@ internal static partial class HostEmitter
             {
                 case BehaviorParameterRole.Service:
                     var slot = behavior.ServiceSlots[service];
-                    call.Append(ServiceArgument(services[slot], slot, behavior.Services[service]));
+                    call.Append(
+                        slot == PipelineBehaviors.ServiceProviderSlot
+                            ? PipelineName + "." + ServiceProviderField
+                            : ServiceArgument(services[slot], slot, behavior.Services[service])
+                    );
                     service++;
                     break;
                 case BehaviorParameterRole.Message:
@@ -845,17 +852,26 @@ internal static partial class HostEmitter
     /// <summary>What a pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
     private static string Holds(HostHandlerModel handler) =>
         handler.StaticInvoker ? "the injected services of its behaviors"
-        : handler.ContextServices.Count > 0 ? "its handler and the injected services of its behaviors"
+        : handler.ContextServices.Count > 0 || handler.ContextServiceProvider ? "its handler and the injected services of its behaviors"
         : "its handler";
 
     /// <summary>
-    ///     One field per service the pipeline context shares (ADR 0001, Injected parameters), in order of first use: the service type for a
-    ///     service resolved as required, the nullable service type for one whose consumers are all optional (<see langword="null" /> when the
-    ///     service is missing; each call site applies its own default). Adds the statement that resolves each from the scope, once, to
+    ///     The <c>ServiceProvider</c> field when <paramref name="serviceProvider" /> (a behavior method injects the unkeyed
+    ///     <c>IServiceProvider</c>; it is assigned the provider the context is built with, never resolved, OQ-63), then one field per service
+    ///     the pipeline context shares (ADR 0001, Injected parameters), in their stable order (OQ-64): the service type for a service resolved
+    ///     as required, the nullable service type for one whose consumers are all optional (<see langword="null" /> when the service is
+    ///     missing; each call site applies its own default). Adds the statement that assigns or resolves each from the scope, once, to
     ///     <paramref name="resolution" />.
     /// </summary>
-    private static void WriteServiceFields(CodeWriter writer, EquatableArray<ContextServiceModel> services, List<string> resolution)
+    private static void WriteServiceFields(CodeWriter writer, EquatableArray<ContextServiceModel> services, bool serviceProvider, List<string> resolution)
     {
+        if (serviceProvider)
+        {
+            writer.Member(plainField: true);
+            writer.Line($"public readonly {ServiceProvider} {ServiceProviderField};");
+            resolution.Add($"{ServiceProviderField} = {ServiceProviderName};");
+        }
+
         for (var i = 0; i < services.Count; i++)
         {
             var service = services[i];
@@ -884,7 +900,7 @@ internal static partial class HostEmitter
                     service.Required ? null : "null",
                     service.IsValueType,
                     service.NullableUnderlyingType,
-                    service.IsServiceProvider
+                    false
                 ),
                 slot
             );
@@ -947,14 +963,19 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     Whether a request or stream pipeline has a context (created once per scope): it resolves something, its handler (the invoker is
-    ///     not static) or an injected service of its behaviors (ADR 0001, Generated pipeline shape). A pipeline with nothing to resolve has
-    ///     none: without behaviors it calls the static invoker directly, with behaviors it calls the outermost behavior method directly and
-    ///     its links, nested in a static class, take only the request.
+    ///     not static) or an injected service of its behaviors, or it holds the scope's provider for a behavior that injects the unkeyed
+    ///     <c>IServiceProvider</c> (ADR 0001, Generated pipeline shape; OQ-63). A pipeline with nothing to resolve or hold has none: without
+    ///     behaviors it calls the static invoker directly, with behaviors it calls the outermost behavior method directly and its links,
+    ///     nested in a static class, take only the request.
     /// </summary>
-    private static bool HasContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || pipeline.Handler.ContextServices.Count > 0;
+    private static bool HasContext(HostPipeline pipeline) =>
+        !pipeline.Handler.StaticInvoker || pipeline.Handler.ContextServices.Count > 0 || pipeline.Handler.ContextServiceProvider;
 
     /// <summary>The label of the switch section of jump-table position <paramref name="position" />.</summary>
     private static string Case(int position) => "case " + Digits(position) + ":";
+
+    /// <summary>The context field that holds the scope's provider for the behavior methods that inject the unkeyed <c>IServiceProvider</c> (OQ-63).</summary>
+    private const string ServiceProviderField = "ServiceProvider";
 
     /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
     private static string ServiceField(int slot) => "Service" + Digits(slot);

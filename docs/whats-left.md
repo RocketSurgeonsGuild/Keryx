@@ -1,8 +1,8 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 26
-(2026-11-27).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22, 23 to 26 and 27
+and 28 (2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -50,7 +50,8 @@ One commit per step, each with build and tests green:
   stream requests and notifications at and above the threshold, at run time, in the generated syntax and in the compiled IL.
 - **eca51b5, shared services:** a pipeline context (request, stream, publish) has one `ServiceN` field per distinct service (type and
   key) its behavior methods inject, computed in the model; a transient shared by several behavior methods of a pipeline is one instance
-  per scope and pipeline.
+  per scope and pipeline. (Decisions 27 and 28, below, moved the unkeyed `IServiceProvider` to its own field and numbered the services
+  by type and key.)
 - **1fddbdd, generated code with `SyntaxFactory`:** `HandlerEmitter` and `HostEmitter` built their output with Roslyn's `SyntaxFactory`
   through `GeneratedSyntax` (one `NormalizeWhitespace` per compilation unit, a layout pass and the header; 38c8f74 below built the
   whitespace in, and 100bfe1 replaced the `SyntaxFactory` emitters with text emitters that write the same bytes); links are one
@@ -148,6 +149,23 @@ Each code change is one commit, with build and tests green:
   not investigated now. The docs sweep after the text emitters and OQ-70 recorded it and checked the ADR, the brief, open-questions.md,
   CONTEXT.md, the README, the samples' READMEs and the analyzer release notes against the code.
 
+## Done: owner decisions 27 and 28 (2026-11-27)
+
+- **A fixed `IServiceProvider` field (decision 27 for OQ-63):** a pipeline context (request, stream, publish) whose behavior methods inject
+  the unkeyed `IServiceProvider` holds it in a dedicated `ServiceProvider` field, assigned the provider the context is built with and
+  never resolved, outside the numbered `ServiceN` fields; a context without such a behavior has no field, and a behavior that injects
+  only the provider gives a static-handler pipeline a context. The model carries it as `ContextServiceProvider` (and slot
+  `PipelineBehaviors.ServiceProviderSlot`); `ContextServiceModel` lost `IsServiceProvider`. A handler's injected `IServiceProvider` was
+  already the provider directly (its factory passes `serviceProvider`); a keyed `IServiceProvider` is an ordinary keyed service and
+  `IServiceScope` has no special case. Tests: a snapshot of request, stream and publish pipelines whose two behaviors each inject the
+  provider (required and optional), a keyed provider beside the unkeyed one, a handler that injects both, and at run time every behavior
+  and handler provider is the scope's; the allocation test's injecting behaviors also take the provider and still allocate 0 B.
+- **Stable service numbering (decision 28 for OQ-64):** `PipelineBehaviors.ShareServices` numbers a context's services by an ordinal sort
+  of (service type, then key: none first, then the key's literal text) instead of first use, so any edit that keeps the set keeps every
+  name. `SharedServiceTests` replaces the renumbering test with one that asserts unchanged `ContextServices` and fields for a
+  set-preserving reorder, and adds a test of the order itself. Snapshots that changed: the keyed `IClock` keys (`"earth"` before
+  `"utc"`), the all-optional consumers (sorted by type) and the required-consumer one (the provider moved to `ServiceProvider`).
+
 ## Done: owner decisions 25 and 26 (2026-11-27)
 
 - **`KeryxHost` only where a host can run (decision 25 for OQ-61, decision 26 for OQ-62):** `build/Keryx.targets` (which
@@ -177,17 +195,12 @@ Each code change is one commit, with build and tests green:
 
 ## Decisions for the owner
 
-Two questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-63 and OQ-64 from the second rework.
-The code follows each one's **Interim** line:
-
-- **OQ-63:** a behavior's unkeyed `IServiceProvider` is held in a shared `ServiceN` field of the context; keep that, or give the context a
-  fixed provider field?
-- **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
-  them; number by a stable sort of (type, key) instead?
+No question is open ([open-questions.md](adr/open-questions.md), **Open**).
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
 (decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
-(decision 25) and OQ-62 (decision 26) are decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
+(decision 25), OQ-62 (decision 26), OQ-63 (decision 27: a fixed `ServiceProvider` field) and OQ-64 (decision 28: stable service
+numbering) are decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
 
 ## Gates and checks
 
@@ -220,7 +233,6 @@ OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), 
 
 ## Before a first release
 
-- Decide OQ-63 and OQ-64.
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

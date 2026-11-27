@@ -100,29 +100,29 @@ namespace Sample
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
                 Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
-                Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, "utc");
-                Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, "earth");
+                Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, "earth");
+                Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, "utc");
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Local</c>: <c>Sample.Utc</c>.</summary>
             public readonly struct Link1(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.Utc.Handle<global::Sample.Ping, int, Link2>(request, new(pipeline, request), cancellationToken, pipeline.Service1);
+                    global::Sample.Utc.Handle<global::Sample.Ping, int, Link2>(request, new(pipeline, request), cancellationToken, pipeline.Service2);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Utc</c>: <c>Sample.UtcAgain</c>.</summary>
             public readonly struct Link2(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.UtcAgain.Handle<global::Sample.Ping, int, Link3>(request, new(pipeline, request), cancellationToken, pipeline.Service1);
+                    global::Sample.UtcAgain.Handle<global::Sample.Ping, int, Link3>(request, new(pipeline, request), cancellationToken, pipeline.Service2);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.UtcAgain</c>: <c>Sample.Earth</c>.</summary>
             public readonly struct Link3(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.Earth.Handle<global::Sample.Ping, int, Link4>(request, new(request), cancellationToken, pipeline.Service2);
+                    global::Sample.Earth.Handle<global::Sample.Ping, int, Link4>(request, new(request), cancellationToken, pipeline.Service1);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Earth</c>: the handler.</summary>

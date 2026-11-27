@@ -79,7 +79,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<int> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = global::System.Threading.Volatile.Read(ref __pipeline0) ?? __CreatePipeline0();
-            return global::Sample.Maybe.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.Service3);
+            return global::Sample.Maybe.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.ServiceProvider);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -93,31 +93,31 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Ping</c>: the injected services of its behaviors, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
+            public readonly global::System.IServiceProvider ServiceProvider;
             public readonly global::Sample.IClock Service0;
             public readonly int Service1;
             public readonly int? Service2;
-            public readonly global::System.IServiceProvider Service3;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
+                ServiceProvider = serviceProvider;
                 Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
                 Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<int>(serviceProvider);
                 Service2 = (int?)global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(serviceProvider, typeof(int?));
-                Service3 = serviceProvider;
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Maybe</c>: <c>Sample.Must</c>.</summary>
             public readonly struct Link1(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.Must.Handle<global::Sample.Ping, int, Link2>(request, new(pipeline, request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.Service3);
+                    global::Sample.Must.Handle<global::Sample.Ping, int, Link2>(request, new(pipeline, request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.ServiceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Must</c>: <c>Sample.MaybeAgain</c>.</summary>
             public readonly struct Link2(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<int>
             {
                 public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.MaybeAgain.Handle<global::Sample.Ping, int, Link3>(request, new(request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.Service3);
+                    global::Sample.MaybeAgain.Handle<global::Sample.Ping, int, Link3>(request, new(request), cancellationToken, pipeline.Service0, pipeline.Service1, pipeline.Service2, pipeline.ServiceProvider);
             }
 
             /// <summary>The <c>next</c> of <c>Sample.MaybeAgain</c>: the handler.</summary>

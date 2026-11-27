@@ -31,8 +31,13 @@ namespace Keryx.Analyzers.Hosts;
 /// </param>
 /// <param name="ContextServices">
 ///     The distinct services the behavior methods of a request or stream handler's pipeline inject, which its pipeline context resolves once
-///     each (<see cref="ContextServiceModel" />); the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. Empty for a
-///     notification handler.
+///     each (<see cref="ContextServiceModel" />), in the stable order of <see cref="PipelineBehaviors.CompareServices" />; the behaviors'
+///     <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. The unkeyed <c>IServiceProvider</c> is not among them
+///     (<paramref name="ContextServiceProvider" />). Empty for a notification handler.
+/// </param>
+/// <param name="ContextServiceProvider">
+///     Whether a behavior method of the pipeline injects the unkeyed <c>IServiceProvider</c>, so its pipeline context holds the provider it
+///     is built with in a <c>ServiceProvider</c> field (OQ-63). <see langword="false" /> for a notification handler.
 /// </param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
@@ -46,7 +51,8 @@ internal sealed record HostHandlerModel(
     EquatableArray<string> UsedExclusions,
     int Order,
     EquatableArray<HostNotificationModel> Deliveries = default,
-    EquatableArray<ContextServiceModel> ContextServices = default
+    EquatableArray<ContextServiceModel> ContextServices = default,
+    bool ContextServiceProvider = false
 );
 
 /// <summary>
@@ -66,7 +72,13 @@ internal sealed record HostHandlerModel(
 /// <param name="Location">Its first declaration when it is in source, for KRX037.</param>
 /// <param name="ContextServices">
 ///     The distinct services its notification behaviors inject, which its publish pipeline context resolves once each
-///     (<see cref="ContextServiceModel" />); the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it.
+///     (<see cref="ContextServiceModel" />), in the stable order of <see cref="PipelineBehaviors.CompareServices" />; the behaviors'
+///     <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. The unkeyed <c>IServiceProvider</c> is not among them
+///     (<paramref name="ContextServiceProvider" />).
+/// </param>
+/// <param name="ContextServiceProvider">
+///     Whether a notification behavior injects the unkeyed <c>IServiceProvider</c>, so its publish pipeline context holds the provider it is
+///     built with in a <c>ServiceProvider</c> field (OQ-63).
 /// </param>
 internal sealed record HostNotificationModel(
     string Type,
@@ -77,7 +89,8 @@ internal sealed record HostNotificationModel(
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
     LocationInfo? Location,
-    EquatableArray<ContextServiceModel> ContextServices = default
+    EquatableArray<ContextServiceModel> ContextServices = default,
+    bool ContextServiceProvider = false
 );
 
 /// <summary>
@@ -106,7 +119,8 @@ internal sealed record HostNotificationModel(
 /// </param>
 /// <param name="ServiceSlots">
 ///     For each of <paramref name="Services" />, the index of the pipeline context service it receives (the pipeline's
-///     <c>ContextServices</c>); set by <see cref="PipelineBehaviors.ShareServices" />.
+///     <c>ContextServices</c>), or <see cref="PipelineBehaviors.ServiceProviderSlot" /> for the unkeyed <c>IServiceProvider</c>, which
+///     receives the context's <c>ServiceProvider</c> field; set by <see cref="PipelineBehaviors.ShareServices" />.
 /// </param>
 internal sealed record PipelineBehaviorModel(
     string Class,
@@ -166,7 +180,10 @@ internal sealed record ExclusionModel(string Operand, string Display, LocationIn
 ///     For a <c>Nullable&lt;T&gt;</c> parameter, <c>T</c>: a type pattern cannot name a nullable type, so an optional one is matched on
 ///     <c>T</c>.
 /// </param>
-/// <param name="IsServiceProvider">Whether the parameter is <c>IServiceProvider</c>, which receives the scope's provider itself.</param>
+/// <param name="IsServiceProvider">
+///     Whether the parameter is <c>IServiceProvider</c>. Unkeyed, it receives the scope's provider itself, never resolved (OQ-63); keyed, it
+///     is an ordinary keyed service.
+/// </param>
 internal sealed record ServiceParameterModel(
     string Type,
     string ServiceType,
@@ -182,37 +199,27 @@ internal sealed record ServiceParameterModel(
 ///     identified by (<paramref name="ServiceType" />, <paramref name="ServiceKey" />). When any of its consumers is required it is resolved
 ///     as required (<c>GetRequiredService</c>/<c>GetRequiredKeyedService</c>) and every consumer receives that instance; when all of them
 ///     are optional it is resolved once with <c>GetService</c>/<c>GetKeyedService</c> into a nullable field, and each call site applies its
-///     own parameter's default. The scope's <c>IServiceProvider</c> (unkeyed) is never resolved: it is the provider the context is built
-///     with, so it counts as required.
+///     own parameter's default. The unkeyed <c>IServiceProvider</c> is not one of them: the context holds the provider it is built with in
+///     its own <c>ServiceProvider</c> field (OQ-63). A keyed <c>IServiceProvider</c> is an ordinary keyed service.
 /// </summary>
 /// <param name="ServiceType">The service type, fully qualified, without a top-level nullable reference annotation.</param>
 /// <param name="ServiceKey">The <c>[FromKeyedServices]</c> key as a C# expression, or <see langword="null" />.</param>
 /// <param name="IsValueType">Whether the service type is a value type, including <c>Nullable&lt;T&gt;</c>.</param>
 /// <param name="NullableUnderlyingType">For a <c>Nullable&lt;T&gt;</c> service type, <c>T</c>.</param>
-/// <param name="IsServiceProvider">Whether it is <c>IServiceProvider</c>.</param>
 /// <param name="Required">Whether at least one consumer is required (has no default value), so the service is resolved as required.</param>
 internal sealed record ContextServiceModel(
     string ServiceType,
     string? ServiceKey,
     bool IsValueType,
     string? NullableUnderlyingType,
-    bool IsServiceProvider,
     bool Required
 )
 {
     /// <summary>
-    ///     The service a parameter injects, as a pipeline context shares it: required unless the parameter has a default value (the scope's
-    ///     <c>IServiceProvider</c> is always available).
+    ///     The service a parameter injects, as a pipeline context shares it: required unless the parameter has a default value.
     /// </summary>
     public static ContextServiceModel For(ServiceParameterModel parameter) =>
-        new(
-            parameter.ServiceType,
-            parameter.ServiceKey,
-            parameter.IsValueType,
-            parameter.NullableUnderlyingType,
-            parameter.IsServiceProvider,
-            parameter.DefaultValue is null || parameter is { IsServiceProvider: true, ServiceKey: null }
-        );
+        new(parameter.ServiceType, parameter.ServiceKey, parameter.IsValueType, parameter.NullableUnderlyingType, parameter.DefaultValue is null);
 
     /// <summary>Whether a parameter injects this service: the same service type and key.</summary>
     public bool Matches(ServiceParameterModel parameter) =>

@@ -258,7 +258,7 @@ internal sealed class BehaviorCatalog
             }
         }
 
-        var (behaviors, services, usedExclusions) = PipelineBehaviors.Compose(
+        var (behaviors, services, usedExclusions, serviceProvider) = PipelineBehaviors.Compose(
             attached,
             AssemblyBehaviorsOf(type.ContainingAssembly),
             new(BehaviorKind.Notification, type, null),
@@ -275,7 +275,8 @@ internal sealed class BehaviorCatalog
             behaviors,
             usedExclusions,
             LocationInfo.From(type.Locations.FirstOrDefault()),
-            services
+            services,
+            serviceProvider
         );
     }
 
@@ -357,16 +358,21 @@ internal sealed class BehaviorCatalog
 
 /// <summary>The behaviors of one pipeline, the services its context shares among them, and the exclusions that removed behaviors from it.</summary>
 /// <param name="Behaviors">The behaviors, in no particular order (ordinal by class), each with its <see cref="PipelineBehaviorModel.ServiceSlots" />.</param>
-/// <param name="Services">The distinct services the behaviors inject, in order of first use in the sorted pipeline.</param>
+/// <param name="Services">
+///     The distinct services the behaviors inject, without the unkeyed <c>IServiceProvider</c>, in the stable order of
+///     <see cref="PipelineBehaviors.CompareServices" />.
+/// </param>
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior.</param>
+/// <param name="ServiceProvider">Whether a behavior injects the unkeyed <c>IServiceProvider</c>, which the context holds in its own field.</param>
 internal sealed record ComposedBehaviors(
     ImmutableArray<PipelineBehaviorModel> Behaviors,
     ImmutableArray<ContextServiceModel> Services,
-    ImmutableArray<string> UsedExclusions
+    ImmutableArray<string> UsedExclusions,
+    bool ServiceProvider
 )
 {
     /// <summary>A pipeline without behaviors.</summary>
-    public static ComposedBehaviors Empty { get; } = new([], [], []);
+    public static ComposedBehaviors Empty { get; } = new([], [], [], false);
 }
 
 /// <summary>
@@ -428,8 +434,8 @@ internal static class PipelineBehaviors
             }
         }
 
-        var (shared, services) = ShareServices([.. behaviors.Values]);
-        return new(shared, services, [.. usedExclusions]);
+        var (shared, services, serviceProvider) = ShareServices([.. behaviors.Values]);
+        return new(shared, services, [.. usedExclusions], serviceProvider);
 
         void Apply(ITypeSymbol type, Action<ITypeSymbol, string>? unfit)
         {
@@ -475,44 +481,72 @@ internal static class PipelineBehaviors
     }
 
     /// <summary>
+    ///     The slot (<see cref="PipelineBehaviorModel.ServiceSlots" />) of an injected parameter that receives the unkeyed
+    ///     <c>IServiceProvider</c>: the pipeline context's own <c>ServiceProvider</c> field, outside the numbered services (OQ-63).
+    /// </summary>
+    public const int ServiceProviderSlot = -1;
+
+    /// <summary>
     ///     Gives a pipeline's injected services one pipeline context field each (ADR 0001, Injected parameters): the distinct
-    ///     (service type, key) pairs the behavior methods inject, in order of first use in the sorted pipeline (outermost behavior first,
-    ///     then declared parameter order), and for each behavior the index of the service each of its injected parameters receives. A
-    ///     service with at least one required consumer is resolved as required for all of them; one whose consumers are all optional is
-    ///     resolved once as optional, and each call site applies its own default. The behaviors keep their order.
+    ///     (service type, key) pairs the behavior methods inject, numbered by a stable ordinal sort (<see cref="CompareServices" />) so that
+    ///     any edit that keeps the set keeps every number (OQ-64), and for each behavior the index of the service each of its injected
+    ///     parameters receives. A service with at least one required consumer is resolved as required for all of them; one whose consumers
+    ///     are all optional is resolved once as optional, and each call site applies its own default. The unkeyed <c>IServiceProvider</c> is
+    ///     not a numbered service: its parameters get <see cref="ServiceProviderSlot" /> and the context holds the provider it is built with
+    ///     (OQ-63); a keyed <c>IServiceProvider</c> is an ordinary keyed service. The behaviors keep their order.
     /// </summary>
     /// <param name="behaviors">The pipeline's behaviors, in any order.</param>
-    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<ContextServiceModel> Services) ShareServices(
+    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<ContextServiceModel> Services, bool ServiceProvider) ShareServices(
         ImmutableArray<PipelineBehaviorModel> behaviors
     )
     {
-        var services = new List<ContextServiceModel>();
-        var slots = new Dictionary<string, ImmutableArray<int>>(StringComparer.Ordinal);
-        foreach (var behavior in BehaviorOrdering.Sort(behaviors, static b => b.Key))
+        var distinct = new List<ContextServiceModel>();
+        var serviceProvider = false;
+        foreach (var behavior in behaviors)
         {
-            var behaviorSlots = ImmutableArray.CreateBuilder<int>(behavior.Services.Count);
             foreach (var parameter in behavior.Services)
             {
-                var slot = services.FindIndex(s => s.Matches(parameter));
+                if (IsScopeProvider(parameter))
+                {
+                    serviceProvider = true;
+                    continue;
+                }
+
                 var service = ContextServiceModel.For(parameter);
-                if (slot < 0)
+                var index = distinct.FindIndex(s => s.Matches(parameter));
+                if (index < 0)
                 {
-                    slot = services.Count;
-                    services.Add(service);
+                    distinct.Add(service);
                 }
-                else if (service.Required && !services[slot].Required)
+                else if (service.Required && !distinct[index].Required)
                 {
-                    services[slot] = services[slot] with { Required = true };
+                    distinct[index] = distinct[index] with { Required = true };
                 }
-
-                behaviorSlots.Add(slot);
             }
-
-            slots[behavior.Identity] = behaviorSlots.MoveToImmutable();
         }
 
-        return ([.. behaviors.Select(b => b with { ServiceSlots = slots[b.Identity] })], [.. services]);
+        distinct.Sort(CompareServices);
+        return ([.. behaviors.Select(b => b with { ServiceSlots = b.Services.Select(Slot).ToImmutableArray() })], [.. distinct], serviceProvider);
+
+        int Slot(ServiceParameterModel parameter) =>
+            IsScopeProvider(parameter) ? ServiceProviderSlot : distinct.FindIndex(s => s.Matches(parameter));
     }
+
+    /// <summary>
+    ///     The order of a pipeline context's numbered services (OQ-64): the service type ordinally (fully qualified, without a top-level
+    ///     nullable reference annotation), then the key: no key first, then the key's C# literal text ordinally.
+    /// </summary>
+    internal static int CompareServices(ContextServiceModel x, ContextServiceModel y)
+    {
+        var byType = string.CompareOrdinal(x.ServiceType, y.ServiceType);
+        return byType != 0 ? byType
+            : x.ServiceKey is null ? y.ServiceKey is null ? 0 : -1
+            : y.ServiceKey is null ? 1
+            : string.CompareOrdinal(x.ServiceKey, y.ServiceKey);
+    }
+
+    /// <summary>Whether a parameter receives the scope's own provider: the unkeyed <c>IServiceProvider</c>.</summary>
+    private static bool IsScopeProvider(ServiceParameterModel parameter) => parameter is { IsServiceProvider: true, ServiceKey: null };
 
     /// <summary>
     ///     The target of a request or stream request handler, or <see langword="null" /> for a notification handler, which has no behaviors of

@@ -152,7 +152,7 @@ is [KRX023](#krx023). Notifications may be handled in any assembly.
 | `T`                                       | `GetRequiredService<T>()`                                                           |
 | `T` with a default value                  | `GetService<T>()`, falling back to the default                                      |
 | `[FromKeyedServices("key")] T`            | `GetRequiredKeyedService<T>("key")`; the key is a constant ([KRX018](#krx018))      |
-| `IServiceProvider`                        | the scope's provider                                                                |
+| `IServiceProvider`                        | the scope's provider itself, never resolved (keyed: an ordinary keyed service)      |
 | `IMediator`, `ISender`, `IPublisher`      | the scoped mediator                                                                 |
 | `CancellationToken`                       | the token of the call                                                               |
 
@@ -232,7 +232,10 @@ pipeline context, so no behavior instance is ever created (a `[StreamBehavior]` 
 call; see [Streaming](#streaming)). The context holds each service once, however many behavior methods of the pipeline inject it (same
 type and same key; a keyed and an unkeyed `IClock` are two services): it is resolved as required when any of them requires it, and
 otherwise once as optional, with each method's own default applied when it is missing. So **a transient service that several behaviors
-of one pipeline inject is one instance per scope and pipeline**, shared by those behaviors, not one per behavior. A method is either:
+of one pipeline inject is one instance per scope and pipeline**, shared by those behaviors, not one per behavior. An unkeyed
+`IServiceProvider` is the scope's provider itself, which the context holds in its own field only when a behavior method injects it. The
+context's fields are named by service type and key, not by where they are first used, so reordering behaviors or their parameters
+does not rename them. A method is either:
 
 - **open:** generic in the message, its response (or item) and `TNext`, with the message type parameter constrained to the kind's
   message interface (table above) or to an interface that derives from it: `where TRequest : ICommand<TResponse>` with

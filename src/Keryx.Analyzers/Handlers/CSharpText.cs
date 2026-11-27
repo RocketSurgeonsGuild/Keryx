@@ -47,9 +47,23 @@ internal static class CSharpText
             TypedConstantKind.Type when constant.Value is ITypeSymbol type => $"typeof({TypeOf(type)})",
             TypedConstantKind.Enum when constant.Type is { } enumType => Value(constant.Value, enumType),
             TypedConstantKind.Primitive when constant.Value is null => "null",
-            TypedConstantKind.Primitive when constant.Type is { } type => Value(constant.Value, type),
+            TypedConstantKind.Primitive when constant.Type is { } type => TypedPrimitive(constant.Value, type),
             TypedConstantKind.Error or TypedConstantKind.Array => null,
             _ => null,
+        };
+
+    /// <summary>
+    ///     A primitive constant whose text keeps its type when it is boxed (a service key is compared with <c>object.Equals</c>): a
+    ///     <c>byte</c>, <c>sbyte</c>, <c>short</c> or <c>ushort</c> literal would otherwise be an <c>int</c>, so it is cast.
+    /// </summary>
+    private static string TypedPrimitive(object value, ITypeSymbol type) =>
+        type.SpecialType switch
+        {
+            SpecialType.System_Byte => $"(byte){Primitive(value)}",
+            SpecialType.System_SByte => $"(sbyte){Primitive(value)}",
+            SpecialType.System_Int16 => $"(short){Primitive(value)}",
+            SpecialType.System_UInt16 => $"(ushort){Primitive(value)}",
+            _ => Value(value, type),
         };
 
     /// <summary>

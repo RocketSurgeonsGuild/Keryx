@@ -49,6 +49,10 @@ stream request handler is the new error KRX039, which leaves the handler in plac
 included, and a test swaps what it does through the services it injects (open-questions OQ-59, decided); and the host no longer reports
 KRX005 across assemblies, which generated manifests cannot reach since KRX023, so KRX005 is the analyzer's rule within one assembly
 (open-questions OQ-60, decided).
+Amended a ninth time 2026-11-27 (owner decisions 27 and 28): a pipeline context holds the unkeyed `IServiceProvider` its behavior
+methods inject in a dedicated `ServiceProvider` field, the provider it is built with, outside its numbered services, as a handler holds
+its own (open-questions OQ-63, decided); and those services are numbered by a stable ordinal sort of (service type, key), so any edit
+that keeps the set of services keeps every field name (open-questions OQ-64, decided).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -393,7 +397,7 @@ handler and of a behavior method.
 | plain `T`                            | `sp.GetRequiredService<T>()`                                                                                                                                                                                                                   |
 | `T` with a default value             | reference type: `sp.GetService<T>() ?? <default>`; value type (including `Nullable<T>`): `sp.GetService(typeof(T)) is T __v ? __v : <default>` (no reflection, no allocation). A nullable annotation alone does not make a parameter optional. |
 | `[FromKeyedServices(key)] T`         | `sp.GetRequiredKeyedService<T>(key)`; the key must be a compile-time constant (KRX018). The parameterless (`InheritKey`) form is KRX018. With a default value, the same optional forms as above using `GetKeyedService`.                       |
-| `IServiceProvider`                   | the scope's provider (counts as an injected parameter)                                                                                                                                                                                         |
+| `IServiceProvider`                   | the scope's provider itself, never resolved (counts as an injected parameter; in a pipeline context, the `ServiceProvider` field). `[FromKeyedServices(key)] IServiceProvider` is an ordinary keyed service.                                   |
 | `IMediator`, `ISender`, `IPublisher` | the scoped mediator (no cycle: handlers are resolved lazily)                                                                                                                                                                                   |
 | `CancellationToken`                  | the call's token, never injected                                                                                                                                                                                                               |
 
@@ -413,13 +417,23 @@ type, or two keys, stay separate. When the consumers of a service differ:
   `Nullable<T>` for a value type, matched with the type pattern above), and each call site applies its own parameter's default:
   `pipeline.Service0 ?? <default>`.
 
-The fields are named `Service0`, `Service1`, ... in order of first use (the pipeline's behaviors outermost first, each one's injected
-parameters in declared order). An edit that changes neither the set of services nor the order in which they are first used keeps the
-names (adding a behavior that injects only services the pipeline already has, in an order that does not move any first use, for
-example); an edit that keeps the set but changes that order renumbers them (open-questions OQ-64). The model computes
-the shared services (each behavior's parameters refer to a service by index); the emitter only writes them out. A behavior's unkeyed
-`IServiceProvider` is the scope's provider the context is built with, held in a field like any shared service and never resolved
-(open-questions OQ-63).
+The fields are named `Service0`, `Service1`, ... by a stable ordinal sort of the services (decided 2026-11-27, OQ-64): by service type
+(its fully qualified name, without a top-level nullable annotation), then by key, no key first and then the key's C# literal text.
+That text keeps the key's type: a `byte`, `sbyte`, `short` or `ushort` key is written with a cast (`(byte)1`), because MS.DI compares
+keys with `object.Equals` and `(byte)1` and `1` are different keys (the same text goes into a handler's `[FromKeyedServices]`).
+**Any edit that keeps the set of services keeps every name**, whatever the order of the behaviors or of their parameters (adding a
+behavior that injects only services the pipeline already has, in any order, for example); so `Service0` is not necessarily the outermost
+behavior's first service. The model computes the shared services (each behavior's parameters refer to a service by index); the emitter
+only writes them out.
+
+**`IServiceProvider` is not a numbered service** (decided 2026-11-27, OQ-63). A behavior method's unkeyed `IServiceProvider`, required or
+optional, receives the scope's provider the context is built with: a pipeline context whose behavior methods inject it holds it in a
+dedicated `ServiceProvider` field, assigned from its constructor's provider and never resolved, outside the `ServiceN` fields, and shared by
+every behavior method that injects it; a context whose behaviors do not inject it has no such field. The rule is shared with handlers:
+wherever a handler's injected `IServiceProvider` is held, it is the provider directly (its generated factory passes the scope's provider
+to the constructor, and the handler's own field holds it), never a resolved or numbered service. A keyed `IServiceProvider`
+(`[FromKeyedServices(key)] IServiceProvider`) is an ordinary keyed service. `IServiceScope` has no special case: it is not injectable
+through DI, and an injected one is an ordinary resolved service.
 
 **Consequence:** a transient service that several behavior methods of one pipeline inject is **one instance per pipeline context**, that
 is per scope and pipeline, not one per behavior method. Behaviors that need separate instances inject a factory (or
@@ -735,11 +749,13 @@ For each pipeline the host emits:
 
 - a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
   the notification type's handlers whose invokers are not static, and the publish strategy that runs them) and each distinct service the
-  pipeline's behavior methods inject, once (one `ServiceN` field per service type and key, shared by every behavior method that injects
-  it; see Injected parameters), resolved in its constructor. Only a pipeline that resolves something has one (decided 2026-11-26, OQ-65;
+  pipeline's behavior methods inject, once (one `ServiceN` field per service type and key, numbered in a stable order and shared by every
+  behavior method that injects it; see Injected parameters), resolved in its constructor; when a behavior method injects the unkeyed
+  `IServiceProvider`, also a `ServiceProvider` field that holds the provider the context is built with (OQ-63). Fields are declared in that
+  order: handler(s), `ServiceProvider`, then `Service0`, `Service1`, .... Only a pipeline that resolves or holds something has one (decided 2026-11-26, OQ-65;
   for publish pipelines with handlers, 2026-11-27, OQ-70): a request or stream pipeline whose handler's invoker is static and whose
   behaviors inject nothing has no context, nor does a publish pipeline whose handlers' invokers are all static (or that has no handlers)
-  and whose behaviors inject nothing. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field and no
+  and whose behaviors inject nothing. A behavior that injects only the unkeyed `IServiceProvider` gives its pipeline a context. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field and no
   `__CreatePipelineN`: without behaviors it calls the static invoker directly, with behaviors its entry calls the outermost behavior
   method directly and its links are nested in a `private static class` of the same name (`__PipelineN`, `__StreamPipelineN`,
   `__NotificationN`). A publish pipeline without a context that has handlers keeps its publish strategy in that static class, as static

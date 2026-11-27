@@ -39,7 +39,8 @@ public class PipelineAllocationTests : HostTest
     }
 
     /// <summary>
-    ///     A host with <paramref name="depth" /> behaviors on each request: pass-through behaviors that inject a service for <c>Ping</c>
+    ///     A host with <paramref name="depth" /> behaviors on each request: pass-through behaviors that inject a service and the scope's
+    ///     <c>IServiceProvider</c> (the context's <c>ServiceProvider</c> field, OQ-63) for <c>Ping</c>
     ///     (reference response, injected handler), <c>Add</c> (value response, static handler) and the struct <c>Tick</c>; <c>async</c> behaviors that complete synchronously
     ///     for <c>Echo</c>; pass-through behaviors that inject nothing for <c>Hop</c> (static handler: with <c>Echo</c>, a pipeline without a
     ///     context); and <c>Touch</c> (<c>IRequest</c>, void handler).
@@ -56,11 +57,12 @@ public class PipelineAllocationTests : HostTest
                   [BehaviorOrder(Phase.Default, Order = {{k}})]
                   public static class Pass{{k}}
                   {
-                      public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, object service, CancellationToken cancellationToken)
+                      public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, object service, IServiceProvider services, CancellationToken cancellationToken)
                           where TRequest : IRequest<TResponse>
                           where TNext : struct, INext<TResponse>
                       {
                           GC.KeepAlive(service);
+                          GC.KeepAlive(services);
                           return next.InvokeAsync(cancellationToken);
                       }
                   }
