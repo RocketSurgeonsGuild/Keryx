@@ -15,39 +15,6 @@ namespace Sample
     internal sealed partial class KeryxMediator : global::Keryx.IMediator
     {
         private readonly global::System.IServiceProvider __serviceProvider;
-        private __Notification0? __notification0;
-        private __Notification1? __notification1;
-        private __Notification2? __notification2;
-        private __Notification3? __notification3;
-        private __Notification4? __notification4;
-        private __Notification5? __notification5;
-        private __Notification6? __notification6;
-        private __Notification7? __notification7;
-        private __Notification8? __notification8;
-        private __Notification9? __notification9;
-        private __Notification10? __notification10;
-        private __Notification11? __notification11;
-        private __Notification12? __notification12;
-        private __Notification13? __notification13;
-        private __Notification14? __notification14;
-        private __Notification15? __notification15;
-        private __Notification16? __notification16;
-        private __Notification17? __notification17;
-        private __Notification18? __notification18;
-        private __Notification19? __notification19;
-        private __Notification20? __notification20;
-        private __Notification21? __notification21;
-        private __Notification22? __notification22;
-        private __Notification23? __notification23;
-        private __Notification24? __notification24;
-        private __Notification25? __notification25;
-        private __Notification26? __notification26;
-        private __Notification27? __notification27;
-        private __Notification28? __notification28;
-        private __Notification29? __notification29;
-        private __Notification30? __notification30;
-        private __Notification31? __notification31;
-        private __Notification32? __notification32;
 
         /// <summary>Creates the mediator of one scope.</summary>
         /// <param name="serviceProvider">The scope's service provider. Pipeline contexts resolve handlers from it.</param>
@@ -563,349 +530,114 @@ namespace Sample
         private static int __NotificationIndex(global::System.Type requestType) =>
             __notificationTypes.TryGetValue(requestType, out var requestIndex) ? requestIndex : -1;
 
-        private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.N00 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification0) ?? __CreateNotification0();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification0 __CreateNotification0() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification0, new __Notification0(__serviceProvider), null) ?? __notification0!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish1(global::Sample.N01 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification1) ?? __CreateNotification1();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification1 __CreateNotification1() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification1, new __Notification1(__serviceProvider), null) ?? __notification1!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish2(global::Sample.N02 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification2) ?? __CreateNotification2();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification2 __CreateNotification2() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification2, new __Notification2(__serviceProvider), null) ?? __notification2!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish3(global::Sample.N03 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification3) ?? __CreateNotification3();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification3 __CreateNotification3() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification3, new __Notification3(__serviceProvider), null) ?? __notification3!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish4(global::Sample.N04 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification4) ?? __CreateNotification4();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification4 __CreateNotification4() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification4, new __Notification4(__serviceProvider), null) ?? __notification4!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish5(global::Sample.N05 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification5) ?? __CreateNotification5();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification5 __CreateNotification5() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification5, new __Notification5(__serviceProvider), null) ?? __notification5!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish6(global::Sample.N06 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification6) ?? __CreateNotification6();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification6 __CreateNotification6() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification6, new __Notification6(__serviceProvider), null) ?? __notification6!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish7(global::Sample.N07 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification7) ?? __CreateNotification7();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification7 __CreateNotification7() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification7, new __Notification7(__serviceProvider), null) ?? __notification7!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish8(global::Sample.N08 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification8) ?? __CreateNotification8();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification8 __CreateNotification8() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification8, new __Notification8(__serviceProvider), null) ?? __notification8!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish9(global::Sample.N09 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification9) ?? __CreateNotification9();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification9 __CreateNotification9() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification9, new __Notification9(__serviceProvider), null) ?? __notification9!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish10(global::Sample.N10 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification10) ?? __CreateNotification10();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification10 __CreateNotification10() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification10, new __Notification10(__serviceProvider), null) ?? __notification10!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish11(global::Sample.N11 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification11) ?? __CreateNotification11();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification11 __CreateNotification11() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification11, new __Notification11(__serviceProvider), null) ?? __notification11!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish12(global::Sample.N12 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification12) ?? __CreateNotification12();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification12 __CreateNotification12() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification12, new __Notification12(__serviceProvider), null) ?? __notification12!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish13(global::Sample.N13 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification13) ?? __CreateNotification13();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification13 __CreateNotification13() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification13, new __Notification13(__serviceProvider), null) ?? __notification13!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish14(global::Sample.N14 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification14) ?? __CreateNotification14();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification14 __CreateNotification14() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification14, new __Notification14(__serviceProvider), null) ?? __notification14!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish15(global::Sample.N15 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification15) ?? __CreateNotification15();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification15 __CreateNotification15() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification15, new __Notification15(__serviceProvider), null) ?? __notification15!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish16(global::Sample.N16 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification16) ?? __CreateNotification16();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification16 __CreateNotification16() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification16, new __Notification16(__serviceProvider), null) ?? __notification16!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish17(global::Sample.N17 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification17) ?? __CreateNotification17();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification17 __CreateNotification17() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification17, new __Notification17(__serviceProvider), null) ?? __notification17!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish18(global::Sample.N18 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification18) ?? __CreateNotification18();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification18 __CreateNotification18() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification18, new __Notification18(__serviceProvider), null) ?? __notification18!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish19(global::Sample.N19 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification19) ?? __CreateNotification19();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification19 __CreateNotification19() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification19, new __Notification19(__serviceProvider), null) ?? __notification19!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish20(global::Sample.N20 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification20) ?? __CreateNotification20();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification20 __CreateNotification20() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification20, new __Notification20(__serviceProvider), null) ?? __notification20!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish21(global::Sample.N21 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification21) ?? __CreateNotification21();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification21 __CreateNotification21() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification21, new __Notification21(__serviceProvider), null) ?? __notification21!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish22(global::Sample.N22 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification22) ?? __CreateNotification22();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification22 __CreateNotification22() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification22, new __Notification22(__serviceProvider), null) ?? __notification22!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish23(global::Sample.N23 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification23) ?? __CreateNotification23();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification23 __CreateNotification23() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification23, new __Notification23(__serviceProvider), null) ?? __notification23!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish24(global::Sample.N24 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification24) ?? __CreateNotification24();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification24 __CreateNotification24() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification24, new __Notification24(__serviceProvider), null) ?? __notification24!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish25(global::Sample.N25 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification25) ?? __CreateNotification25();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification25 __CreateNotification25() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification25, new __Notification25(__serviceProvider), null) ?? __notification25!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish26(global::Sample.N26 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification26) ?? __CreateNotification26();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification26 __CreateNotification26() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification26, new __Notification26(__serviceProvider), null) ?? __notification26!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish27(global::Sample.N27 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification27) ?? __CreateNotification27();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification27 __CreateNotification27() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification27, new __Notification27(__serviceProvider), null) ?? __notification27!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish28(global::Sample.N28 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification28) ?? __CreateNotification28();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification28 __CreateNotification28() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification28, new __Notification28(__serviceProvider), null) ?? __notification28!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish29(global::Sample.N29 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification29) ?? __CreateNotification29();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification29 __CreateNotification29() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification29, new __Notification29(__serviceProvider), null) ?? __notification29!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish30(global::Sample.N30 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification30) ?? __CreateNotification30();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification30 __CreateNotification30() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification30, new __Notification30(__serviceProvider), null) ?? __notification30!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish31(global::Sample.N31 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification31) ?? __CreateNotification31();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification31 __CreateNotification31() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification31, new __Notification31(__serviceProvider), null) ?? __notification31!;
-
-        private global::System.Threading.Tasks.ValueTask __Publish32(global::Sample.N32 notification, global::System.Threading.CancellationToken cancellationToken)
-        {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification32) ?? __CreateNotification32();
-            return pipeline.RunHandlers(notification, cancellationToken);
-        }
-
-        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification32 __CreateNotification32() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification32, new __Notification32(__serviceProvider), null) ?? __notification32!;
+        private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.N00 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification0.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish1(global::Sample.N01 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification1.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish2(global::Sample.N02 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification2.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish3(global::Sample.N03 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification3.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish4(global::Sample.N04 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification4.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish5(global::Sample.N05 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification5.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish6(global::Sample.N06 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification6.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish7(global::Sample.N07 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification7.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish8(global::Sample.N08 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification8.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish9(global::Sample.N09 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification9.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish10(global::Sample.N10 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification10.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish11(global::Sample.N11 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification11.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish12(global::Sample.N12 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification12.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish13(global::Sample.N13 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification13.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish14(global::Sample.N14 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification14.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish15(global::Sample.N15 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification15.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish16(global::Sample.N16 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification16.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish17(global::Sample.N17 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification17.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish18(global::Sample.N18 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification18.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish19(global::Sample.N19 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification19.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish20(global::Sample.N20 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification20.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish21(global::Sample.N21 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification21.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish22(global::Sample.N22 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification22.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish23(global::Sample.N23 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification23.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish24(global::Sample.N24 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification24.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish25(global::Sample.N25 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification25.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish26(global::Sample.N26 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification26.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish27(global::Sample.N27 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification27.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish28(global::Sample.N28 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification28.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish29(global::Sample.N29 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification29.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish30(global::Sample.N30 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification30.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish31(global::Sample.N31 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification31.RunHandlers(notification, cancellationToken);
+
+        private global::System.Threading.Tasks.ValueTask __Publish32(global::Sample.N32 notification, global::System.Threading.CancellationToken cancellationToken) =>
+            __Notification32.RunHandlers(notification, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType) =>
             new(requestType);
 
-        /// <summary>The publish pipeline context of <c>Sample.N00</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification0
+        /// <summary>The publish strategy of <c>Sample.N00</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification0
         {
-            public __Notification0(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N00 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N00 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -930,7 +662,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N00 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N00 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -948,15 +680,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N01</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification1
+        /// <summary>The publish strategy of <c>Sample.N01</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification1
         {
-            public __Notification1(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N01 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N01 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -981,7 +709,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N01 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N01 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -999,15 +727,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N02</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification2
+        /// <summary>The publish strategy of <c>Sample.N02</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification2
         {
-            public __Notification2(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N02 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N02 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1032,7 +756,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N02 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N02 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1050,15 +774,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N03</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification3
+        /// <summary>The publish strategy of <c>Sample.N03</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification3
         {
-            public __Notification3(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N03 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N03 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1083,7 +803,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N03 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N03 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1101,15 +821,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N04</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification4
+        /// <summary>The publish strategy of <c>Sample.N04</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification4
         {
-            public __Notification4(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N04 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N04 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1134,7 +850,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N04 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N04 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1152,15 +868,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N05</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification5
+        /// <summary>The publish strategy of <c>Sample.N05</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification5
         {
-            public __Notification5(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N05 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N05 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1185,7 +897,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N05 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N05 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1203,15 +915,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N06</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification6
+        /// <summary>The publish strategy of <c>Sample.N06</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification6
         {
-            public __Notification6(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N06 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N06 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1236,7 +944,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N06 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N06 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1254,15 +962,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N07</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification7
+        /// <summary>The publish strategy of <c>Sample.N07</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification7
         {
-            public __Notification7(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N07 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N07 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1287,7 +991,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N07 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N07 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1305,15 +1009,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N08</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification8
+        /// <summary>The publish strategy of <c>Sample.N08</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification8
         {
-            public __Notification8(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N08 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N08 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1338,7 +1038,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N08 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N08 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1356,15 +1056,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N09</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification9
+        /// <summary>The publish strategy of <c>Sample.N09</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification9
         {
-            public __Notification9(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N09 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N09 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1389,7 +1085,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N09 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N09 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1407,15 +1103,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N10</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification10
+        /// <summary>The publish strategy of <c>Sample.N10</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification10
         {
-            public __Notification10(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N10 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N10 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1440,7 +1132,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N10 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N10 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1458,15 +1150,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N11</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification11
+        /// <summary>The publish strategy of <c>Sample.N11</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification11
         {
-            public __Notification11(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N11 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N11 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1491,7 +1179,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N11 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N11 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1509,15 +1197,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N12</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification12
+        /// <summary>The publish strategy of <c>Sample.N12</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification12
         {
-            public __Notification12(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N12 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N12 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1542,7 +1226,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N12 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N12 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1560,15 +1244,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N13</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification13
+        /// <summary>The publish strategy of <c>Sample.N13</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification13
         {
-            public __Notification13(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N13 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N13 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1593,7 +1273,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N13 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N13 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1611,15 +1291,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N14</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification14
+        /// <summary>The publish strategy of <c>Sample.N14</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification14
         {
-            public __Notification14(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N14 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N14 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1644,7 +1320,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N14 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N14 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1662,15 +1338,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N15</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification15
+        /// <summary>The publish strategy of <c>Sample.N15</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification15
         {
-            public __Notification15(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N15 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N15 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1695,7 +1367,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N15 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N15 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1713,15 +1385,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N16</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification16
+        /// <summary>The publish strategy of <c>Sample.N16</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification16
         {
-            public __Notification16(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N16 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N16 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1746,7 +1414,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N16 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N16 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1764,15 +1432,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N17</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification17
+        /// <summary>The publish strategy of <c>Sample.N17</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification17
         {
-            public __Notification17(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N17 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N17 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1797,7 +1461,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N17 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N17 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1815,15 +1479,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N18</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification18
+        /// <summary>The publish strategy of <c>Sample.N18</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification18
         {
-            public __Notification18(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N18 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N18 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1848,7 +1508,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N18 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N18 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1866,15 +1526,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N19</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification19
+        /// <summary>The publish strategy of <c>Sample.N19</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification19
         {
-            public __Notification19(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N19 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N19 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1899,7 +1555,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N19 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N19 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1917,15 +1573,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N20</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification20
+        /// <summary>The publish strategy of <c>Sample.N20</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification20
         {
-            public __Notification20(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N20 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N20 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -1950,7 +1602,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N20 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N20 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -1968,15 +1620,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N21</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification21
+        /// <summary>The publish strategy of <c>Sample.N21</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification21
         {
-            public __Notification21(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N21 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N21 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2001,7 +1649,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N21 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N21 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2019,15 +1667,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N22</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification22
+        /// <summary>The publish strategy of <c>Sample.N22</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification22
         {
-            public __Notification22(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N22 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N22 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2052,7 +1696,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N22 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N22 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2070,15 +1714,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N23</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification23
+        /// <summary>The publish strategy of <c>Sample.N23</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification23
         {
-            public __Notification23(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N23 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N23 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2103,7 +1743,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N23 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N23 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2121,15 +1761,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N24</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification24
+        /// <summary>The publish strategy of <c>Sample.N24</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification24
         {
-            public __Notification24(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N24 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N24 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2154,7 +1790,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N24 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N24 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2172,15 +1808,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N25</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification25
+        /// <summary>The publish strategy of <c>Sample.N25</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification25
         {
-            public __Notification25(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N25 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N25 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2205,7 +1837,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N25 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N25 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2223,15 +1855,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N26</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification26
+        /// <summary>The publish strategy of <c>Sample.N26</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification26
         {
-            public __Notification26(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N26 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N26 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2256,7 +1884,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N26 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N26 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2274,15 +1902,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N27</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification27
+        /// <summary>The publish strategy of <c>Sample.N27</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification27
         {
-            public __Notification27(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N27 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N27 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2307,7 +1931,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N27 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N27 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2325,15 +1949,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N28</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification28
+        /// <summary>The publish strategy of <c>Sample.N28</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification28
         {
-            public __Notification28(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N28 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N28 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2358,7 +1978,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N28 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N28 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2376,15 +1996,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N29</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification29
+        /// <summary>The publish strategy of <c>Sample.N29</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification29
         {
-            public __Notification29(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N29 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N29 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2409,7 +2025,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N29 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N29 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2427,15 +2043,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N30</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification30
+        /// <summary>The publish strategy of <c>Sample.N30</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification30
         {
-            public __Notification30(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N30 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N30 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2460,7 +2072,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N30 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N30 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2478,15 +2090,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N31</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification31
+        /// <summary>The publish strategy of <c>Sample.N31</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification31
         {
-            public __Notification31(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N31 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N31 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2511,7 +2119,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N31 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N31 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {
@@ -2529,15 +2137,11 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.N32</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
-        private sealed class __Notification32
+        /// <summary>The publish strategy of <c>Sample.N32</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>
+        private static class __Notification32
         {
-            public __Notification32(global::System.IServiceProvider serviceProvider)
-            {
-            }
-
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
-            public global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N32 notification, global::System.Threading.CancellationToken cancellationToken)
+            public static global::System.Threading.Tasks.ValueTask RunHandlers(global::Sample.N32 notification, global::System.Threading.CancellationToken cancellationToken)
             {
                 global::System.Collections.Generic.List<global::System.Exception>? exceptions = null;
                 global::System.Threading.Tasks.ValueTask task;
@@ -2562,7 +2166,7 @@ namespace Sample
 
             /// <summary>Awaits the handler at <paramref name="position" />, runs the ones after it in order, then reports every failure.</summary>
             [global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
-            private async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N32 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
+            private static async global::System.Threading.Tasks.ValueTask RunHandlersAsync(global::Sample.N32 notification, global::System.Threading.Tasks.ValueTask pending, int position, global::System.Collections.Generic.List<global::System.Exception>? exceptions, global::System.Threading.CancellationToken cancellationToken)
             {
                 try
                 {

@@ -1,7 +1,7 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 and 21 (2026-11-27).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 21 (2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -82,7 +82,7 @@ open-questions.md, CONTEXT.md and the README:
   context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
   what it reads or passes on (`(pipeline, request)`, `(request)`, or nothing), so the mediator no longer suppresses CS9113 and its header
   pragma is the obsolete-type one alone. OQ-65 is decided; OQ-70 (a publish pipeline with handlers that resolves nothing keeps its
-  context) was raised and is open.
+  context) was raised, and decision 20 below answered it.
 - **38c8f74, generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` builds every token with its spaces and every
   line from the depth its container gives it, so `Render` writes the tree as built: no `NormalizeWhitespace` and no layout pass. Type
   names are parsed once per file and constant attribute lists built once. Every snapshot is byte for byte unchanged (a temporary two-way
@@ -115,7 +115,7 @@ the session scratchpad of the follow-up, `followup-*/`, which is not kept in the
   `SyntaxFactory` and explicit trivia, 58 ms and 33 ms with the text emitters before 1fddbdd, 51 ms and 29 ms with the text emitters of
   decision 21 (raw results in the session scratchpad, `text-before/` and `text-after/`).
 
-## Done: owner decisions 19 and 21 (2026-11-27)
+## Done: owner decisions 19 to 21 (2026-11-27)
 
 - **Text emitters (decision 21 for OQ-71):** every generator writes its source as text through `CodeWriter`
   (`src/Keryx.Analyzers/CodeWriter.cs`, the writer removed in 1fddbdd, recovered and extended with the layout rules the `SyntaxFactory`
@@ -127,11 +127,19 @@ the session scratchpad of the follow-up, `followup-*/`, which is not kept in the
   is built with SyntaxFactory") and OQ-66's implementation are marked superseded.
 - **OQ-69 (decision 19):** accepted with no code change: a closed request base from a referenced assembly is treated, and named in
   KRX003, as abstract; the attribute lookup stays in case a compiler returns it.
+- **Publish pipelines that resolve nothing (decision 20 for OQ-70):** a publish pipeline whose handlers' invokers are all static and
+  whose behaviors inject nothing has no context: its `RunHandlers` (and `RunHandlersAsync`) are static members of
+  `private static class __NotificationN`, called as `__NotificationN.RunHandlers(notification, cancellationToken)`, with no
+  `__notificationN` field and no `__CreateNotificationN`. The notification jump-table snapshots changed accordingly; new snapshots cover
+  such a pipeline sequential and parallel, with and without behaviors, and the allocation tests add six 0 B rows. Measured in interleaved
+  runs: typed `PublishTo1` and `PublishTo5` about 0.3 ns faster (linear and above the threshold), generic `PublishTo5` 3.03 to 2.74 ns,
+  the other generic rows within noise, 0 B everywhere; generic `Publish<__Canon>` keeps its 2 and 35 tail calls and its code shrinks
+  (392 to 300 bytes linear, 2,856 to 1,468 above the threshold). Raw results in the session scratchpad, `oq70-before/` and `oq70-after/`.
 
 ## Decisions for the owner
 
-Seven questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework and OQ-70 from
-its follow-up. The code follows each one's **Interim** line:
+Six questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework. The code follows
+each one's **Interim** line:
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
   referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
@@ -148,10 +156,9 @@ its follow-up. The code follows each one's **Interim** line:
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
-- **OQ-70:** a publish pipeline whose handlers all have static invokers and whose behaviors inject nothing resolves nothing but keeps
-  its context, because the publish strategy is an instance method of it; make the strategy static and drop that context too?
 
-OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19) and OQ-71 (decision 21) are decided and applied.
+OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20) and OQ-71 (decision 21) are
+decided and applied.
 
 ## Gates and checks
 
@@ -182,7 +189,7 @@ OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19) a
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64 and OQ-70.
+- Decide OQ-59 to OQ-64.
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

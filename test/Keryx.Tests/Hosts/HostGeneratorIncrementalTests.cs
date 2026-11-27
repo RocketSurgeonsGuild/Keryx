@@ -175,7 +175,10 @@ public class HostGeneratorIncrementalTests : HostTest
         var result = second.RunResult<HostGenerator>();
 
         await Assert.That(SourceOutputSteps(result).Reasons()).Contains(IncrementalStepRunReason.Modified);
-        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("private __Notification1 __CreateNotification1()");
+        // AuditDomainEvents' invoker is static, so the new publish pipeline resolves nothing and has no context (OQ-70).
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName])
+                    .Contains("global::Sample.AuditDomainEvents.InvokeAsync(notification, cancellationToken)");
+        await Assert.That(second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]).Contains("private static class __Notification1");
     }
 
     [Test]

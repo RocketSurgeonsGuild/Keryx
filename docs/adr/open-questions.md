@@ -21,9 +21,9 @@ are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a s
 (decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, and OQ-68, decided by the owner (decision 18),
-follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised while implementing it and is open. OQ-66, decided by
-the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69 and OQ-71, decided by the owner on 2026-11-27 (decisions
-19 and 21), come last; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
+follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised while implementing it. OQ-66, decided by
+the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69, OQ-71 and OQ-70, decided by the owner on 2026-11-27
+(decisions 19, 21 and 20), come last; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
 
 ## Open
 
@@ -125,24 +125,6 @@ text and the order of the model's `ContextServices`.
   keeps every name (the incremental test would then assert unchanged `ContextServices`). Cost: the numbering no longer follows the
   pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
   stability clause from the decision. Needs a decision.
-
-### OQ-70: A publish pipeline whose handlers resolve nothing
-
-Owner decision 16 decided OQ-65 by adopting its proposal: a pipeline that resolves nothing gets no context. The proposal named the
-pipelines that have nothing to resolve as "a request or stream pipeline whose handler's invoker is static and whose behaviors inject
-nothing, or a publish pipeline without handlers whose behaviors inject nothing", and that is what was measured. A publish pipeline whose
-handlers all have static invokers and whose behaviors inject nothing (with or without behaviors) also resolves nothing, but it was not in
-that list: its context holds no field, only the publish strategy (`RunHandlers`, and for the sequential strategy `RunHandlersAsync`), which
-is an instance method of the context. Giving it no context means making the strategy static in a static class of the same name, which
-changes the publish code (every `PublishTo` comparison benchmark is such a pipeline) and was neither proposed nor measured.
-
-- **Interim:** such a publish pipeline keeps its context: `__NotificationN` is created once per scope with an empty constructor, its
-  strategy runs on it, and its links take `(pipeline, notification)` because the last one calls `pipeline.RunHandlers`. Every link still
-  takes only what it reads or passes on, so nothing raises CS9113. The ADR (Generated pipeline shape) says so.
-- **Proposal:** give it no context too: `RunHandlers` and `RunHandlersAsync` become `static` members of `private static class
-  __NotificationN`, the entry (or the last link) calls `__NotificationN.RunHandlers(notification, cancellationToken)`, and the mediator has
-  no `__notificationN` field and no `__CreateNotificationN`; measure `PublishTo1` and `PublishTo5` (typed and generic) before and after.
-  Alternative: keep the interim (one empty context per scope and type, a `Volatile.Read` per publish). Needs a decision.
 
 ## Decided
 
@@ -1811,7 +1793,8 @@ constructors, such a parameter is warning CS9113, an error under warnings-as-err
   pipeline without handlers, has no parameter list (`new()`); the entry declares `var pipeline = ...` only when its call needs it. No link
   has an unread parameter, so `GeneratedSyntax.MediatorPragma` is removed and the mediator's header is the obsolete-type pragma alone
   (`#pragma warning disable CS0612, CS0618`). A publish pipeline with handlers that resolves nothing (static invokers, nothing injected)
-  keeps its context, because the publish strategy is an instance method of it and the proposal did not list it: OQ-70 (open).
+  keeps its context, because the publish strategy is an instance method of it and the proposal did not list it: OQ-70 (then open;
+  decided 2026-11-27, at the end).
   Snapshots: every host snapshot's header loses CS9113 (35 files); the pipelines without a context (`AnnotatedResponseTests`, the
   `Unattended` notification of `NotificationGeneratorTests.Should_Generate_Publish_Pipelines`) become static link classes, and the last
   links of static handlers lose `pipeline` (`PipelineGeneratorTests.Should_Generate_Pipelines_For_Static_Handlers_Struct_Requests_And_IRequest`,
@@ -1961,3 +1944,56 @@ its red wrapper per construct, where the text emitters appended strings) and how
   new emitters were still getting faster during those runs (278 ms at run 2, 52 ms at run 11) while the server JIT-compiled them. So the
   target of the 66 ms / 35 ms baseline is met. Folded into the ADR (status, Incremental generation rules, Alternatives considered), the
   brief (Summary, Engineering rules), the README (Hosts) and whats-left.md.
+
+### OQ-70: A publish pipeline whose handlers resolve nothing (2026-11-27)
+
+Owner decision 16 decided OQ-65 by adopting its proposal: a pipeline that resolves nothing gets no context. The proposal named the
+pipelines that have nothing to resolve as "a request or stream pipeline whose handler's invoker is static and whose behaviors inject
+nothing, or a publish pipeline without handlers whose behaviors inject nothing", and that is what was measured. A publish pipeline whose
+handlers all have static invokers and whose behaviors inject nothing (with or without behaviors) also resolves nothing, but it was not in
+that list: its context holds no field, only the publish strategy (`RunHandlers`, and for the sequential strategy `RunHandlersAsync`), which
+is an instance method of the context. Giving it no context means making the strategy static in a static class of the same name, which
+changes the publish code (every `PublishTo` comparison benchmark is such a pipeline) and was neither proposed nor measured.
+
+- **Interim:** such a publish pipeline keeps its context: `__NotificationN` is created once per scope with an empty constructor, its
+  strategy runs on it, and its links take `(pipeline, notification)` because the last one calls `pipeline.RunHandlers`. Every link still
+  takes only what it reads or passes on, so nothing raises CS9113. The ADR (Generated pipeline shape) says so.
+- **Proposal:** give it no context too: `RunHandlers` and `RunHandlersAsync` become `static` members of `private static class
+  __NotificationN`, the entry (or the last link) calls `__NotificationN.RunHandlers(notification, cancellationToken)`, and the mediator has
+  no `__notificationN` field and no `__CreateNotificationN`; measure `PublishTo1` and `PublishTo5` (typed and generic) before and after.
+  Alternative: keep the interim (one empty context per scope and type, a `Volatile.Read` per publish). Needs a decision.
+- **Decision:** adopt the proposal (owner decision 20, 2026-11-27): a publish pipeline whose handlers all have static
+  invokers and whose behaviors inject nothing, with or without behaviors, gets no context. `HostEmitter.HasContext` for a publish
+  pipeline is now "a behavior injects a service, or a handler's invoker is not static" (a type without handlers is the case OQ-65 already
+  covered). Such a pipeline's `RunHandlers` and, for the sequential strategy, `RunHandlersAsync` are `static` members of
+  `private static class __NotificationN`; without behaviors the entry is `__PublishN(...) => __NotificationN.RunHandlers(notification,
+  cancellationToken)`, with behaviors the last link calls the same; the mediator has no `__notificationN` field and no
+  `__CreateNotificationN`, and the links take only the notification (`LinkK(TNotification notification)`, `new(notification)`). Behavior
+  is unchanged: the strategy bodies are the same code (handler order, every failure in one `AggregateException`, cancellation collected
+  like any failure, the parallel start-all-then-await), only `static`. The runtime tests already published through such pipelines
+  (`NotificationRuntimeTests`' `Failing`, `OneFailure`, `Cancellable`, `Fanout`, `FanoutFailing` and `CancellableParallel` have only
+  static handlers) and pass unchanged.
+  Snapshots: the three `JumpTableDispatchTests` snapshots with notifications (`kind=Notification` at 32 and 33, and every kind above the
+  threshold), whose handlers are all static, lose the 32 or 33 `__notificationN` fields and `__CreateNotificationN` methods and the
+  empty context constructors; each `__PublishN` becomes an expression-bodied call of `__NotificationN.RunHandlers`, and each
+  `__NotificationN` becomes a static class with static strategy methods (net10.0 and net11.0 output identical; re-accepted after reading
+  each diff, which has no other change). No other snapshot changed: every other publish pipeline in a snapshot has a handler with
+  injected parameters or a behavior that injects a service, or no handlers. New
+  `NotificationGeneratorTests.Should_Give_No_Context_To_A_Publish_Pipeline_That_Resolves_Nothing` snapshots such a pipeline with and
+  without two behaviors, sequential and parallel (four snapshots), and asserts no field, no create method and no `pipeline`.
+  `HostGeneratorIncrementalTests.Adding_A_Notification_Type_A_Polymorphic_Handler_Receives_Modifies_The_Host_Sources` asserted the new
+  type's `__CreateNotification1`; its handler is static, so it now asserts the static class and the direct handler call.
+  `NotificationAllocationTests` adds six rows (typed and generic): sequential with a behavior, parallel without and with a behavior, all
+  without a context, 0 B (the sequential `Tick` rows were already such a pipeline).
+  Measured (BenchmarkDotNet 0.15.8 default job, net10.0, Apple M4 Max, macOS 27.2, 2026-11-27; `--filter '*Comparison.PublishTo*Keryx_*'`,
+  rounds interleaved before, after, before, after; HEAD 100bfe1 against the change; results in the session scratchpad under
+  `oq70-before/` and `oq70-after/`, compared in `oq70-after/comparison.txt`, not kept in the repository). Every row 0 B before and after.
+  Typed `PublishTo1` 0.67 and 0.65 ns to 0.35 and 0.42 ns, typed `PublishTo5` 0.80 and 0.75 ns to 0.46 and 0.51 ns; generic
+  `PublishTo5` 3.03 and 3.03 ns to 2.74 and 2.75 ns, generic `PublishTo1` within noise (2.77 and 2.76 ns against 2.79 and 2.74 ns). Above
+  the threshold (`KeryxDispatchPadding=true`): typed `PublishTo1` 0.70 and 0.69 ns to 0.40 and 0.40 ns, typed `PublishTo5` 0.55 and
+  0.71 ns to 0.36 and 0.47 ns, generic rows within noise (6.02 and 5.96 ns against 5.92 and 5.96 ns; 6.04 and 6.01 ns against 5.99 and
+  5.90 ns). Generic JIT code (`DOTNET_TieredCompilation=0`, `DOTNET_JitDisasm`, the `--verify` run): `Publish<__Canon>` keeps its 2
+  (linear) and 35 (above the threshold) tail calls and shrinks from 392 to 300 bytes and from 2,856 to 1,468 bytes, its calls from 7 to 5
+  and from 40 to 6 (the context reads and the non-inlined create calls are gone). Folded into the ADR (status, Generated pipeline shape,
+  Notifications, Mediator, Alternatives considered), the brief (Phases 4 and 6), CONTEXT.md (pipeline context), the README (Hosts,
+  Benchmarks) and whats-left.md.

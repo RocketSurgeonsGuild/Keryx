@@ -297,11 +297,12 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   target-typed `new(...)` at every behavior call and at the entry (`TNext` stays an explicit type argument), a one-line `<summary>` naming
   where `next` goes, and `global::` names without `using` aliases. Owner decision 16 (OQ-65): only a pipeline that resolves something has
   a context. A request or stream pipeline whose handler's invoker is static and whose behaviors inject nothing, and a publish pipeline
-  without handlers whose behaviors inject nothing, have no context field, no `__CreatePipelineN` and no `Volatile.Read` at the entry, and
-  their links are nested in a `private static class` of the same name. Every link takes only the parameters it reads or passes on
+  whose handlers' invokers are all static (or that has no handlers) and whose behaviors inject nothing (owner decision 20, OQ-70), have no
+  context field, no `__CreatePipelineN` and no `Volatile.Read` at the entry, and their links are nested in a `private static class` of the
+  same name. Every link takes only the parameters it reads or passes on
   (`(pipeline, request)`, `(request)`, or nothing for the last link of a publish pipeline without handlers, called as `new()`), so no link
-  raises CS9113 and the mediator's header suppresses nothing but the obsolete-type warnings. A publish pipeline with handlers keeps its
-  context even when it resolves nothing (OQ-70, open). The gate prototype is written the same way and `--prototype-disasm` must still show
+  raises CS9113 and the mediator's header suppresses nothing but the obsolete-type warnings. The publish strategy of a publish pipeline
+  without a context is static, in that class (Phase 6). The gate prototype is written the same way and `--prototype-disasm` must still show
   0 B and every link inlined.
 - **Shared services** (owner decision 9 of the second rework; ADR, Injected parameters). Every pipeline context (request, stream, publish)
   resolves each distinct service (type and key) once, into one field (`Service0`, `Service1`, ... in order of first use), whatever the
@@ -385,17 +386,22 @@ record the decisions this phase follows.
 `[NotificationBehavior]` wraps the whole publish once, also with zero handlers, uses `INext` and returns `ValueTask`; it is attached with
 `[Behavior]` on the notification type, `[assembly: Behavior]` in the notification type's assembly or `[GlobalBehavior]`, and its
 `TNotification` is the concrete published type; the publish pipeline context shares its behaviors' injected services as Phase 4's "Shared
-services" describes. Handlers in a publish are called directly under both strategies: there are no per-handler
-pipelines or links. The handler generator writes no `Behaviors` for a notification handler, and the analyzer reports KRX042 for
-`[Behavior]` on a notification handler method.
+services" describes. Handlers in a publish are called directly under both strategies: there are no per-handler pipelines or links. The
+publish strategy (`RunHandlers`, and `RunHandlersAsync` for the sequential strategy) is a method of the pipeline context; a publish pipeline
+that resolves nothing (every handler's invoker static, nothing injected; owner decision 20, OQ-70) has no context, and its strategy is
+`static` in `private static class __NotificationN`, called as `__NotificationN.RunHandlers(notification, cancellationToken)` from the entry
+or the last link. The handler generator writes no `Behaviors` for a notification handler, and the analyzer reports KRX042 for `[Behavior]`
+on a notification handler method.
 
 **Done when:** tests cover zero/one/many handlers, polymorphic handlers, ordering, both strategies, failures in several handlers and
 cancellation; notification behavior tests cover all three scopes, zero handlers, both strategies, an exception propagating unwrapped and a
 synchronous throw from the outermost behavior; an `[assembly: Behavior]` naming a `[NotificationBehavior]` applies in the notification
 type's assembly, and in an assembly that declares notification handlers but not the notification type it changes no publish pipeline;
 KRX042 has positive tests for `[Behavior]` on a notification handler method (exact-type and polymorphic), and it changes no generated
-code; snapshot tests of publish pipelines at depths 0, 1, 3 and 8 show the handlers called directly under both strategies; allocation tests
-show 0 B for a sequential publish (with behaviors that take injected services) and for a parallel publish with synchronous handlers;
+code; snapshot tests of publish pipelines at depths 0, 1, 3 and 8 show the handlers called directly under both strategies, and snapshots
+of a publish pipeline that resolves nothing (sequential and parallel, with and without behaviors) show no context and a static strategy;
+allocation tests show 0 B for a sequential publish (with behaviors that take injected services) and for a parallel publish with
+synchronous handlers, with and without a context;
 generic `Publish<TNotification>` is tested on both sides of the dispatch threshold, as generic `Send` is (Phase 3): the generated shape and
 the compiled IL at the threshold and one above, every notification type reaching its own handlers above it, and an unknown type or a type
 derived from a handled notification type (unknown to the host) running nothing.

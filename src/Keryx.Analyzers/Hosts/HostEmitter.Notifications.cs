@@ -8,8 +8,9 @@ namespace Keryx.Analyzers.Hosts;
 ///     Notification dispatch and publish pipelines (ADR 0001, Notifications): typed <c>Publish</c> overloads, generic
 ///     <c>Publish&lt;TNotification&gt;</c> that never boxes a struct notification, and per notification type a pipeline context holding its
 ///     handlers and the injected services of its notification behaviors, one flat <c>INext</c> link struct per notification behavior, and the
-///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly. A type with
-///     behaviors that inject nothing and no handlers has no context.
+///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly. A type that
+///     resolves nothing (every handler's invoker is static, or it has no handlers, and its behaviors inject nothing) has no context: its
+///     strategy and links are static members of a static class (OQ-70).
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -161,15 +162,21 @@ internal static partial class HostEmitter
     /// <summary>
     ///     The publish pipeline of one notification type, without checks: the typed overload and generic dispatch both call it. It calls the
     ///     outermost notification behavior method directly with the first link, or, without notification behaviors, runs the handlers with the
-    ///     publish strategy.
+    ///     publish strategy: on the context, or, for a pipeline without one, the static <c>__NotificationN.RunHandlers</c>.
     /// </summary>
     private static void WritePublishCore(CodeWriter writer, NotificationPipeline pipeline, int index)
     {
+        var hasContext = HasContext(pipeline);
         var context = ContextRead(NotificationContextField(index), CreateNotificationContextName(index));
+        var declaration = $"private {ValueTask} {PublishCoreName(index)}({pipeline.Notification.Type} notification, {TokenParameter})";
         writer.Member();
-        writer.Line($"private {ValueTask} {PublishCoreName(index)}({pipeline.Notification.Type} notification, {TokenParameter})");
-        if (pipeline.Behaviors.IsEmpty)
+        if (pipeline.Behaviors.IsEmpty && !hasContext)
         {
+            writer.Arrow(declaration, $"{NotificationContextName(index)}.RunHandlers(notification, cancellationToken)");
+        }
+        else if (pipeline.Behaviors.IsEmpty)
+        {
+            writer.Line(declaration);
             writer.Open();
             writer.Line($"var {PipelineName} = {context};");
             writer.Line($"return {PipelineName}.RunHandlers(notification, cancellationToken);");
@@ -177,6 +184,7 @@ internal static partial class HostEmitter
         }
         else
         {
+            writer.Line(declaration);
             var links = LinkCaptures(pipeline.Behaviors, End(pipeline));
             var call = BehaviorCall(
                 pipeline.Behaviors[0],
@@ -188,24 +196,26 @@ internal static partial class HostEmitter
             WriteEntry(writer, "return " + call + ";", CallCaptures(pipeline.Behaviors[0], links[0]), context, obliviousFit: false);
         }
 
-        if (HasContext(pipeline))
+        if (hasContext)
         {
             WriteCreateContext(writer, NotificationContextName(index), NotificationContextField(index), CreateNotificationContextName(index));
         }
     }
 
     /// <summary>
-    ///     Whether a publish pipeline has a context (created once per scope): it has handlers (the context holds the ones with injected
-    ///     parameters and the publish strategy that calls them) or its behaviors inject a service (ADR 0001, Generated pipeline shape). A
-    ///     notification type with behaviors that inject nothing and no handlers has none: its links are nested in a static class.
+    ///     Whether a publish pipeline has a context (created once per scope): only when it resolves something, a handler whose invoker is not
+    ///     static (the context holds it) or a service its behaviors inject (ADR 0001, Generated pipeline shape; OQ-70). Otherwise its publish
+    ///     strategy and its links are static members of a static class, and the mediator has no field for it.
     /// </summary>
-    private static bool HasContext(NotificationPipeline pipeline) => !pipeline.Handlers.IsEmpty || pipeline.Notification.ContextServices.Count > 0;
+    private static bool HasContext(NotificationPipeline pipeline) =>
+        pipeline.Notification.ContextServices.Count > 0 || pipeline.Handlers.Any(static entry => !entry.Handler.StaticInvoker);
 
     /// <summary>
-    ///     What the end of a publish pipeline reads: the context and the notification, for its publish strategy; nothing without handlers
-    ///     (the last link completes at once).
+    ///     What the end of a publish pipeline reads: the notification, for its publish strategy, and the context when the strategy runs on it;
+    ///     nothing without handlers (the last link completes at once).
     /// </summary>
-    private static Captures End(NotificationPipeline pipeline) => pipeline.Handlers.IsEmpty ? Captures.None : Captures.Pipeline | Captures.Message;
+    private static Captures End(NotificationPipeline pipeline) =>
+        pipeline.Handlers.IsEmpty ? Captures.None : Captures.Message | ( HasContext(pipeline) ? Captures.Pipeline : Captures.None );
 
     /// <summary>
     ///     The parallel strategy's slow path (ADR 0001, Publish strategy): awaits the handlers that had not completed successfully when they
@@ -275,15 +285,17 @@ internal static partial class HostEmitter
     /// <summary>
     ///     The pipeline context of one notification type: its handlers that have injected parameters and the injected services of its
     ///     notification behaviors, resolved once per scope; the publish strategy, which calls the handlers directly; and one flat link struct
-    ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy). A type with notification behaviors that inject
-    ///     nothing and no handlers has no context: its links are nested in a static class of the same name, and the last one takes nothing.
+    ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy). A type that resolves nothing has no context: its
+    ///     publish strategy (static) and its links are nested in a static class of the same name; its last link takes the notification, or
+    ///     nothing when there are no handlers.
     /// </summary>
     private static void WriteNotificationContext(CodeWriter writer, NotificationPipeline pipeline, int index)
     {
         var notification = pipeline.Notification;
         var context = NotificationContextName(index);
+        var hasContext = HasContext(pipeline);
         writer.Member();
-        if (HasContext(pipeline))
+        if (hasContext)
         {
             writer.Documentation(
                 pipeline.Handlers.IsEmpty
@@ -310,7 +322,11 @@ internal static partial class HostEmitter
         else
         {
             writer.Documentation(
-                $"<summary>The links of the publish pipeline of <c>{Display(notification.Type)}</c>, which has no context: it has no handlers and its behaviors inject nothing.</summary>"
+                pipeline.Handlers.IsEmpty
+                    ? $"<summary>The links of the publish pipeline of <c>{Display(notification.Type)}</c>, which has no context: it has no handlers and its behaviors inject nothing.</summary>"
+                    : pipeline.Behaviors.IsEmpty
+                    ? $"<summary>The publish strategy of <c>{Display(notification.Type)}</c>, which has no context: its handlers' invokers are static and it has no behaviors.</summary>"
+                    : $"<summary>The publish strategy and links of <c>{Display(notification.Type)}</c>, which has no context: its handlers' invokers are static and its behaviors inject nothing.</summary>"
             );
             writer.Line($"private static class {context}");
             writer.Open();
@@ -320,11 +336,11 @@ internal static partial class HostEmitter
         {
             if (notification.Parallel)
             {
-                WriteParallelStrategy(writer, pipeline);
+                WriteParallelStrategy(writer, pipeline, hasContext);
             }
             else
             {
-                WriteSequentialStrategy(writer, pipeline);
+                WriteSequentialStrategy(writer, pipeline, hasContext);
             }
         }
 
@@ -336,7 +352,7 @@ internal static partial class HostEmitter
                 ? BehaviorCall(pipeline.Behaviors[k + 1], notification.ContextServices, LinkName(k + 1), links[k + 1], "notification")
                 : pipeline.Handlers.IsEmpty
                 ? "default"
-                : $"{PipelineName}.RunHandlers(notification, cancellationToken)";
+                : $"{( hasContext ? PipelineName : context )}.RunHandlers(notification, cancellationToken)";
             WriteLink(
                 writer,
                 LinkName(k),
@@ -359,14 +375,15 @@ internal static partial class HostEmitter
     ///     The sequential strategy (ADR 0001, Publish strategy, Failures): each handler is called directly and awaited in handler order, every
     ///     one runs whatever the others do, and the failures are combined into one <c>AggregateException</c>. Handlers that complete synchronously and
     ///     successfully take a path that allocates nothing; the first one that does not hands over to <c>RunHandlersAsync</c>, which awaits it
-    ///     and runs the rest.
+    ///     and runs the rest. Both are instance methods of the context, or static members of the static class of a pipeline without one.
     /// </summary>
-    private static void WriteSequentialStrategy(CodeWriter writer, NotificationPipeline pipeline)
+    private static void WriteSequentialStrategy(CodeWriter writer, NotificationPipeline pipeline, bool hasContext)
     {
         var notification = pipeline.Notification;
+        var @static = hasContext ? "" : "static ";
         writer.Member();
         writer.Documentation("<summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>");
-        writer.Line($"public {ValueTask} RunHandlers({notification.Type} notification, {TokenParameter})");
+        writer.Line($"public {@static}{ValueTask} RunHandlers({notification.Type} notification, {TokenParameter})");
         writer.Open();
         WriteBox(writer, pipeline);
         writer.Line($"{ExceptionList}? exceptions = null;");
@@ -391,7 +408,7 @@ internal static partial class HostEmitter
         writer.Member();
         writer.Documentation("<summary>Awaits the handler at <paramref name=\"position\" />, runs the ones after it in order, then reports every failure.</summary>");
         writer.Line(CodeWriter.PoolingBuilderAttribute);
-        writer.Line($"private async {ValueTask} RunHandlersAsync({parameters})");
+        writer.Line($"private {@static}async {ValueTask} RunHandlersAsync({parameters})");
         writer.Open();
         WriteTryCollect(writer, "await pending.ConfigureAwait(false);");
         for (var i = 1; i < pipeline.Handlers.Length; i++)
@@ -410,14 +427,15 @@ internal static partial class HostEmitter
     ///     The parallel strategy (ADR 0001, Publish strategy): every handler is started in handler order on the calling thread without
     ///     awaiting it (no <c>Task.Run</c>), a synchronous throw is recorded as a faulted task and the rest still start. When every handler
     ///     completed successfully, nothing is allocated; otherwise one array plus one <c>AsTask()</c> per pipeline that did not, awaited
-    ///     together, with every failure in handler order.
+    ///     together, with every failure in handler order. An instance method of the context, or a static member of the static class of a
+    ///     pipeline without one.
     /// </summary>
-    private static void WriteParallelStrategy(CodeWriter writer, NotificationPipeline pipeline)
+    private static void WriteParallelStrategy(CodeWriter writer, NotificationPipeline pipeline, bool hasContext)
     {
         var count = pipeline.Handlers.Length;
         writer.Member();
         writer.Documentation("<summary>Starts every handler in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>");
-        writer.Line($"public {ValueTask} RunHandlers({pipeline.Notification.Type} notification, {TokenParameter})");
+        writer.Line($"public {( hasContext ? "" : "static " )}{ValueTask} RunHandlers({pipeline.Notification.Type} notification, {TokenParameter})");
         writer.Open();
         WriteBox(writer, pipeline);
         for (var i = 0; i < count; i++)

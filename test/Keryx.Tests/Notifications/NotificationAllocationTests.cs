@@ -7,8 +7,9 @@ namespace Keryx.Tests.Notifications;
 ///     The Performance contract for <c>Publish</c> (ADR 0001, Performance contract; the Phase 6 brief): after one warm-up publish in the same
 ///     scope, a sequential publish and a parallel publish whose handlers complete synchronously allocate 0 bytes, on the typed
 ///     overload and the generic entry point, for class and struct notifications, with and without static notification behaviors (one that
-///     takes an injected service, and an <c>async</c> one, compiled with optimizations as a Release build ships it). The one documented exception, a
-///     struct delivered to an interface-typed handler, allocates exactly one box per publish (OQ-17, KRX037).
+///     takes an injected service, and an <c>async</c> one, compiled with optimizations as a Release build ships it), with and without a
+///     pipeline context (a pipeline whose handlers are all static and whose behaviors inject nothing has none, OQ-70). The one documented
+///     exception, a struct delivered to an interface-typed handler, allocates exactly one box per publish (OQ-17, KRX037).
 /// </summary>
 /// <remarks>Measured like <see cref="HostAllocationTests" />: inside the compiled host, smallest of several regions, not in parallel.</remarks>
 [Timeout(ModuleInitializer.TestTimeout)]
@@ -61,6 +62,19 @@ public class NotificationAllocationTests : HostTest
         [Behavior(typeof(Pass))]
         public readonly record struct FanoutTick(int Value) : INotification;
 
+        /// <summary>Static handlers and a behavior that injects nothing: a publish pipeline without a context (OQ-70), like <c>Tick</c>.</summary>
+        [Behavior(typeof(Around))]
+        public sealed record Quiet : INotification;
+
+        /// <summary>Parallel, static handlers, no behaviors: no context.</summary>
+        [PublishStrategy(PublishStrategy.Parallel)]
+        public sealed record Spread : INotification;
+
+        /// <summary>Parallel, static handlers, a behavior that injects nothing: no context.</summary>
+        [PublishStrategy(PublishStrategy.Parallel)]
+        [Behavior(typeof(Around))]
+        public sealed record SpreadWrapped : INotification;
+
         public static partial class OnPlaced1 { private static ValueTask Handle(Placed notification) => default; }
         public static partial class OnPlaced2 { private static Task Handle(Placed notification, CancellationToken cancellationToken) => Task.CompletedTask; }
         public partial class OnPlaced3 { private static ValueTask Handle(Placed notification, object service) => default; }
@@ -81,6 +95,15 @@ public class NotificationAllocationTests : HostTest
         public static partial class OnFanoutTick1 { private static ValueTask Handle(FanoutTick notification) => default; }
         public static partial class OnFanoutTick2 { private static ValueTask Handle(FanoutTick notification) => default; }
 
+        public static partial class OnQuiet1 { private static ValueTask Handle(Quiet notification) => default; }
+        public static partial class OnQuiet2 { private static Task Handle(Quiet notification, CancellationToken cancellationToken) => Task.CompletedTask; }
+
+        public static partial class OnSpread1 { private static ValueTask Handle(Spread notification) => default; }
+        public static partial class OnSpread2 { private static ValueTask Handle(Spread notification) => default; }
+
+        public static partial class OnSpreadWrapped1 { private static ValueTask Handle(SpreadWrapped notification) => default; }
+        public static partial class OnSpreadWrapped2 { private static ValueTask Handle(SpreadWrapped notification) => default; }
+
         public static class Probe
         {
             private static object? _sink;
@@ -96,6 +119,9 @@ public class NotificationAllocationTests : HostTest
                 var fanout = new Fanout();
                 var fanoutTick = new FanoutTick(1);
                 var unwatched = new Unwatched();
+                var quiet = new Quiet();
+                var spread = new Spread();
+                var spreadWrapped = new SpreadWrapped();
 
                 return new()
                 {
@@ -111,6 +137,12 @@ public class NotificationAllocationTests : HostTest
                     ["parallel, generic struct, behavior"] = Region(() => publisher.Publish(fanoutTick)),
                     ["no handlers, typed, behavior without a context"] = Region(() => mediator.Publish(unwatched)),
                     ["no handlers, generic, behavior without a context"] = Region(() => publisher.Publish(unwatched)),
+                    ["sequential, typed, behavior without a context"] = Region(() => mediator.Publish(quiet)),
+                    ["sequential, generic, behavior without a context"] = Region(() => publisher.Publish(quiet)),
+                    ["parallel, typed, without a context"] = Region(() => mediator.Publish(spread)),
+                    ["parallel, generic, without a context"] = Region(() => publisher.Publish(spread)),
+                    ["parallel, typed, behavior without a context"] = Region(() => mediator.Publish(spreadWrapped)),
+                    ["parallel, generic, behavior without a context"] = Region(() => publisher.Publish(spreadWrapped)),
                     ["boxed, typed struct"] = Region(() => mediator.Publish(tock)),
                     ["boxed, generic struct"] = Region(() => publisher.Publish(tock)),
                     ["one box"] = Region(() =>
@@ -161,7 +193,7 @@ public class NotificationAllocationTests : HostTest
 
         var allocated = Call<Dictionary<string, long>>(host, "Sample.Probe", "Measure", scope.ServiceProvider);
 
-        await Assert.That(allocated.Count).IsEqualTo(15);
+        await Assert.That(allocated.Count).IsEqualTo(21);
         var oneBox = allocated["one box"];
         await Assert.That(oneBox).IsGreaterThan(0L);
         foreach (var (scenario, bytes) in allocated)

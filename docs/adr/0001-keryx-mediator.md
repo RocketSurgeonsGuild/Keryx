@@ -35,9 +35,11 @@ KRX038, open-questions OQ-68, decided), and generic `Send` and `Stream` test eac
 (`Publish` keeps exact-type guards, because notification types need not be sealed); links are written with primary constructors and target-typed `new(...)`, a pipeline that resolves nothing has no pipeline context, and
 each link takes only what it reads or passes on (open-questions OQ-65, decided); and `next` stays a struct
 implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>` (typed next delegates rejected).
-Amended a sixth time 2026-11-27 (owner decisions 19 and 21): a closed request base from a referenced assembly is treated, and named in
-KRX003, as abstract (open-questions OQ-69, decided); and the generators write their output as text through an indented writer again
-(`CodeWriter`), every generated source unchanged, because `SyntaxFactory` measured slower (open-questions OQ-71, decided).
+Amended a sixth time 2026-11-27 (owner decisions 19 to 21): a closed request base from a referenced assembly is treated, and named in
+KRX003, as abstract (open-questions OQ-69, decided); a publish pipeline whose handlers' invokers are all static and whose behaviors inject
+nothing has no pipeline context either, its publish strategy being static (open-questions OQ-70, decided); and the generators write
+their output as text through an indented writer again (`CodeWriter`), every generated source unchanged, because `SyntaxFactory` measured
+slower (open-questions OQ-71, decided).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -719,15 +721,17 @@ notification type that does not match is KRX009.
 For each pipeline the host emits:
 
 - a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
-  the notification type's handlers, and the publish strategy that runs them) and each distinct service the pipeline's behavior methods
-  inject, once (one `ServiceN` field per service type and key, shared by every behavior method that injects it; see Injected
-  parameters), resolved in its constructor. Only a pipeline that resolves something has one (decided 2026-11-26, OQ-65): a request or
-  stream pipeline whose handler's invoker is static and whose behaviors inject nothing has no context, nor does a publish pipeline without
-  handlers whose behaviors inject nothing. Such a pipeline has no `__pipelineN` field and no `__CreatePipelineN`: without behaviors it
-  calls the static invoker directly, with behaviors its entry calls the outermost behavior method directly and its links are nested in a
-  `private static class` of the same name (`__PipelineN`, `__StreamPipelineN`, `__NotificationN`). A publish pipeline with handlers keeps
-  its context even when every handler's invoker is static and nothing is injected, because the publish strategy is a method of the
-  context (open-questions OQ-70, open);
+  the notification type's handlers whose invokers are not static, and the publish strategy that runs them) and each distinct service the
+  pipeline's behavior methods inject, once (one `ServiceN` field per service type and key, shared by every behavior method that injects
+  it; see Injected parameters), resolved in its constructor. Only a pipeline that resolves something has one (decided 2026-11-26, OQ-65;
+  for publish pipelines with handlers, 2026-11-27, OQ-70): a request or stream pipeline whose handler's invoker is static and whose
+  behaviors inject nothing has no context, nor does a publish pipeline whose handlers' invokers are all static (or that has no handlers)
+  and whose behaviors inject nothing. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field and no
+  `__CreatePipelineN`: without behaviors it calls the static invoker directly, with behaviors its entry calls the outermost behavior
+  method directly and its links are nested in a `private static class` of the same name (`__PipelineN`, `__StreamPipelineN`,
+  `__NotificationN`). A publish pipeline without a context that has handlers keeps its publish strategy in that static class, as static
+  members (`RunHandlers`, and `RunHandlersAsync` for the sequential strategy), and its entry (without behaviors) or its last link calls
+  `__NotificationN.RunHandlers(notification, cancellationToken)`;
 - one small **link** struct per position, a `readonly struct` with a primary constructor and an expression-bodied `InvokeAsync`, with a
   one-line summary that names where its `next` goes (decided 2026-11-26):
 
@@ -745,7 +749,8 @@ For each pipeline the host emits:
     handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the publish strategy). The entry of the pipeline calls the
     outermost behavior method the same way, after reading the context only when that call reads or passes it on. A link takes exactly the
     parameters it reads or passes on (decided 2026-11-26, OQ-65): the context when its call injects a service, when the handler is resolved
-    into the context (its last link) or when the publish strategy runs from it, or when a later link takes the context; the message
+    into the context (its last link) or when the publish strategy runs on the context (the last link of a publish pipeline with a
+    context), or when a later link takes the context; the message
     (`notification` in a publish pipeline) whenever anything after it runs, which is always except in the last link of a publish pipeline
     without handlers. So a link is `LinkK(__PipelineN pipeline, TRequest request)`, `LinkK(TRequest request)` (`new(request)`) or, as the
     last link of a publish pipeline without handlers, `LinkK` without a parameter list (`new()`); a behavior method always takes the
@@ -771,7 +776,8 @@ may call `next` more than once (retry). The `CancellationToken` is passed as the
 spelling does not change the machine code of a pipeline with a context whose links all read or pass it on: the Phase 4 gate prototype,
 written that way, still allocates nothing and inlines every link and behavior method (open-questions, "Links with primary
 constructors"). A pipeline without a context reads no field at its entry and its links hold the message alone: three stream behaviors
-allocate 648 B instead of 680 B per `Stream`, and the JIT code of an inlined pipeline shrinks (OQ-65).
+allocate 648 B instead of 680 B per `Stream`, and the JIT code of an inlined pipeline shrinks (OQ-65). A publish to static handlers
+skips the `Volatile.Read` of an empty context and still allocates nothing (OQ-70 has the measurements).
 
 Stream pipelines use the same shape with `IStreamNext<TItem>` links (see Streaming), and the publish pipeline of a notification type
 with `INext` links (see Notifications).
@@ -946,6 +952,11 @@ synchronously, and the parallel strategy's `Task.WhenAll`) uses `ConfigureAwait(
 sequential publish may run on a thread-pool thread. Handlers and behaviors await however they choose, and the caller's own
 `await Publish(...)` still resumes on its context.
 
+The publish strategy is generated per notification type and calls each handler's invoker directly. It is a method of the type's
+pipeline context when the publish resolves something (a handler whose invoker is not static, or a service a behavior injects); otherwise
+it is a static method of `private static class __NotificationN` and the publish reads no context (decided 2026-11-27, open-questions
+OQ-70; see Generated pipeline shape). Either way it behaves the same: handler order, failures and cancellation as below.
+
 **Failures.** Every handler runs, whatever the others do. If any handler fails, `Publish` throws one `AggregateException` containing every
 failure, in handler order. This holds even when exactly one handler fails: callers always see the same exception shape. The exception
 list is allocated only when a failure happens. A notification behavior wraps the whole publish, so an exception it throws (or lets
@@ -1025,9 +1036,9 @@ internal sealed partial class KeryxMediator : IMediator
 }
 ```
 
-- **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline that resolves something (its handler or the
-  injected services of its behaviors) and per notification type with handlers (open-questions OQ-70, open); any other pipeline has no
-  context and no field in the mediator (Generated pipeline shape, OQ-65). After the first call in a scope, nothing is resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
+- **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline that resolves something (its handler, the
+  handlers of a notification type whose invokers are not static, or the injected services of its behaviors); any other pipeline has no
+  context and no field in the mediator (Generated pipeline shape, OQ-65, OQ-70). After the first call in a scope, nothing is resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
   handler's transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because
   its injected services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the
   pipeline that injects the service).
@@ -1545,6 +1556,10 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   taking only what each link reads or passes on removes the per-scope context, the `Volatile.Read` at the entry and the suppression, and
   made three stream behaviors' iterators smaller (648 B instead of 680 B per `Stream`) and the inlined pipelines' code shorter
   (Generated pipeline shape).
+- **A context for every publish pipeline with handlers** (OQ-70's interim, 2026-11-26 to 2026-11-27, until owner decision 20): the
+  publish strategy was an instance method of the context, so a notification type whose handlers' invokers are all static and whose
+  behaviors inject nothing still had a context with an empty constructor, created once per scope and read with `Volatile.Read` on every
+  publish. The strategy is now static in a static class for such a pipeline (Generated pipeline shape).
 - **`[assembly: KeryxHost]`**, an assembly attribute that made the assembly a host: the design until the owner's second rework on
   2026-11-26, replaced by the `KeryxHost` MSBuild property (Opting in), the pattern Dovetail uses. The property needs no source edit in the
   common case (an executable or test project is a host by default), a project opts out without touching code, and the build decides

@@ -187,6 +187,71 @@ public class NotificationGeneratorTests : HostTest
         await VerifyHost(result).UseParameters(depth);
     }
 
+    /// <summary>
+    ///     A publish pipeline that resolves nothing (OQ-70): every handler's invoker is static and the behaviors, if any, inject nothing. It has
+    ///     no context: its publish strategy is a static member of <c>private static class __Notification0</c>, the mediator has no
+    ///     <c>__notification0</c> field and no <c>__CreateNotification0</c>, and its links take only the notification. Sequential and parallel,
+    ///     without behaviors and with two.
+    /// </summary>
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
+    public async Task Should_Give_No_Context_To_A_Publish_Pipeline_That_Resolves_Nothing(bool behaviors, bool parallel, CancellationToken cancellationToken)
+    {
+        var source = new System.Text.StringBuilder("namespace Sample;\n\n");
+        if (behaviors)
+        {
+            for (var k = 1; k <= 2; k++)
+            {
+                source.Append(
+                    CultureInfo.InvariantCulture,
+                    $$"""
+                      [NotificationBehavior]
+                      [BehaviorOrder(Phase.Default, Order = {{k}})]
+                      public static class Step{{k}}
+                      {
+                          public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                              where TNotification : INotification
+                              where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+                      }
+
+
+                      """
+                );
+            }
+
+            source.Append("[Behavior(typeof(Step1))]\n[Behavior(typeof(Step2))]\n");
+        }
+
+        if (parallel)
+        {
+            source.Append("[PublishStrategy(PublishStrategy.Parallel)]\n");
+        }
+
+        source.Append(
+            """
+            public sealed record Placed : INotification;
+
+            public static partial class First { [HandlerOrder(1)] private static ValueTask Handle(Placed notification) => default; }
+            public static partial class Second { [HandlerOrder(2)] private static Task Handle(Placed notification, CancellationToken cancellationToken) => Task.CompletedTask; }
+            """
+        );
+        var result = await HostBuilder.AddSources(Usings + source).Build().GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("private static class __Notification0");
+        await Assert.That(mediator).Contains("public static global::System.Threading.Tasks.ValueTask RunHandlers(");
+        await Assert.That(mediator).DoesNotContain("__notification0");
+        await Assert.That(mediator).DoesNotContain("__CreateNotification0");
+        await Assert.That(mediator).DoesNotContain("var pipeline");
+        await Assert.That(mediator).DoesNotContain("__Notification0 pipeline");
+        await VerifyHost(result).UseParameters(behaviors, parallel);
+    }
+
     [Test]
     public async Task Should_Dispatch_Notifications_Through_A_FrozenDictionary_Above_The_Threshold(CancellationToken cancellationToken)
     {

@@ -403,11 +403,12 @@ namespace:
 
 The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
 services its behavior methods inject; it never creates a behavior instance. A request or stream pipeline with a static handler whose
-behaviors inject nothing, and a notification type without handlers whose behaviors inject nothing, have no context at all (a
-notification type with handlers keeps one even when it resolves nothing; open-questions OQ-70, open): such a pipeline's entry
-calls the outermost behavior method directly, and each `next` link holds only the request or notification. From then on a `Send` allocates nothing. Singletons and hosted
-services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
-as long as the scope, and the behaviors of one pipeline that inject the same transient share one instance.
+behaviors inject nothing, and a notification type whose handlers are all static (or that has none) and whose behaviors inject nothing, have
+no context at all (open-questions OQ-65 and OQ-70): such a pipeline's entry calls the outermost behavior method, or the handler, or for a
+notification its static publish strategy, directly, and each `next` link holds only the request or notification. From then on a `Send`
+allocates nothing. Singletons and hosted services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's
+transient dependencies therefore live as long as the scope, and the behaviors of one pipeline that inject the same transient share one
+instance.
 
 The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type: a switch statement with a type pattern per
 sealed request type (`case Ping r: return ...;`, one method-table compare each), and above 32 request types a `FrozenDictionary` lookup
@@ -605,6 +606,11 @@ resolves.
 | MediatR 15.0.0, `IMediator` | 122 ns · 768 B | 316 ns · 1,728 B |
 | ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.98 ns · 0 B | 20.3 ns · 0 B |
 | ZeroAlloc.Mediator 7.0.1, `IMediator` | 27.5 ns · 24 B | 58.8 ns · 120 B |
+
+Since that run, a publish whose handlers are all static and whose behaviors inject nothing (every row here) has no pipeline context and
+its publish strategy is static (open-questions OQ-70): in interleaved reruns against the code before it, the typed overload measured 0.35
+to 0.42 ns for 1 handler and 0.46 to 0.51 ns for 5 (0.65 to 0.67 ns and 0.75 to 0.80 ns before), `IMediator` with 5 handlers 2.74 ns (3.03
+ns before) and with 1 handler within noise, all still 0 B.
 
 Run them yourself (the full set takes about 15 minutes with these settings; `--verify` checks that every library really runs each
 scenario's handlers and behaviors):
