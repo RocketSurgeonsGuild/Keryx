@@ -5,7 +5,8 @@ owner's second rework, and again after its follow-up (owner decisions 14 to 18);
 (2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64; updated for owner decision 30 (real-world benchmark
 scenarios, 2026-11-27) and decisions 29 and 31 (the NativeAOT benchmark run and its CI job, 2026-11-27); updated for decision 32 (the
 README's numbers from a full local run under the JIT and NativeAOT, 2026-11-27) and decision 35 (transient `IMediator`, `ISender`
-and `IPublisher` forwarders, OQ-74).
+and `IPublisher` forwarders, OQ-74); updated for decisions 33, 34 and 36 (the real-world setup rules in the ADR, the verification probe
+compiled out of the benchmark builds, `MessageName<T>`; OQ-72, OQ-73 and OQ-75).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -228,14 +229,32 @@ a singleton that injects one of the interfaces, which fails when first resolved 
 Nothing was measured with BenchmarkDotNet: the README's scope-per-request and `IMediator` rows are still decision 32's and say so;
 decision 37's run refreshes them.
 
+## Done: benchmark probe compiled out, `MessageName<T>`, real-world setup rules (owner decisions 33, 34 and 36, 2026-11-27)
+
+- **OQ-72** (decision 33): the real-world setup is confirmed as implemented, including the behavior-scenario baseline that does the
+  behaviors' work inline, the singleton SQLite connection, the separate notification-behavior pair and the Mediator parallel project; the
+  rules are in the ADR's Benchmarks section ("Real-world setup rules"), beside OQ-51's. No code changed for it.
+- **OQ-73** (decision 34): the builds BenchmarkDotNet makes (JIT and NativeAOT) have no verification probe. `Program.cs` sets
+  `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds; under it `Keryx.Benchmarks.Common` defines
+  `KERYX_BENCHMARKS_NO_PROBE`, `Probe.Enabled` is a `const` `false` and `Probe.Hit()` is empty. `--verify` builds without it (JIT and the
+  NativeAOT publish) and keeps counting; `Probe.EnsureCounting()` fails a verify run of a probe-less build. Checked with `--keepFiles`:
+  BenchmarkDotNet's JIT build has `Enabled` as a literal and a one-`ret` `Hit`; its NativeAOT build has no `Probe` static constructor or
+  static-base helper, and the baseline's `PingHandler.Handle` is 80 B of code against 128 B in the `--verify` publish, which keeps the
+  class-initialization check, the field load and the branch. Enforced on every run since: `ComparisonBenchmark.Setup()` (the shared
+  `[GlobalSetup]`) throws unless `Probe.IsCompiledOut()`, so the CI Dry jobs (JIT and NativeAOT) fail if the probe comes back; `--verify`
+  calls `CreateSubjects()` instead.
+- **OQ-75** (decision 36): `MessageName<T>.Value` in `Keryx.Benchmarks.Common` is the name every real-world logging behavior (Keryx,
+  Mediator scoped, MediatR, Immediate.Handlers, ZeroAlloc.Mediator) and the baseline (with its concrete types) pass to `RequestLog`.
+- `--verify`: 238 passed under the JIT (net10.0 and net11.0), 215 passed and 23 n/a in the NativeAOT publish; full Dry runs pass (JIT 271
+  benchmarks, NativeAOT 242); 1,576 tests pass; no snapshot changed. Nothing was measured: the README's tables are still decision 32's,
+  which include the probe and the type-name allocations under NativeAOT, and say so; decision 37's run refreshes them.
+
 ## Decisions for the owner
 
-Four questions are open ([open-questions.md](adr/open-questions.md), **Open**). Three are about the benchmarks: OQ-72 (how the
-real-world scenarios set up each library), OQ-73 (the verification probe's cost in NativeAOT benchmark builds: compile it out of
-BenchmarkDotNet's builds, or measure it first) and OQ-75 (read the benchmark behaviors' type names once, the same way in every subject and
-the baseline). OQ-76 asks whether to accept that, with the transient forwarders, `ValidateOnBuild` no longer reports a singleton that
-injects `IMediator`, `ISender` or `IPublisher` (as with MediatR), or to have the host generator warn where it can see one. OQ-74 is
-decided (decision 35, above).
+One question is open ([open-questions.md](adr/open-questions.md), **Open**): OQ-76 asks whether to accept that, with the transient
+forwarders, `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (as with MediatR), or to
+have the host generator warn where it can see one. OQ-74 (decision 35), OQ-72 (decision 33), OQ-73 (decision 34) and OQ-75 (decision 36)
+are decided (above).
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
 (decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
@@ -266,7 +285,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   (each library's parallel strategy) publish a `Pinged` notification to 1 and 5 handlers. 104 benchmarks in all, for every subject that
   has an API for them. `--verify` checks their `Pong` and counts handler, behavior, validator, repository, query and log calls (238
   comparison benchmarks pass on net10.0 and net11.0), and the Dry job, which already runs every benchmark, covers them (a Dry run of
-  `*RealWorld*` runs 104). Their per-library setup and n/a cells are OQ-72, open. Measured in decision 32's run (README).
+  `*RealWorld*` runs 104). Their per-library setup and n/a cells are in the ADR's Benchmarks section (decision 33, OQ-72). Measured in
+  decision 32's run (README).
 - **NativeAOT benchmark run** (owner decisions 29 and 31, 2026-11-27; open-questions, "NativeAOT benchmark run"): the comparison
   suite runs with BenchmarkDotNet's NativeAOT toolchain (`--runtimes nativeaot10.0`, on its own: side by side with the JIT the
   NativeAOT rows get no ratios) with the same scenarios and subjects. Built and run
@@ -279,7 +299,7 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   and single-file analyzers. The Phase 4 prototype is JIT-only (left out of NativeAOT jobs: BenchmarkDotNet rejects its Linux
   `DisassemblyDiagnoser` there). Local Dry runs of every benchmark pass under NativeAOT (242) and the JIT (271), and the NativeAOT job's
   steps pass on Linux (linux-arm64 container: `--verify` 215 passed, 23 n/a; Dry run 242, exit 0). Measured in decision 32's
-  run (README, NativeAOT); those numbers include the probe, whose NativeAOT cost is OQ-73, open.
+  run (README, NativeAOT); those numbers include the probe, which decision 34 (OQ-73) has since compiled out of the benchmark builds.
 - **Performance contract against the comparison run** (README, Benchmarks; decision 32's run, 2026-11-27, at 1652e50): Keryx
   allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1
   and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state machine); a
@@ -289,7 +309,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting them. The
   tables include the follow-up: generic `Send` with a synchronous handler at 2.44 to 2.74 ns (3.22 to 3.51 ns before the type patterns),
   three stream behaviors at 648 B (OQ-65), and the typed `Publish` at 0.34 and 0.44 ns (OQ-70). The same allocations hold under
-  NativeAOT, except in the real-world behavior rows, where the benchmark behaviors' type names add 96 B (OQ-75), and in the SQLite and
+  NativeAOT, except in the real-world behavior rows, where the benchmark behaviors' type names added 96 B (OQ-75; read once per type
+  since decision 36, so decision 37's run should not show it), and in the SQLite and
   async-handler rows, 16 B less per query, the same change as the direct call's. With a scope per
   request, Keryx's typed overload allocates 80 B more than the direct call for a plain `Ping` (the scoped `KeryxMediator`) and its
   `IMediator` publish 360 B (1 handler) and 800 B (5 handlers) more than the typed overload, measured with the scoped forwarders that
@@ -306,12 +327,9 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
-- Decide OQ-73 (the verification probe in NativeAOT benchmark builds; the README's NativeAOT numbers include it) and OQ-75 (the
-  benchmark behaviors' type names under NativeAOT); re-run the NativeAOT tables if either changes the benchmark code.
-- Re-run the scope-per-request and `IMediator` rows now that the interfaces are transient forwarders (decision 35, OQ-74; decision 37's
-  full run).
-- Decide OQ-72 (the real-world scenarios' setup: the baseline that does the behaviors' work inline, the singleton SQLite connection,
-  the separate notification-behavior pair, the Mediator parallel project, the n/a cells) and fold it into the ADR's Benchmarks section.
+- Decision 37: re-run the full comparison suite under the JIT and then NativeAOT (README settings, quiet machine, clean `git archive` of
+  HEAD) and refresh every table and note that decisions 34 to 36 affect: every scope-per-request and `IMediator` row (transient
+  forwarders, OQ-74), every NativeAOT row (no probe, OQ-73) and the behavior rows (`MessageName<T>`, OQ-75).
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
   decision 32's run at 1652e50).
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)

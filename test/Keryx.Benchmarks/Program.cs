@@ -24,6 +24,12 @@ if (args is ["--prototype-disasm"])
 // A benchmark that fails to build or throws fails the run (CI runs every benchmark with the Dry job, with the JIT and with NativeAOT). The
 // config leaves the subjects that are n/a under NativeAOT, and the JIT-only Phase 4 prototype, out of NativeAOT jobs (--runtimes
 // nativeaot10.0; Comparison/NativeAot.cs) and fails the run when a comparison scenario is missing from --verify's list.
+//
+// The builds BenchmarkDotNet makes (JIT and NativeAOT) inherit this process's environment, where an MSBuild property can be set: with
+// KeryxBenchmarksProbe=false, Probe.Enabled is a const false and Probe.Hit is empty, so no measured call carries the verification probe
+// (owner decision 34). BenchmarkDotNet 0.15.8 passes ArtifactsPath and OutDir to those builds, so every project they rebuild goes to the
+// generated project's folder and never over this process's own binaries. --verify, above, never sets the property.
+Environment.SetEnvironmentVariable("KeryxBenchmarksProbe", "false");
 var config = DefaultConfig.Instance.AddFilter(NativeAot.Filter).AddValidator(ScenarioListValidator.Instance);
 var summaries = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 return summaries.Any(static summary => summary.HasCriticalValidationErrors || summary.Reports.Any(static report => !report.Success)) ? 1 : 0;

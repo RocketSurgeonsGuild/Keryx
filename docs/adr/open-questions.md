@@ -28,190 +28,12 @@ the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69,
 "Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) follows. OQ-61 and OQ-62, decided by the owner on
 2026-11-27 (decisions 25 and 26), follow, then OQ-59 and OQ-60 (decisions 23 and 24, the same day), and OQ-63 and OQ-64 (decisions 27
 and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) and "NativeAOT benchmark run" (decisions 29 and 31,
-the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second, and both are open. "Full
-benchmark run" (decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27
-(decision 35), comes last; OQ-76 was raised while implementing it, and is open.
+the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second. "Full benchmark run"
+(decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27 (decision 35),
+follows; OQ-76 was raised while implementing it, and is open. OQ-72, OQ-73 and OQ-75, decided by the owner the same day (decisions 33, 34
+and 36), come last.
 
 ## Open
-
-### OQ-72: How the real-world benchmark scenarios set up each library (2026-11-27)
-
-Decision 30 ("Real-world benchmark scenarios", below) names the scenarios and the subjects, but, as OQ-51 found for the first scenarios,
-not the setup each number depends on: what the baseline does when the scenario has behaviors, the lifetimes of the new services, where
-the SQLite connection comes from, how each library attaches the logging and validation behaviors and gets their services, how each
-library publishes the notification scenarios (30d) sequentially and in parallel, and which subjects cannot run a scenario.
-
-- **Interim** (`test/Keryx.Benchmarks/Comparison/RealWorldBenchmarks.cs` and `RealWorldPublishBenchmarks.cs`, `RealWorld.cs` and
-  `RealWorldPublish.cs` in each project under `test/benchmark-subjects`, the shared services in `Keryx.Benchmarks.Common`):
-    - **Messages.** Each subject declares `Ping`, `TypicalPing` and `QueryPing` (`sealed record` with an `int Id`) with its library's
-      request interface; every library returns the same `Pong(int Id, string Name)` record from `Keryx.Benchmarks.Common`. The
-      benchmarks send id 42.
-    - **Scenarios.** `RealWorldPing` (a handler that returns a new `Pong`, no behaviors), `RealWorldBehaviors` (decision 30b) and
-      `RealWorldSqlite` (30c) send through the entry point resolved once from the scope that lives for the whole benchmark, like the
-      other comparison scenarios. `RealWorldPingScopePerRequest` and `RealWorldBehaviorsScopePerRequest` (30a, and 30a with 30b) create
-      a scope from the container's `IServiceScopeFactory` (read once in setup, as ASP.NET Core holds it), resolve the entry point from it
-      (Keryx's `KeryxMediator` or `IMediator`, Mediator's `Mediator` class or `IMediator`, MediatR's `IMediator`, Immediate.Handlers'
-      generated `Handler`, ZeroAlloc.Mediator's `IMediator`, the baseline's handler class), send, await and dispose the scope inside the
-      measured method; every one of those methods is `async`, so each row carries the same state machine. The SQLite scenario has no
-      per-request variant: with the singleton connection below, it would add only the scope cost the `Ping` pair already shows.
-    - **Logging behavior** (outermost). It injects `ILogger<TRequest>` and writes two source-generated messages per request
-      (`RequestLog.Handling` with the request type's name, `RequestLog.Handled` with the `Pong`, formatted through its `ToString`; the
-      subjects read the name with `typeof(TRequest).Name`, the baseline writes `nameof`, which differs under NativeAOT: OQ-75). The
-      only provider is `InMemoryLoggerProvider` at `Information`: it calls the formatter for every message, as a console or file provider
-      does, and keeps the last 1,024 messages in a ring buffer, so nothing grows across iterations. MediatR's license category stays
-      filtered.
-    - **Validation behavior** (inside logging). It injects `IValidator<TRequest>`, a hand-written interface in `Keryx.Benchmarks.Common`
-      that returns an error message or `null`, calls it, and throws `ValidationException` on an error. Each subject's
-      `TypicalPingValidator` checks the same rule (the id names a stored pong) and is registered scoped, the lifetime FluentValidation's
-      assembly scan uses.
-    - **Handler with a scoped repository.** `IPongRepository` (`PongRepository` in `Keryx.Benchmarks.Common`, registered scoped): a
-      `Dictionary<int, string>` lookup over 100 pongs. Keryx's handler method injects it (the generated handler class is registered
-      scoped by `AddKeryx()`); Mediator, MediatR and ZeroAlloc.Mediator take it in the constructor of a handler with the library's default
-      lifetime (transient, scoped for Mediator scoped); Immediate.Handlers injects it as a `HandleAsync` parameter.
-    - **How each library attaches the behaviors.** Keryx: `[Behavior]` on the handler method, the two static behavior classes ordered by
-      `[BehaviorOrder(Phase.Observability)]` and `[BehaviorOrder(Phase.Validation)]`, injecting the services as behavior method
-      parameters (held in the pipeline context). Immediate.Handlers: `[Behaviors]` on the handler class, services in the behavior
-      constructors. Mediator scoped and MediatR: constrained open behaviors selected by `ILogged` and `IValidated` marker interfaces,
-      listed before the pass-through ones, services in the constructors. ZeroAlloc.Mediator: two
-      `[PipelineBehavior(Order = 100 and 101, AppliesTo = typeof(TypicalPing))]` classes with `where TState : IServiceProvider?` that
-      resolve the logger and the validator from the state on every call, the library's documented way for a behavior to get services
-      (its generated `IMediator` passes the provider it was resolved from).
-    - **SQLite.** Microsoft.Data.Sqlite 11.0.0. A named shared-cache in-memory database (`Mode=Memory;Cache=Shared`) is created and seeded
-      with 100 rows once per process by a connection that is never closed (`PongDatabase`). Each container registers a singleton
-      `SqliteConnection` opened to it, and every handler runs the same query helper, `PongDatabase.FindNameAsync`: a new command,
-      `SELECT name FROM pongs WHERE id = $id` with `AddWithValue`, `ExecuteScalarAsync`. A singleton open connection keeps the
-      measurement about the mediator plus a realistic query, with no pool open per call; the benchmarks are single-threaded, so the
-      shared connection is never used concurrently. SQLite's async methods complete synchronously. `Subjects` resolves every
-      container's connection right after building the container (`RealWorldServices.OpenPongDatabase`), which also creates and seeds the
-      database the first time, so no subject opens its connection or seeds the database inside a measured call (before, only the subjects
-      whose handler class was resolved in setup had an open connection; the others opened it, and the first one seeded the database, in
-      their first benchmark call).
-    - **Baseline.** A hand-written handler class per request, registered scoped and called directly (from the long-lived scope, or
-      resolved from a new scope per request). In the behavior scenarios it does the behaviors' work inline (the two log messages, the
-      validator, the lookup), unlike the other scenarios' baseline, which never models behaviors (OQ-51): here the work is far larger than
-      the mediator, so the ratio column shows the mediator's cost on top of the same work.
-    - **Notification scenarios (30d).** Each subject with a publish API declares the notifications in `RealWorldPublish.cs`:
-      `TypicalPinged1`/`TypicalPinged5` (handlers inject the scoped `IPongRepository` and `ILogger<TNotification>`), and
-      `QueryPinged1`/`QueryPinged5` (handlers inject the singleton `SqliteConnection` and `ILogger<TNotification>`); Keryx adds
-      `LoggedPinged1`/`LoggedPinged5` (the `TypicalPinged` handlers' twins, with `[Behavior(typeof(LoggingBehavior))]` on the type) and
-      Keryx and ZeroAlloc.Mediator add `ParallelQueryPinged1`/`ParallelQueryPinged5` (their parallel strategy is an attribute on the
-      type). Every handler is one call to the same body in `Keryx.Benchmarks.Common`, `PingedWork.Lookup` (look the pong up, write
-      `RequestLog.Pinged`) or `PingedWork.QueryAsync` (await `PongDatabase.FindNameAsync`, write `RequestLog.Pinged`), returned in the
-      library's handler shape (MediatR's `Task` through `AsTask()`, which allocates nothing for a completed `ValueTask`). The logger
-      category is the notification type in every subject, as the request behaviors use the request type.
-        - `RealWorldPublish1ScopePerRequest`/`5`: a scope per request, as the `Send` ones, around `Publish(TypicalPinged)`.
-        - `RealWorldPublishBehavior1ScopePerRequest`/`5`: the same with the notification logging behavior: Keryx's `LoggingBehavior`
-          also carries `[NotificationBehavior]`, a fully open method that injects `ILogger<TNotification>` and writes
-          `RequestLog.Publishing` and `RequestLog.Published` around `next`. The baseline's `LoggedPinged` publisher writes the two messages
-          inline.
-        - `RealWorldPublishAsync1`/`5`: `Publish(QueryPinged)` from the long-lived scope with each library's default sequential strategy
-          (Keryx sequential, Mediator's `ForeachAwaitPublisher`, MediatR's `ForeachAwaitPublisher`, ZeroAlloc.Mediator's sequential
-          publish). The awaited operation is the SQLite query, not `Task.Yield`: the query is the realistic await, and a yield would
-          measure thread-pool scheduling more than the mediator. Because SQLite completes synchronously, these rows measure each
-          library's async-handler path on completed tasks, not overlapping I/O.
-        - `RealWorldPublishParallel1`/`5`: the same handlers with each library's parallel strategy. Keryx: `[PublishStrategy(Parallel)]`
-          on `ParallelQueryPinged`. Mediator: `NotificationPublisherType = typeof(TaskWhenAllPublisher)`, a generator option fixed per
-          assembly (the generated wrapper holds the concrete publisher type), so it is a new subject project,
-          `Keryx.Benchmarks.MediatorParallel`, with Mediator's default singleton lifetime and only the `QueryPinged` handlers; its rows
-          are named `MediatorSingleton_*`. MediatR: `NotificationPublisherType = typeof(TaskWhenAllPublisher)` in a second container
-          (`MediatRSetup.AddMediatRParallelBenchmarks`, the same handlers, no behaviors) publishing the same `QueryPinged` types.
-          ZeroAlloc.Mediator: `[ParallelNotification]` on `ParallelQueryPinged` (its generated publish starts every handler, keeps the
-          completed ones in place and awaits the rest with `Task.WhenAll`). The baseline starts every handler before awaiting any, with
-          no failure aggregation (the floor); with one handler it is the sequential call.
-        - Baseline: hand-written handler classes with the same bodies and a publisher class that takes them in its constructor
-          (`TypicalPinged5Publisher` and so on, all scoped), resolved from the scope per request or once from the long-lived scope, and
-          written as an application would (`async`, awaiting each handler).
-        - ZeroAlloc.Mediator's static `Mediator` gets the `QueryPinged` and `ParallelQueryPinged` handlers, which have constructor
-          dependencies, from the factories `ZeroAllocSetup.UseStaticFactories` registers, like the SQLite request handler.
-    - **`--verify`.** The probe also counts validator calls, repository lookups, SQLite queries and formatted log messages, and a
-      real-world benchmark's result is checked by its `Pong` (`ExpectAttribute.Result` for the id, `Name` for the name): `RealWorldPing`
-      1 hit; `RealWorldBehaviors` 7 (2 behaviors, 2 messages, validator, handler, lookup; the baseline 5); `RealWorldSqlite` 2 (handler,
-      query). A real-world notification handler makes 3 (itself, its lookup or query, its message), so the publish scenarios expect 3 and
-      15 hits, the notification-behavior pair 6 and 18 (the behavior and its 2 messages; the baseline, which writes the messages inline,
-      5 and 17). A parallel publish's handlers all complete synchronously here, so the counts are exact after the call.
-    - **n/a cells**, each checked, not assumed:
-        - Mediator singleton in both behavior scenarios: with the singleton lifetime Mediator registers handlers and behaviors as
-          singletons, which cannot take the scoped repository and validator. Building that subject's container with the scenario
-          (`ValidateOnBuild`) fails with "Cannot consume scoped service 'Keryx.Benchmarks.Common.IPongRepository' from singleton
-          'Keryx.Benchmarks.MediatorSingleton.TypicalPingHandler'" (and the same for the validator in `ValidationBehavior`), so the subject
-          leaves `TypicalPing` out.
-        - ZeroAlloc.Mediator's static `Mediator` in both behavior scenarios. The generated static `Send(TypicalPing)` passes a literal
-          `null` as the behaviors' `TState` (read in the generated source; the library's docs say the same), so this subject's behavior
-          body, which resolves the logger and the validator from the state, gets no services. The library's
-          static-path mechanism for behavior services is an `IPipelineBehaviorStateInitializer`, run by `PipelineBehaviorStateActivation`
-          when the container is first used: it hands a process-wide bridge the container, and the bridge opens a new scope for each
-          request that needs scoped services (as its validation bridge does). Using it would take a different behavior body
-          (`state ?? the bridge's container`, plus that scope) and put a scope creation inside every call of the long-lived scenario,
-          unlike every other subject. The mechanism `RealWorldSqlite` uses does not apply: `SetFactory` supplies a handler instance (the
-          static `Send` would take a `TypicalPingHandler` factory too), but behaviors are static methods the generated code calls with
-          the state, never created through a factory. Pointing a static field of our own at the long-lived scope would work, but it is a
-          workaround outside the library's API, so the cell stays n/a.
-        - ZeroAlloc.Mediator's static `Mediator` in every scope-per-request scenario (`RealWorldPingScopePerRequest`,
-          `RealWorldBehaviorsScopePerRequest`, `RealWorldPublish1ScopePerRequest`/`5` and the behavior pair): the static class has no
-          scope to resolve it from.
-        - Mediator singleton in `RealWorldPublish1ScopePerRequest`/`5`: the same reason as for `TypicalPing`; its singleton
-          notification handlers cannot take the scoped repository, so that subject leaves `TypicalPinged` out.
-        - Every library but Keryx in the notification-behavior pair, each checked: Mediator's generated `Publish` goes straight to its
-          notification publisher (a `TypicalPinged1` given the `ILogged` marker, which the open `LoggingBehavior` is constrained to,
-          still published without it); MediatR's `Publish` hands the handlers to its `INotificationPublisher`, and its pipeline behaviors
-          wrap `Send` only (decompiled `Mediator.PublishNotification`); ZeroAlloc.Mediator's generator ignores a
-          `[PipelineBehavior(AppliesTo = typeof(TypicalPinged1))]` behavior (the build succeeds and the generated publish never calls
-          it), its behaviors have the request shape `Handle<TRequest, TResponse, TState>`. A custom notification publisher is a strategy,
-          not a behavior, so none is written.
-        - Mediator scoped in the parallel pair: one Mediator assembly carries the `TaskWhenAllPublisher`, and its lifetime is the
-          default, singleton.
-        - Immediate.Handlers in every notification scenario: it has no notifications.
-        - MediatR has no typed entry point and Immediate.Handlers no generic one, as in OQ-51.
-    - **ZeroAlloc.Mediator's static path with a constructor dependency.** In `RealWorldSqlite` it gets the handler through the library's
-      documented factory, `Mediator.Configure(c => c.SetFactory(...))` (`ZeroAllocSetup.UseStaticFactories`), which resolves the transient
-      handler from the long-lived scope on every call. ZAM008 (a handler without a parameterless constructor) is suppressed in that
-      project for this reason.
-    - **Effect on the existing scenarios.** Every container now also registers logging, the repository and the connection (opened in
-      setup), and every comparison benchmark's setup builds the two parallel-publish containers too, and the
-      logging and validation behaviors join the Mediator scoped and MediatR open behavior lists (their marker constraints exclude every
-      other request). The existing scenarios' setup is otherwise unchanged; their README tables were re-run at the commit that adds these
-      scenarios (decision 32, "Full benchmark run", at the end).
-- **Proposal:** confirm, and add these setup rules to the ADR's Benchmarks section beside OQ-51's, in particular the behavior-scenario
-  baseline that does the behaviors' work inline, the singleton connection, the separate notification-behavior pair (so the per-request
-  publish compares every library on the same work) and the Mediator parallel assembly. Alternative for the baseline: the handler alone, as in the
-  other scenarios, which makes the ratio mostly the cost of logging. Needs a decision.
-
-### OQ-73: The verification probe in NativeAOT benchmark builds (2026-11-27)
-
-Every subject's handlers and behaviors call `Probe.Hit()` (`Keryx.Benchmarks.Common`), which counts calls only in a `--verify` run, where
-an AppContext switch turns it on. Under the JIT, `Probe.Enabled` is a `static readonly` field that Tier 1 code reads as a constant, so in a
-benchmark run `Hit()` compiles to nothing. The NativeAOT compiler has no tiers: it folds a `static readonly` field only when it can run the
-class's static constructor at compile time, and `Probe`'s reads the AppContext switch, so a NativeAOT benchmark keeps a static-base
-access, a field load and a branch in every handler and behavior call. Every subject makes the same calls in a scenario (the baseline
-makes fewer in the behavior scenarios), but the cost is inside every NativeAOT number and grows with the depth. It has not been measured
-(this step measured nothing), and the generated code was not inspected, so "not folded" follows from how the compiler preinitializes
-statics, not from an observation.
-
-- **Interim:** the probe stays as it is; the NativeAOT run (decision 29) includes it. The NativeAOT numbers decision 32's run put in
-  the README (2026-11-27, "Full benchmark run" at the end) include it, and the README says so.
-- **Proposal:** compile the probe out of the builds BenchmarkDotNet makes: an MSBuild property (for example
-  `KeryxBenchmarksProbe=false`) that `Program.cs` sets in its own environment before BenchmarkDotNet builds, so its JIT and NativeAOT
-  builds see it the way they see `KeryxDispatchPadding`, under which `Probe.Enabled` is a `const` `false`; `--verify`, under the JIT and
-  in the NativeAOT publish, keeps the switch. Alternative: measure first (the depth-8 scenarios under NativeAOT with and without the
-  property) and keep the probe if the difference is within noise. Needs a decision.
-
-### OQ-75: Type names in the benchmark behaviors' log messages under NativeAOT (2026-11-27)
-
-Every subject's real-world logging behavior reads the message type's name with `typeof(TRequest).Name` (Keryx's notification behavior
-with `typeof(TNotification).Name`) for its two messages, while the baseline, which does the behaviors' work inline (OQ-72), writes
-`nameof(TypicalPing)`. Under the JIT a type's name is cached and the read allocates nothing; under NativeAOT every read allocates a new
-string: a probe (`typeof(TypicalPing).Name` in a shared generic method, 1,000 reads) measured 0 B per read under the JIT and 48 B
-published with NativeAOT. Two reads per request or publish make Keryx's NativeAOT behavior rows 96 B larger than its JIT rows in decision
-32's run (`RealWorldBehaviors` 520 to 616 B, `RealWorldBehaviorsScopePerRequest` 1,408 to 1,504 B,
-`RealWorldPublishBehavior1ScopePerRequest` 712 to 808 B), and the same reads are in the other libraries' behavior rows, but not in the
-direct call's. Under NativeAOT, those rows' distance from the direct call therefore includes two string allocations that belong to the
-benchmark code, not to the library.
-
-- **Interim:** as measured; the README's NativeAOT section says so.
-- **Proposal:** read the name once per type, the same way in every subject and in the baseline: a `MessageName<T>` static class in
-  `Keryx.Benchmarks.Common` (`public static readonly string Value = typeof(T).Name;`) that every logging behavior, and the baseline with
-  its concrete types, passes to `RequestLog`, so no row allocates for it under either runtime; then re-run the behavior rows under
-  NativeAOT. Alternative: keep `typeof(T).Name` and read it in the baseline too, so every row pays the same. Needs a decision.
 
 ### OQ-76: `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (2026-11-27)
 
@@ -2366,10 +2188,10 @@ Implemented as `RealWorldPing`, `RealWorldPingScopePerRequest`, `RealWorldBehavi
 `RealWorldPublishBehavior1ScopePerRequest`/`5` (the notification behavior, Keryx only), `RealWorldPublishAsync1`/`5` (awaiting the
 SQLite query, not `Task.Yield`) and `RealWorldPublishParallel1`/`5` (`Comparison/RealWorldPublishBenchmarks.cs`, 56 benchmarks), 104 in
 all; Mediator's parallel publisher is a generator option, so it got a subject project of its own (`Keryx.Benchmarks.MediatorParallel`).
-How each library is set up, the connection choice, the parallel publishers and the n/a cells are OQ-72, open. `--verify` (238 comparison
-benchmarks, net10.0 and net11.0) and a Dry-job run of `*RealWorld*` (104 benchmarks) pass; no measured run yet (the README's numbers
-come from the full local run of decision 32). Folded into the ADR (Benchmarks), the brief (Phase 8), the README (Benchmarks) and
-whats-left.md.
+How each library is set up, the connection choice, the parallel publishers and the n/a cells are OQ-72 (decided, owner decision 33).
+`--verify` (238 comparison benchmarks, net10.0 and net11.0) and a Dry-job run of `*RealWorld*` (104 benchmarks) pass; no measured run yet
+(the README's numbers come from the full local run of decision 32). Folded into the ADR (Benchmarks), the brief (Phase 8), the README
+(Benchmarks) and whats-left.md.
 
 ### NativeAOT benchmark run (2026-11-27)
 
@@ -2429,7 +2251,7 @@ Implemented:
   `mcr.microsoft.com/dotnet/sdk:11.0` image with the .NET 10 runtime, clang and zlib1g-dev (linux-arm64; CI is linux-x64), where
   `GateConfig` does add the diagnoser: no warning in Keryx or the subjects, `--verify` 215 passed and 23 n/a, and the Dry run 242
   benchmarks, exit 0. Nothing was measured: the NativeAOT numbers come from decision 32's full local run. The verification probe's cost in
-  NativeAOT builds is OQ-73, open.
+  NativeAOT builds is OQ-73 (decided, owner decision 34: compiled out of the benchmark builds).
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
 
@@ -2463,7 +2285,8 @@ Done:
   and 0.44 ns (OQ-70); the generic `Stream` depth-0 slowdown of decision 22 does not show ("Generic `Stream` at depth 0 is tracked for
   the release", above).
 - **Found while reading the results.** Keryx's `IMediator` rows with a scope per request pay for the forwarding registration (OQ-74), and
-  the behavior rows under NativeAOT for the type names in the log messages (OQ-75); both open, measured as they are.
+  the behavior rows under NativeAOT for the type names in the log messages (OQ-75); both open then, measured as they are (since decided:
+  owner decisions 35 and 36).
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
 
@@ -2513,3 +2336,239 @@ the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`)
 
 Folded into the ADR (status; Injected parameters; DI registration), the brief (the host), the README (Hosts, Injected parameters,
 Benchmarks notes) and whats-left.md.
+
+### OQ-72: How the real-world benchmark scenarios set up each library (2026-11-27)
+
+Decision 30 ("Real-world benchmark scenarios", below) names the scenarios and the subjects, but, as OQ-51 found for the first scenarios,
+not the setup each number depends on: what the baseline does when the scenario has behaviors, the lifetimes of the new services, where
+the SQLite connection comes from, how each library attaches the logging and validation behaviors and gets their services, how each
+library publishes the notification scenarios (30d) sequentially and in parallel, and which subjects cannot run a scenario.
+
+- **Interim** (`test/Keryx.Benchmarks/Comparison/RealWorldBenchmarks.cs` and `RealWorldPublishBenchmarks.cs`, `RealWorld.cs` and
+  `RealWorldPublish.cs` in each project under `test/benchmark-subjects`, the shared services in `Keryx.Benchmarks.Common`):
+    - **Messages.** Each subject declares `Ping`, `TypicalPing` and `QueryPing` (`sealed record` with an `int Id`) with its library's
+      request interface; every library returns the same `Pong(int Id, string Name)` record from `Keryx.Benchmarks.Common`. The
+      benchmarks send id 42.
+    - **Scenarios.** `RealWorldPing` (a handler that returns a new `Pong`, no behaviors), `RealWorldBehaviors` (decision 30b) and
+      `RealWorldSqlite` (30c) send through the entry point resolved once from the scope that lives for the whole benchmark, like the
+      other comparison scenarios. `RealWorldPingScopePerRequest` and `RealWorldBehaviorsScopePerRequest` (30a, and 30a with 30b) create
+      a scope from the container's `IServiceScopeFactory` (read once in setup, as ASP.NET Core holds it), resolve the entry point from it
+      (Keryx's `KeryxMediator` or `IMediator`, Mediator's `Mediator` class or `IMediator`, MediatR's `IMediator`, Immediate.Handlers'
+      generated `Handler`, ZeroAlloc.Mediator's `IMediator`, the baseline's handler class), send, await and dispose the scope inside the
+      measured method; every one of those methods is `async`, so each row carries the same state machine. The SQLite scenario has no
+      per-request variant: with the singleton connection below, it would add only the scope cost the `Ping` pair already shows.
+    - **Logging behavior** (outermost). It injects `ILogger<TRequest>` and writes two source-generated messages per request
+      (`RequestLog.Handling` with the request type's name, `RequestLog.Handled` with the `Pong`, formatted through its `ToString`; the
+      subjects read the name with `typeof(TRequest).Name`, the baseline writes `nameof`, which differs under NativeAOT: OQ-75). The
+      only provider is `InMemoryLoggerProvider` at `Information`: it calls the formatter for every message, as a console or file provider
+      does, and keeps the last 1,024 messages in a ring buffer, so nothing grows across iterations. MediatR's license category stays
+      filtered.
+    - **Validation behavior** (inside logging). It injects `IValidator<TRequest>`, a hand-written interface in `Keryx.Benchmarks.Common`
+      that returns an error message or `null`, calls it, and throws `ValidationException` on an error. Each subject's
+      `TypicalPingValidator` checks the same rule (the id names a stored pong) and is registered scoped, the lifetime FluentValidation's
+      assembly scan uses.
+    - **Handler with a scoped repository.** `IPongRepository` (`PongRepository` in `Keryx.Benchmarks.Common`, registered scoped): a
+      `Dictionary<int, string>` lookup over 100 pongs. Keryx's handler method injects it (the generated handler class is registered
+      scoped by `AddKeryx()`); Mediator, MediatR and ZeroAlloc.Mediator take it in the constructor of a handler with the library's default
+      lifetime (transient, scoped for Mediator scoped); Immediate.Handlers injects it as a `HandleAsync` parameter.
+    - **How each library attaches the behaviors.** Keryx: `[Behavior]` on the handler method, the two static behavior classes ordered by
+      `[BehaviorOrder(Phase.Observability)]` and `[BehaviorOrder(Phase.Validation)]`, injecting the services as behavior method
+      parameters (held in the pipeline context). Immediate.Handlers: `[Behaviors]` on the handler class, services in the behavior
+      constructors. Mediator scoped and MediatR: constrained open behaviors selected by `ILogged` and `IValidated` marker interfaces,
+      listed before the pass-through ones, services in the constructors. ZeroAlloc.Mediator: two
+      `[PipelineBehavior(Order = 100 and 101, AppliesTo = typeof(TypicalPing))]` classes with `where TState : IServiceProvider?` that
+      resolve the logger and the validator from the state on every call, the library's documented way for a behavior to get services
+      (its generated `IMediator` passes the provider it was resolved from).
+    - **SQLite.** Microsoft.Data.Sqlite 11.0.0. A named shared-cache in-memory database (`Mode=Memory;Cache=Shared`) is created and seeded
+      with 100 rows once per process by a connection that is never closed (`PongDatabase`). Each container registers a singleton
+      `SqliteConnection` opened to it, and every handler runs the same query helper, `PongDatabase.FindNameAsync`: a new command,
+      `SELECT name FROM pongs WHERE id = $id` with `AddWithValue`, `ExecuteScalarAsync`. A singleton open connection keeps the
+      measurement about the mediator plus a realistic query, with no pool open per call; the benchmarks are single-threaded, so the
+      shared connection is never used concurrently. SQLite's async methods complete synchronously. `Subjects` resolves every
+      container's connection right after building the container (`RealWorldServices.OpenPongDatabase`), which also creates and seeds the
+      database the first time, so no subject opens its connection or seeds the database inside a measured call (before, only the subjects
+      whose handler class was resolved in setup had an open connection; the others opened it, and the first one seeded the database, in
+      their first benchmark call).
+    - **Baseline.** A hand-written handler class per request, registered scoped and called directly (from the long-lived scope, or
+      resolved from a new scope per request). In the behavior scenarios it does the behaviors' work inline (the two log messages, the
+      validator, the lookup), unlike the other scenarios' baseline, which never models behaviors (OQ-51): here the work is far larger than
+      the mediator, so the ratio column shows the mediator's cost on top of the same work.
+    - **Notification scenarios (30d).** Each subject with a publish API declares the notifications in `RealWorldPublish.cs`:
+      `TypicalPinged1`/`TypicalPinged5` (handlers inject the scoped `IPongRepository` and `ILogger<TNotification>`), and
+      `QueryPinged1`/`QueryPinged5` (handlers inject the singleton `SqliteConnection` and `ILogger<TNotification>`); Keryx adds
+      `LoggedPinged1`/`LoggedPinged5` (the `TypicalPinged` handlers' twins, with `[Behavior(typeof(LoggingBehavior))]` on the type) and
+      Keryx and ZeroAlloc.Mediator add `ParallelQueryPinged1`/`ParallelQueryPinged5` (their parallel strategy is an attribute on the
+      type). Every handler is one call to the same body in `Keryx.Benchmarks.Common`, `PingedWork.Lookup` (look the pong up, write
+      `RequestLog.Pinged`) or `PingedWork.QueryAsync` (await `PongDatabase.FindNameAsync`, write `RequestLog.Pinged`), returned in the
+      library's handler shape (MediatR's `Task` through `AsTask()`, which allocates nothing for a completed `ValueTask`). The logger
+      category is the notification type in every subject, as the request behaviors use the request type.
+        - `RealWorldPublish1ScopePerRequest`/`5`: a scope per request, as the `Send` ones, around `Publish(TypicalPinged)`.
+        - `RealWorldPublishBehavior1ScopePerRequest`/`5`: the same with the notification logging behavior: Keryx's `LoggingBehavior`
+          also carries `[NotificationBehavior]`, a fully open method that injects `ILogger<TNotification>` and writes
+          `RequestLog.Publishing` and `RequestLog.Published` around `next`. The baseline's `LoggedPinged` publisher writes the two messages
+          inline.
+        - `RealWorldPublishAsync1`/`5`: `Publish(QueryPinged)` from the long-lived scope with each library's default sequential strategy
+          (Keryx sequential, Mediator's `ForeachAwaitPublisher`, MediatR's `ForeachAwaitPublisher`, ZeroAlloc.Mediator's sequential
+          publish). The awaited operation is the SQLite query, not `Task.Yield`: the query is the realistic await, and a yield would
+          measure thread-pool scheduling more than the mediator. Because SQLite completes synchronously, these rows measure each
+          library's async-handler path on completed tasks, not overlapping I/O.
+        - `RealWorldPublishParallel1`/`5`: the same handlers with each library's parallel strategy. Keryx: `[PublishStrategy(Parallel)]`
+          on `ParallelQueryPinged`. Mediator: `NotificationPublisherType = typeof(TaskWhenAllPublisher)`, a generator option fixed per
+          assembly (the generated wrapper holds the concrete publisher type), so it is a new subject project,
+          `Keryx.Benchmarks.MediatorParallel`, with Mediator's default singleton lifetime and only the `QueryPinged` handlers; its rows
+          are named `MediatorSingleton_*`. MediatR: `NotificationPublisherType = typeof(TaskWhenAllPublisher)` in a second container
+          (`MediatRSetup.AddMediatRParallelBenchmarks`, the same handlers, no behaviors) publishing the same `QueryPinged` types.
+          ZeroAlloc.Mediator: `[ParallelNotification]` on `ParallelQueryPinged` (its generated publish starts every handler, keeps the
+          completed ones in place and awaits the rest with `Task.WhenAll`). The baseline starts every handler before awaiting any, with
+          no failure aggregation (the floor); with one handler it is the sequential call.
+        - Baseline: hand-written handler classes with the same bodies and a publisher class that takes them in its constructor
+          (`TypicalPinged5Publisher` and so on, all scoped), resolved from the scope per request or once from the long-lived scope, and
+          written as an application would (`async`, awaiting each handler).
+        - ZeroAlloc.Mediator's static `Mediator` gets the `QueryPinged` and `ParallelQueryPinged` handlers, which have constructor
+          dependencies, from the factories `ZeroAllocSetup.UseStaticFactories` registers, like the SQLite request handler.
+    - **`--verify`.** The probe also counts validator calls, repository lookups, SQLite queries and formatted log messages, and a
+      real-world benchmark's result is checked by its `Pong` (`ExpectAttribute.Result` for the id, `Name` for the name): `RealWorldPing`
+      1 hit; `RealWorldBehaviors` 7 (2 behaviors, 2 messages, validator, handler, lookup; the baseline 5); `RealWorldSqlite` 2 (handler,
+      query). A real-world notification handler makes 3 (itself, its lookup or query, its message), so the publish scenarios expect 3 and
+      15 hits, the notification-behavior pair 6 and 18 (the behavior and its 2 messages; the baseline, which writes the messages inline,
+      5 and 17). A parallel publish's handlers all complete synchronously here, so the counts are exact after the call.
+    - **n/a cells**, each checked, not assumed:
+        - Mediator singleton in both behavior scenarios: with the singleton lifetime Mediator registers handlers and behaviors as
+          singletons, which cannot take the scoped repository and validator. Building that subject's container with the scenario
+          (`ValidateOnBuild`) fails with "Cannot consume scoped service 'Keryx.Benchmarks.Common.IPongRepository' from singleton
+          'Keryx.Benchmarks.MediatorSingleton.TypicalPingHandler'" (and the same for the validator in `ValidationBehavior`), so the subject
+          leaves `TypicalPing` out.
+        - ZeroAlloc.Mediator's static `Mediator` in both behavior scenarios. The generated static `Send(TypicalPing)` passes a literal
+          `null` as the behaviors' `TState` (read in the generated source; the library's docs say the same), so this subject's behavior
+          body, which resolves the logger and the validator from the state, gets no services. The library's
+          static-path mechanism for behavior services is an `IPipelineBehaviorStateInitializer`, run by `PipelineBehaviorStateActivation`
+          when the container is first used: it hands a process-wide bridge the container, and the bridge opens a new scope for each
+          request that needs scoped services (as its validation bridge does). Using it would take a different behavior body
+          (`state ?? the bridge's container`, plus that scope) and put a scope creation inside every call of the long-lived scenario,
+          unlike every other subject. The mechanism `RealWorldSqlite` uses does not apply: `SetFactory` supplies a handler instance (the
+          static `Send` would take a `TypicalPingHandler` factory too), but behaviors are static methods the generated code calls with
+          the state, never created through a factory. Pointing a static field of our own at the long-lived scope would work, but it is a
+          workaround outside the library's API, so the cell stays n/a.
+        - ZeroAlloc.Mediator's static `Mediator` in every scope-per-request scenario (`RealWorldPingScopePerRequest`,
+          `RealWorldBehaviorsScopePerRequest`, `RealWorldPublish1ScopePerRequest`/`5` and the behavior pair): the static class has no
+          scope to resolve it from.
+        - Mediator singleton in `RealWorldPublish1ScopePerRequest`/`5`: the same reason as for `TypicalPing`; its singleton
+          notification handlers cannot take the scoped repository, so that subject leaves `TypicalPinged` out.
+        - Every library but Keryx in the notification-behavior pair, each checked: Mediator's generated `Publish` goes straight to its
+          notification publisher (a `TypicalPinged1` given the `ILogged` marker, which the open `LoggingBehavior` is constrained to,
+          still published without it); MediatR's `Publish` hands the handlers to its `INotificationPublisher`, and its pipeline behaviors
+          wrap `Send` only (decompiled `Mediator.PublishNotification`); ZeroAlloc.Mediator's generator ignores a
+          `[PipelineBehavior(AppliesTo = typeof(TypicalPinged1))]` behavior (the build succeeds and the generated publish never calls
+          it), its behaviors have the request shape `Handle<TRequest, TResponse, TState>`. A custom notification publisher is a strategy,
+          not a behavior, so none is written.
+        - Mediator scoped in the parallel pair: one Mediator assembly carries the `TaskWhenAllPublisher`, and its lifetime is the
+          default, singleton.
+        - Immediate.Handlers in every notification scenario: it has no notifications.
+        - MediatR has no typed entry point and Immediate.Handlers no generic one, as in OQ-51.
+    - **ZeroAlloc.Mediator's static path with a constructor dependency.** In `RealWorldSqlite` it gets the handler through the library's
+      documented factory, `Mediator.Configure(c => c.SetFactory(...))` (`ZeroAllocSetup.UseStaticFactories`), which resolves the transient
+      handler from the long-lived scope on every call. ZAM008 (a handler without a parameterless constructor) is suppressed in that
+      project for this reason.
+    - **Effect on the existing scenarios.** Every container now also registers logging, the repository and the connection (opened in
+      setup), and every comparison benchmark's setup builds the two parallel-publish containers too, and the
+      logging and validation behaviors join the Mediator scoped and MediatR open behavior lists (their marker constraints exclude every
+      other request). The existing scenarios' setup is otherwise unchanged; their README tables were re-run at the commit that adds these
+      scenarios (decision 32, "Full benchmark run", at the end).
+- **Proposal:** confirm, and add these setup rules to the ADR's Benchmarks section beside OQ-51's, in particular the behavior-scenario
+  baseline that does the behaviors' work inline, the singleton connection, the separate notification-behavior pair (so the per-request
+  publish compares every library on the same work) and the Mediator parallel assembly. Alternative for the baseline: the handler alone, as in the
+  other scenarios, which makes the ratio mostly the cost of logging. Needs a decision.
+- **Decision** (owner decision 33, 2026-11-27): confirm the setup as recorded in the interim above, including the behavior-scenario
+  baseline that does the behaviors' work inline, the singleton SQLite connection, the separate notification-behavior pair and the Mediator
+  parallel project, and add the setup rules to the ADR's Benchmarks section beside OQ-51's. No code changed for it: the rules are in the
+  ADR ("Real-world setup rules", after the first scenarios' rules), with the n/a cells and their reasons; the checks behind each n/a cell
+  stay recorded here. One detail of the interim changed the same day: the logging behaviors and the baseline read the type name through
+  `MessageName<T>` (owner decision 36, OQ-75, below) instead of `typeof(T).Name` and `nameof`.
+
+Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+### OQ-73: The verification probe in NativeAOT benchmark builds (2026-11-27)
+
+Every subject's handlers and behaviors call `Probe.Hit()` (`Keryx.Benchmarks.Common`), which counts calls only in a `--verify` run, where
+an AppContext switch turns it on. Under the JIT, `Probe.Enabled` is a `static readonly` field that Tier 1 code reads as a constant, so in a
+benchmark run `Hit()` compiles to nothing. The NativeAOT compiler has no tiers: it folds a `static readonly` field only when it can run the
+class's static constructor at compile time, and `Probe`'s reads the AppContext switch, so a NativeAOT benchmark keeps a static-base
+access, a field load and a branch in every handler and behavior call. Every subject makes the same calls in a scenario (the baseline
+makes fewer in the behavior scenarios), but the cost is inside every NativeAOT number and grows with the depth. It has not been measured
+(this step measured nothing), and the generated code was not inspected, so "not folded" follows from how the compiler preinitializes
+statics, not from an observation.
+
+- **Interim:** the probe stays as it is; the NativeAOT run (decision 29) includes it. The NativeAOT numbers decision 32's run put in
+  the README (2026-11-27, "Full benchmark run" at the end) include it, and the README says so.
+- **Proposal:** compile the probe out of the builds BenchmarkDotNet makes: an MSBuild property (for example
+  `KeryxBenchmarksProbe=false`) that `Program.cs` sets in its own environment before BenchmarkDotNet builds, so its JIT and NativeAOT
+  builds see it the way they see `KeryxDispatchPadding`, under which `Probe.Enabled` is a `const` `false`; `--verify`, under the JIT and
+  in the NativeAOT publish, keeps the switch. Alternative: measure first (the depth-8 scenarios under NativeAOT with and without the
+  property) and keep the probe if the difference is within noise. Needs a decision.
+- **Decision** (owner decision 34, 2026-11-27): adopt the proposal: compile the probe out of the builds BenchmarkDotNet makes (JIT and
+  NativeAOT); `--verify`, under the JIT and in the NativeAOT publish, keeps the AppContext switch. Done:
+    - **The property.** `Keryx.Benchmarks.Common.csproj` defines `KERYX_BENCHMARKS_NO_PROBE` when `KeryxBenchmarksProbe` is `false`;
+      under it `Probe.Enabled` is `public const bool Enabled = false` and `Probe.Hit()` has an empty body (`#if`, so the probe-on build is
+      unchanged). `Probe.EnsureCounting()` replaces `Verification`'s read of `Probe.Enabled`: a `const` read there would make the rest of
+      the method unreachable (CS0162, an error here), and it fails a verify run of a probe-less build with a message saying so (checked:
+      `KeryxBenchmarksProbe=false dotnet run -- --verify` throws "This build has no verification probe").
+    - **Setting it.** `Program.cs` calls `Environment.SetEnvironmentVariable("KeryxBenchmarksProbe", "false")` just before
+      `BenchmarkSwitcher` runs, not in `--verify` or `--prototype-disasm`; BenchmarkDotNet's `dotnet restore`, `build` and `publish`
+      inherit the environment, where MSBuild reads it as a property, as with `KeryxDispatchPadding`. BenchmarkDotNet 0.15.8 passes
+      `ArtifactsPath` and `OutDir` to both toolchains' builds (its build log shows them), so the rebuilt Common, subject and benchmark
+      projects go to the generated project's folder, never over the runner's own binaries, which stay probe-on (checked: the runner's
+      `bin/Release/net10.0/Keryx.Benchmarks.Common.dll` and its `obj` copy have the same modification time before and after a Dry run).
+    - **No probe in the benchmark builds** (checked with `--keepFiles`). JIT (`--filter '*RealWorldPing*' --job Dry`): in the generated
+      project's `Keryx.Benchmarks.Common.dll`, `Enabled` is `.field public static literal bool Enabled = bool(false)`, `Hit` is a single
+      `ret` and `Probe` has no static constructor; the runner's own build has `static initonly bool Enabled`, a `Hit` that loads it and
+      branches around `Interlocked.Increment`, and a `.cctor` that reads the switch. NativeAOT (`--runtimes nativeaot10.0`, the same filter,
+      with `StripSymbols=false` and `IlcGenerateMapFile=true` in the environment, against the `--verify` publish built with the same two
+      properties): in the `--verify` binary `Probe` has a static constructor and a `__GetNonGCStaticBase` helper, and the baseline's
+      `PingHandler.Handle` (128 B of code) starts with the class-initialization check (a load and a branch to that helper), then loads
+      `Enabled` and branches around an atomic add; in the benchmark binary neither the constructor nor the helper exists, and
+      `PingHandler.Handle` is 80 B: the `Pong` allocation and the return.
+    - **`--verify` still counts.** JIT net10.0 and net11.0: 238 passed; the NativeAOT publish: 215 passed, 23 n/a. Full Dry runs pass:
+      JIT 271 benchmarks, NativeAOT 242.
+    - **Enforced on every run** (review finding, after the inspection above). The inspection proves one build; a BenchmarkDotNet
+      upgrade, an MSBuild change or a toolchain that reuses the runner's probe-on binaries would bring the probe back silently, since the
+      probe-on build runs the same benchmarks without error. `Probe.IsCompiledOut()` (a method, not a `const`, so its callers have no
+      unreachable code) is true only under `KERYX_BENCHMARKS_NO_PROBE`, and `ComparisonBenchmark.Setup()`, the `[GlobalSetup]` every
+      comparison benchmark shares, throws `InvalidOperationException` ("This benchmark build carries the verification probe;
+      KeryxBenchmarksProbe=false did not reach BenchmarkDotNet's build.") unless it is, so both CI Dry jobs (JIT and
+      `--runtimes nativeaot10.0`) now enforce the guarantee on every pull request. `--verify`, which runs the probe-on build, calls
+      `CreateSubjects()` (what `Setup()` does after the check) instead. `--inProcess` measures the runner's own probe-on build, so it fails
+      too, deliberately: its numbers would include the probe. Checked: full Dry runs pass (JIT 271 benchmarks, NativeAOT 242), `--verify`
+      passes (238 under the JIT, net10.0 and net11.0; 215 and 23 n/a in the NativeAOT publish), and `--filter '*RealWorldPing.*' --job Dry
+      --inProcess` fails with that message.
+
+    Nothing was measured: the README's NativeAOT numbers are still decision 32's, which include the probe, until decision 37's run.
+
+Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+### OQ-75: Type names in the benchmark behaviors' log messages under NativeAOT (2026-11-27)
+
+Every subject's real-world logging behavior reads the message type's name with `typeof(TRequest).Name` (Keryx's notification behavior
+with `typeof(TNotification).Name`) for its two messages, while the baseline, which does the behaviors' work inline (OQ-72), writes
+`nameof(TypicalPing)`. Under the JIT a type's name is cached and the read allocates nothing; under NativeAOT every read allocates a new
+string: a probe (`typeof(TypicalPing).Name` in a shared generic method, 1,000 reads) measured 0 B per read under the JIT and 48 B
+published with NativeAOT. Two reads per request or publish make Keryx's NativeAOT behavior rows 96 B larger than its JIT rows in decision
+32's run (`RealWorldBehaviors` 520 to 616 B, `RealWorldBehaviorsScopePerRequest` 1,408 to 1,504 B,
+`RealWorldPublishBehavior1ScopePerRequest` 712 to 808 B), and the same reads are in the other libraries' behavior rows, but not in the
+direct call's. Under NativeAOT, those rows' distance from the direct call therefore includes two string allocations that belong to the
+benchmark code, not to the library.
+
+- **Interim:** as measured; the README's NativeAOT section says so.
+- **Proposal:** read the name once per type, the same way in every subject and in the baseline: a `MessageName<T>` static class in
+  `Keryx.Benchmarks.Common` (`public static readonly string Value = typeof(T).Name;`) that every logging behavior, and the baseline with
+  its concrete types, passes to `RequestLog`, so no row allocates for it under either runtime; then re-run the behavior rows under
+  NativeAOT. Alternative: keep `typeof(T).Name` and read it in the baseline too, so every row pays the same. Needs a decision.
+- **Decision** (owner decision 36, 2026-11-27): adopt the proposal. `MessageName<T>` (`Keryx.Benchmarks.Common/MessageName.cs`,
+  `public static readonly string Value = typeof(T).Name`) is what every real-world logging behavior passes to `RequestLog`: Keryx's request
+  and notification behavior methods, Mediator scoped's, MediatR's, Immediate.Handlers' and ZeroAlloc.Mediator's
+  (`MessageName<TRequest>.Value`, `MessageName<TMessage>.Value`, `MessageName<TNotification>.Value`), and the baseline with its concrete
+  types (`MessageName<TypicalPing>.Value` in `TypicalPingHandler`, `MessageName<TypicalPinged1>.Value` and
+  `MessageName<TypicalPinged5>.Value` in the two logged publishers), so no row allocates for the name under either runtime. The strings
+  are the same as before, so `--verify`'s results and hit counts are unchanged (238 passed under the JIT, 215 and 23 n/a in the NativeAOT
+  publish). Nothing was measured; decision 37's run re-measures the behavior rows.
+
+Folded into the ADR (status; Benchmarks), the README (Benchmarks) and whats-left.md.

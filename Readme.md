@@ -514,7 +514,8 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 mediators, each in its own small project under `test/benchmark-subjects`, all running the same requests, handler bodies and
 behaviors. Every benchmark is one call on a mediator resolved beforehand (scoped ones from a scope that lives for the whole run), except
 the real-world scope-per-request rows; behaviors complete synchronously. "Typed" is a library's per-request entry point, `IMediator` its
-generic method; n/a marks a scenario the library has no API for. How each library is set up is recorded in
+generic method; n/a marks a scenario the library has no API for. How each library is set up is in the ADR's
+[Benchmarks](docs/adr/0001-keryx-mediator.md#benchmarks) section, and the checks behind it in
 [open-questions.md](docs/adr/open-questions.md) (OQ-51, and OQ-72 for the real-world scenarios).
 
 Each cell is the mean time per call and the bytes allocated per call (exact: BenchmarkDotNet's reports round them to KB once a column
@@ -711,8 +712,9 @@ handlers and behaviors cannot take the scoped repository and validator); ZeroAll
 behavior scenarios (its static `Send` passes behaviors a `null` state, and the library's static-path alternative would need another
 behavior body that opens a scope inside each call) and in every scope-per-request scenario (it has no scope); every library but Keryx in
 the notification-behavior pair; Immediate.Handlers in every notification scenario (it has none); Mediator scoped in the parallel pair (its
-parallel publisher is the singleton project's). The setup is recorded in [open-questions.md](docs/adr/open-questions.md) (OQ-72). Run them
-on their own with `--filter '*RealWorld*'`.
+parallel publisher is the singleton project's). The setup rules are in the ADR's [Benchmarks](docs/adr/0001-keryx-mediator.md#benchmarks)
+section (owner decision 33) and the check behind each n/a cell in [open-questions.md](docs/adr/open-questions.md) (OQ-72). Run them on
+their own with `--filter '*RealWorld*'`.
 
 ### Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only)
 
@@ -777,13 +779,17 @@ three things in mind:
   measures 1.49 to 1.52 ns at every depth: that is the floor of a NativeAOT `Send` row, and the sub-nanosecond JIT `Send` rows have no
   NativeAOT equivalent. The `Publish` rows of the direct call and Keryx's typed overload still measure about a nanosecond or less
   (the direct call 0.17 ns and 1.20 ns, Keryx 0.87 ns and 1.85 ns), so compare those by order of magnitude.
-- In NativeAOT builds the call counter `--verify` uses is not compiled away as it is under the JIT, so each handler and behavior call
-  carries a field load and a branch (OQ-73, open). It is in every subject's rows alike, and grows with the depth.
-- The behaviors' log messages take the request or notification type's name from `typeof(T).Name`, which allocates a new string on every
-  read under NativeAOT (48 B for `TypicalPing`, checked with a NativeAOT probe; nothing under the JIT), while the direct call uses
-  `nameof`. That is Keryx's extra 96 B in the behavior rows under NativeAOT (two messages), and the same reads are in every other
-  library's behavior rows (OQ-75, open). In the scope-per-request rows, Microsoft.Extensions.DependencyInjection resolves without
-  generated IL under NativeAOT, so every row's scope cost changes, the direct call's included.
+- In this run's NativeAOT builds the call counter `--verify` uses was not compiled away as it is under the JIT, so each handler and
+  behavior call carried a field load and a branch, in every subject's rows alike and growing with the depth. Since owner decision 34
+  the builds BenchmarkDotNet makes have no counter at all, under either runtime (the runner sets `KeryxBenchmarksProbe=false` before they
+  build, and every comparison benchmark's setup fails a build that still has it, so CI's Dry runs check it; OQ-73); the next full run
+  (decision 37) replaces these numbers.
+- In this run the behaviors' log messages took the request or notification type's name from `typeof(T).Name`, which allocates a new
+  string on every read under NativeAOT (48 B for `TypicalPing`, checked with a NativeAOT probe; nothing under the JIT), while the direct
+  call used `nameof`. That is Keryx's extra 96 B in the behavior rows under NativeAOT (two messages), and the same reads are in every other
+  library's behavior rows. Since owner decision 36 every behavior and the direct call read it once per type, through `MessageName<T>`
+  (OQ-75); the next full run re-measures those rows. In the scope-per-request rows, Microsoft.Extensions.DependencyInjection resolves
+  without generated IL under NativeAOT, so every row's scope cost changes, the direct call's included.
 
 Send, synchronous handler:
 
@@ -916,7 +922,8 @@ Real-world publish to handlers that await the SQLite query:
   request (332 ns); the other libraries 222 to 331 ns and 495 to 736 ns.
 
 Run them yourself (the JIT run took 25 minutes and the NativeAOT run 22 minutes with these settings; `--verify` checks that every
-library really runs each scenario's handlers and behaviors):
+library really runs each scenario's handlers and behaviors, with a call counter that the benchmark runs compile out: the runner sets the
+MSBuild property `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds):
 
 ```bash
 cd test/Keryx.Benchmarks

@@ -75,9 +75,9 @@ public sealed class LoggedPinged1Publisher(TypicalPinged1Handler a, ILogger<Typi
 {
     public async ValueTask Publish(TypicalPinged1 notification)
     {
-        RequestLog.Publishing(logger, nameof(TypicalPinged1));
+        RequestLog.Publishing(logger, MessageName<TypicalPinged1>.Value);
         await a.Handle(notification).ConfigureAwait(false);
-        RequestLog.Published(logger, nameof(TypicalPinged1));
+        RequestLog.Published(logger, MessageName<TypicalPinged1>.Value);
     }
 }
 
@@ -93,13 +93,13 @@ public sealed class LoggedPinged5Publisher(
 {
     public async ValueTask Publish(TypicalPinged5 notification)
     {
-        RequestLog.Publishing(logger, nameof(TypicalPinged5));
+        RequestLog.Publishing(logger, MessageName<TypicalPinged5>.Value);
         await a.Handle(notification).ConfigureAwait(false);
         await b.Handle(notification).ConfigureAwait(false);
         await c.Handle(notification).ConfigureAwait(false);
         await d.Handle(notification).ConfigureAwait(false);
         await e.Handle(notification).ConfigureAwait(false);
-        RequestLog.Published(logger, nameof(TypicalPinged5));
+        RequestLog.Published(logger, MessageName<TypicalPinged5>.Value);
     }
 }
 

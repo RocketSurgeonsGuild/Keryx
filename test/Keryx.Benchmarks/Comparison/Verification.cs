@@ -52,10 +52,7 @@ internal static class Verification
 
     public static async Task<int> RunAsync()
     {
-        if (!Probe.Enabled)
-        {
-            throw new InvalidOperationException($"Set the {Probe.SwitchName} AppContext switch before verifying.");
-        }
+        Probe.EnsureCounting();
 
         var runtime = NativeAot.IsActive ? "NativeAOT" : "JIT";
         var failures = new List<string>();
@@ -66,7 +63,7 @@ internal static class Verification
             var expect = scenario.Type.GetCustomAttribute<ExpectAttribute>()
              ?? throw new InvalidOperationException($"{scenario.Type.Name} has no [Expect].");
             var benchmark = scenario.Create();
-            benchmark.Setup();
+            benchmark.CreateSubjects();
             try
             {
                 foreach (var method in scenario.Benchmarks)

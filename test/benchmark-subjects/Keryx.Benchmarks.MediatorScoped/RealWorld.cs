@@ -62,9 +62,9 @@ public sealed class LoggingBehavior<TMessage, TResponse>(ILogger<TMessage> logge
     public async ValueTask<TResponse> Handle(TMessage message, MessageHandlerDelegate<TMessage, TResponse> next, CancellationToken cancellationToken)
     {
         Probe.Hit();
-        RequestLog.Handling(logger, typeof(TMessage).Name);
+        RequestLog.Handling(logger, MessageName<TMessage>.Value);
         var response = await next(message, cancellationToken).ConfigureAwait(false);
-        RequestLog.Handled(logger, typeof(TMessage).Name, response);
+        RequestLog.Handled(logger, MessageName<TMessage>.Value, response);
         return response;
     }
 }

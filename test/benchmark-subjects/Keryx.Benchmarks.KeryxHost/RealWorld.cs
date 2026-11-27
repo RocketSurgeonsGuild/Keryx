@@ -72,9 +72,9 @@ public static class LoggingBehavior
         where TNext : struct, INext<TResponse>
     {
         Probe.Hit();
-        RequestLog.Handling(logger, typeof(TRequest).Name);
+        RequestLog.Handling(logger, MessageName<TRequest>.Value);
         var response = await next.InvokeAsync(cancellationToken).ConfigureAwait(false);
-        RequestLog.Handled(logger, typeof(TRequest).Name, response);
+        RequestLog.Handled(logger, MessageName<TRequest>.Value, response);
         return response;
     }
 
@@ -88,9 +88,9 @@ public static class LoggingBehavior
         where TNext : struct, INext
     {
         Probe.Hit();
-        RequestLog.Publishing(logger, typeof(TNotification).Name);
+        RequestLog.Publishing(logger, MessageName<TNotification>.Value);
         await next.InvokeAsync(cancellationToken).ConfigureAwait(false);
-        RequestLog.Published(logger, typeof(TNotification).Name);
+        RequestLog.Published(logger, MessageName<TNotification>.Value);
     }
 }
 

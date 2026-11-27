@@ -39,7 +39,7 @@ public sealed class TypicalPingHandler(ILogger<TypicalPing> logger, IValidator<T
 {
     public ValueTask<Pong> Handle(TypicalPing request)
     {
-        RequestLog.Handling(logger, nameof(TypicalPing));
+        RequestLog.Handling(logger, MessageName<TypicalPing>.Value);
         if (validator.Validate(request) is { } error)
         {
             throw new ValidationException(error);
@@ -48,7 +48,7 @@ public sealed class TypicalPingHandler(ILogger<TypicalPing> logger, IValidator<T
         Probe.Hit();
         var name = repository.FindName(request.Id) ?? throw new KeyNotFoundException($"No pong with id {request.Id}.");
         var response = new Pong(request.Id, name);
-        RequestLog.Handled(logger, nameof(TypicalPing), response);
+        RequestLog.Handled(logger, MessageName<TypicalPing>.Value, response);
         return new(response);
     }
 }

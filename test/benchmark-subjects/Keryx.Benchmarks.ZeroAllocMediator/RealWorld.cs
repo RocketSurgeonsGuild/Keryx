@@ -72,9 +72,9 @@ public sealed class TypicalPingLogging : IPipelineBehavior
     {
         Probe.Hit();
         var logger = Services(state).GetRequiredService<ILogger<TRequest>>();
-        RequestLog.Handling(logger, typeof(TRequest).Name);
+        RequestLog.Handling(logger, MessageName<TRequest>.Value);
         var response = await next(request, state, ct).ConfigureAwait(false);
-        RequestLog.Handled(logger, typeof(TRequest).Name, response);
+        RequestLog.Handled(logger, MessageName<TRequest>.Value, response);
         return response;
     }
 

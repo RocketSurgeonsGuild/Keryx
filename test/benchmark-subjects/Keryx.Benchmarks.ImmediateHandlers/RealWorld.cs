@@ -63,9 +63,9 @@ public sealed class LoggingBehavior<TRequest, TResponse>(ILogger<TRequest> logge
     public override async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken cancellationToken)
     {
         Probe.Hit();
-        RequestLog.Handling(logger, typeof(TRequest).Name);
+        RequestLog.Handling(logger, MessageName<TRequest>.Value);
         var response = await Next(request, cancellationToken).ConfigureAwait(false);
-        RequestLog.Handled(logger, typeof(TRequest).Name, response);
+        RequestLog.Handled(logger, MessageName<TRequest>.Value, response);
         return response;
     }
 }

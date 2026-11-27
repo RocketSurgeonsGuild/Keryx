@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
+using Keryx.Benchmarks.Common;
 using K = Keryx.Benchmarks.KeryxHost;
 using MS = Keryx.Benchmarks.MediatorScoped;
 using MSi = Keryx.Benchmarks.MediatorSingleton;
@@ -33,8 +34,30 @@ public abstract class ComparisonBenchmark
     private protected MediatR.IMediator MediatR = null!;
     private protected ZeroAlloc.Mediator.IMediator ZeroAllocMediator = null!;
 
+    /// <summary>
+    ///     Fails unless this build has no verification probe (owner decision 34, open-questions OQ-73): the runner sets
+    ///     <c>KeryxBenchmarksProbe=false</c> before BenchmarkDotNet builds, and a build that missed it (a BenchmarkDotNet or MSBuild change,
+    ///     or a toolchain that reuses the runner's own probe-on binaries, as <c>--inProcess</c> does) would measure the probe in every
+    ///     handler and behavior call. Then builds the subjects.
+    /// </summary>
     [GlobalSetup]
     public void Setup()
+    {
+        if (!Probe.IsCompiledOut())
+        {
+            throw new InvalidOperationException(
+                "This benchmark build carries the verification probe; KeryxBenchmarksProbe=false did not reach BenchmarkDotNet's build."
+            );
+        }
+
+        CreateSubjects();
+    }
+
+    /// <summary>
+    ///     Builds each library's container and copies the mediators into fields; <c>--verify</c>, which runs the probe-on build, calls it
+    ///     in place of <see cref="Setup" />.
+    /// </summary>
+    internal void CreateSubjects()
     {
         _subjects = new();
         KeryxTyped = _subjects.KeryxTyped;

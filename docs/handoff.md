@@ -495,11 +495,17 @@ lookup and a log message each) published per request scope, again with the loggi
 other libraries' behaviors wrap requests only), to handlers that await the SQLite query published sequentially, and with each library's
 parallel strategy (Keryx `PublishStrategy.Parallel`, Mediator and MediatR `TaskWhenAllPublisher`, ZeroAlloc.Mediator
 `[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same bodies
-in every subject, 104 real-world benchmarks that `--verify` counts, the setup in OQ-72. The comparison suite also runs with
+in every subject, 104 real-world benchmarks that `--verify` counts, the setup confirmed by the owner (decision 33, OQ-72) and written in
+the ADR's Benchmarks section ("Real-world setup rules"); every logging behavior and the baseline read the message type's name once per type
+through `MessageName<T>` in `Keryx.Benchmarks.Common` (decision 36, OQ-75). The comparison suite also runs with
 BenchmarkDotNet's NativeAOT toolchain (owner decisions 29 and 31, `--runtimes nativeaot10.0`): a subject that cannot run there is n/a with
 the reason found by building and running it (MediatR 15, in every scenario; `Comparison/NativeAot.cs`), and `--verify` runs in the
 benchmark project published with NativeAOT (`-p:KeryxBenchmarksNativeAot=true`), with no trim or AOT warning in Keryx's own code and none
-suppressed (open-questions, "NativeAOT benchmark run"; the probe's NativeAOT cost is OQ-73). The benchmarks workflow runs the suite with
+suppressed (open-questions, "NativeAOT benchmark run"). The verification probe is compiled out of the builds BenchmarkDotNet makes
+(decision 34, OQ-73): `Program.cs` sets `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds, under which
+`Probe.Enabled` is a `const` `false` and `Probe.Hit()` is empty; `--verify` builds without it. Every comparison benchmark's
+`[GlobalSetup]` throws unless `Probe.IsCompiledOut()`, so a benchmark build with the probe fails the run (the CI Dry jobs enforce it;
+`--inProcess` runs the runner's probe-on build and fails too; `--verify` calls `CreateSubjects()` instead). The benchmarks workflow runs the suite with
 `--verify` and `--job Dry`, a NativeAOT job publishes it with NativeAOT, runs `--verify` in that binary and runs it with
 `--job Dry --runtimes nativeaot10.0` (the Phase 4 prototype is JIT-only and left out there; run `--runtimes nativeaot10.0` on its own, since
 side by side with the JIT the NativeAOT rows get no ratios), and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser`
@@ -508,7 +514,8 @@ The README's tables come from one full local run of the comparison suite under t
 (owner decision 32: IterationCount=15, IterationTime=200ms, LaunchCount=1, WarmupCount=5, built from a clean copy of the measured commit,
 nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
 2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
-scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT).
+scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT; decided:
+`MessageName<T>`, owner decision 36). Decision 37's full run, under the JIT and then NativeAOT, refreshes the tables these changes affect.
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`

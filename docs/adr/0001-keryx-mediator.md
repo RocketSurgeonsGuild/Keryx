@@ -57,18 +57,22 @@ Amended a tenth time 2026-11-27 (owner decision 30): the comparison benchmarks g
 request, typical logging and validation behaviors around a handler with a scoped repository, a SQLite query, and `Pinged` notifications
 to 1 and 5 handlers published per request scope (with a notification logging behavior where the library has one), to async handlers
 sequentially, and with each library's parallel strategy (Benchmarks; open-questions, "Real-world benchmark scenarios"; their per-library
-setup is OQ-72, open).
+setup is OQ-72, decided (owner decision 33, below)).
 Amended an eleventh time 2026-11-27 (owner decisions 29 and 31): the comparison suite also runs with BenchmarkDotNet's NativeAOT toolchain,
 with the subjects that cannot run there shown n/a with a verified reason (MediatR), `--verify` checks the NativeAOT build, and a CI job
 builds and dry-runs the suite under NativeAOT (Benchmarks; open-questions, "NativeAOT benchmark run"; the verification probe's cost in
-NativeAOT builds is OQ-73, open).
+NativeAOT builds is OQ-73, decided (owner decision 34, below)).
 Amended a twelfth time 2026-11-27 (owner decision 32): the README's benchmark tables come from one full local run of the comparison
 suite, under the JIT and then under NativeAOT, with the settings and machine stated (Benchmarks; open-questions, "Full benchmark run";
 what that run found, the `IMediator` scope entry and the benchmark behaviors' type names under NativeAOT, is OQ-74, decided (owner
-decision 35, below), and OQ-75, open).
+decision 35, below), and OQ-75, decided (owner decision 36, below)).
 Amended a thirteenth time 2026-11-27 (owner decision 35, OQ-74): `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as
 transient factories that forward to the scoped `KeryxMediator`, so resolving them adds no scope entry, and `ValidateOnBuild` no longer
 reports a singleton that depends on one of them (Injected parameters; Generated host, DI registration; that trade-off is OQ-76, open).
+Amended a fourteenth time 2026-11-27 (owner decisions 33, 34 and 36): the real-world benchmark scenarios' setup is confirmed as
+implemented and written down beside the first scenarios' rules (open-questions OQ-72, decided); the verification probe is compiled out of
+the builds BenchmarkDotNet makes, under the JIT and NativeAOT, while `--verify` keeps it (OQ-73, decided); and every logging behavior and
+the baseline read the message type's name once per type, through one `MessageName<T>` cache (OQ-75, decided) (Benchmarks).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1504,10 +1508,8 @@ Real-world `Ping` -> `Pong` scenarios (owner decision 30, 2026-11-27), for every
       `TaskWhenAllPublisher` (a second container), ZeroAlloc.Mediator's `[ParallelNotification]`.
 
 The handler bodies and behaviors are the same in every subject (the notification handlers all call one body in the common project), and
-`--verify` counts their handler, behavior, validator, repository, query and log calls. How each library is set up for them (the baseline,
-the lifetimes, the connection, the parallel publishers, the n/a cells: Mediator singleton in the behavior scenarios and the per-request
-publish, ZeroAlloc.Mediator's static class in the behavior scenarios and everything per request, every library but Keryx in the
-notification-behavior pair) is open-questions OQ-72, still open.
+`--verify` counts their handler, behavior, validator, repository, query and log calls. How each library is set up for them is in the
+real-world setup rules below (owner decision 33, open-questions OQ-72).
 
 Setup rules, which every number depends on:
 
@@ -1523,6 +1525,61 @@ Setup rules, which every number depends on:
   does not complete synchronously.
 - "Typed" is each library's per-request entry point, "generic" its `IMediator`/`ISender` generic method. A scenario a library has no API
   for is left out and shown as n/a.
+- The verification probe that every handler and behavior calls (`Probe.Hit()`, counted by `--verify`) is compiled out of the builds
+  BenchmarkDotNet makes, under the JIT and NativeAOT (owner decision 34, open-questions OQ-73): the benchmark runner sets the MSBuild
+  property `KeryxBenchmarksProbe=false` in its own environment before BenchmarkDotNet builds, and under it `Probe.Enabled` is a `const`
+  `false` and `Probe.Hit()` is empty, so no measured call reads a static field or branches on it (a NativeAOT build cannot fold the
+  `static readonly` switch the way the JIT's Tier 1 does). `--verify`, under the JIT and in the NativeAOT publish, builds without the
+  property and keeps the AppContext switch. Every comparison benchmark's `[GlobalSetup]` throws unless `Probe.IsCompiledOut()` is true,
+  so a benchmark build that still has the probe (the property did not reach BenchmarkDotNet's build, or a toolchain such as `--inProcess`
+  reused the runner's own binaries) fails the run, and the CI Dry jobs (JIT and NativeAOT) enforce it on every pull request.
+
+Real-world setup rules (owner decision 33, 2026-11-27, open-questions OQ-72, where each n/a cell's check is recorded), beside the rules
+above:
+
+- **Messages.** Each subject declares `Ping`, `TypicalPing` and `QueryPing` (`sealed record` with an `int Id`) with its library's request
+  interface, and every library returns the same `Pong(int Id, string Name)` from the common project; the benchmarks send id 42.
+- **Scopes.** The long-lived scenarios send through the entry point resolved once from the scope that lives for the whole benchmark. The
+  per-request ones read the container's `IServiceScopeFactory` once in setup, as ASP.NET Core holds it, and inside the measured method,
+  which is `async` for every subject, create a scope, resolve the library's entry point from it (Keryx's `KeryxMediator` or `IMediator`,
+  Mediator's class or `IMediator`, MediatR's `IMediator`, Immediate.Handlers' generated `Handler`, ZeroAlloc.Mediator's `IMediator`, the
+  baseline's handler or publisher class), send or publish, await and dispose the scope. The SQLite scenario has no per-request variant.
+- **Logging behavior** (outermost). It injects `ILogger<TRequest>` and writes two source-generated messages per request, the request
+  type's name before the handler and the `Pong` after it; every subject's behavior and the baseline read the name through
+  `MessageName<T>.Value` in the common project, read once per type (owner decision 36, open-questions OQ-75), since under NativeAOT
+  every `typeof(T).Name` read allocates a string. The only logging provider formats every message, as a console or file provider does,
+  and keeps the last 1,024 in a ring buffer.
+- **Validation behavior** (inside logging). It calls a hand-written `IValidator<TRequest>` from the common project and throws on an
+  error; each subject's validator checks the same rule and is registered scoped, the lifetime FluentValidation's assembly scan uses.
+- **Handler.** It injects the scoped `IPongRepository` (a dictionary lookup over 100 pongs), in each library's way and with its default
+  handler lifetime.
+- **Attaching the behaviors.** Each library its own way: Keryx's `[Behavior]` with `[BehaviorOrder(Phase.Observability)]` and
+  `[BehaviorOrder(Phase.Validation)]`, services as behavior method parameters; Immediate.Handlers' `[Behaviors]`, services in the
+  behaviors' constructors; Mediator scoped and MediatR as constrained open behaviors selected by `ILogged` and `IValidated` marker
+  interfaces; ZeroAlloc.Mediator's `[PipelineBehavior(Order, AppliesTo)]` classes, which resolve the logger and the validator from the
+  state its `IMediator` passes, the library's documented way.
+- **SQLite.** One named shared-cache in-memory database, created and seeded once per process by a connection that is never closed. Each
+  container registers a singleton `SqliteConnection` opened to it in setup, and every handler runs the same query helper (a new command,
+  one parameter, `ExecuteScalarAsync`): the measurement is the mediator plus a realistic query, with no pool open per call; the benchmarks
+  are single-threaded, so the connection is never used concurrently. ZeroAlloc.Mediator's static class gets this handler, which has a
+  constructor dependency, from the library's documented factory (`SetFactory`), resolved from the long-lived scope on every call.
+- **Baseline.** A hand-written handler class per request, registered scoped and called directly. In the behavior scenarios it does the
+  behaviors' work inline (the two log messages, the validator, the lookup), unlike the baseline of the scenarios above: there the work is
+  far larger than the mediator, so the ratio shows the mediator's cost on top of the same work. For notifications, a publisher class that
+  takes the handlers in its constructor and awaits each in turn, written as an application would; for the parallel publish it starts
+  every handler before awaiting any, with no failure aggregation (the floor).
+- **Notifications.** The per-request publish pair (handlers that look the pong up and write one message) is the same work in every
+  library with a publish API. A separate pair adds the logging behavior as a notification behavior, where only Keryx has one, so the
+  first pair still compares every library on the same work (the baseline writes the behavior's two messages inline). The async pair awaits
+  the SQLite query in each handler with each library's default sequential strategy; the parallel pair uses each library's parallel
+  strategy: Keryx's `PublishStrategy.Parallel`, Mediator's `TaskWhenAllPublisher` (a generator option fixed per assembly, so a subject
+  assembly of its own with Mediator's default singleton lifetime), MediatR's `TaskWhenAllPublisher` (a second container) and
+  ZeroAlloc.Mediator's `[ParallelNotification]`.
+- **n/a cells**, each checked by building or running it: Mediator singleton in the behavior scenarios and the per-request publish (its
+  singleton handlers cannot take the scoped repository and validator); ZeroAlloc.Mediator's static class in the behavior scenarios (its
+  static `Send` passes no services to behaviors) and in every per-request scenario (it has no scope); every library but Keryx in the
+  notification-behavior pair; Mediator scoped in the parallel pair (the parallel assembly is singleton); Immediate.Handlers in every
+  notification scenario; and, as above, MediatR's typed and Immediate.Handlers' generic entry points.
 
 **NativeAOT** (owner decisions 29 and 31, 2026-11-27). The comparison suite also runs with BenchmarkDotNet's NativeAOT toolchain on net10.0
 (`--runtimes nativeaot10.0`, run on its own for its ratio columns), with the same scenarios and subjects. A subject that cannot run under
@@ -1549,8 +1606,9 @@ request. Numbers are never published from shared runners. The README's numbers c
 since owner decision 32 (2026-11-27), one full run of the comparison suite (`--filter '*Comparison*'`, IterationCount=15,
 IterationTime=200ms, LaunchCount=1, WarmupCount=5) under the JIT and right after it under NativeAOT, built from a clean copy of the commit
 it measures, with nothing else running on the machine; the README states the date, the commit and BenchmarkDotNet's environment block,
-shows the NativeAOT times beside the JIT times, and notes what is in the NativeAOT numbers that is not the library's (the verification
-probe, OQ-73; the log messages' type names, OQ-75).
+shows the NativeAOT times beside the JIT times, and notes anything in the numbers that is not the library's. Since owner decisions 34
+and 36 neither the verification probe nor the log messages' type names is in them; decision 32's run, measured before, included both
+under NativeAOT (OQ-73, OQ-75), and the next full run (decision 37) replaces those numbers.
 Before a release the comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream
 behaviors, which measured 20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision
 22, 2026-11-27: tracked for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
