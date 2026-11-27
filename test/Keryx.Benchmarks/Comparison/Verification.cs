@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BenchmarkDotNet.Attributes;
 using Keryx.Benchmarks.Common;
@@ -9,10 +10,46 @@ namespace Keryx.Benchmarks.Comparison;
 ///     result (a real-world scenario's <see cref="Pong" />: id and name) and the number of probe hits (handler and behavior calls; in the
 ///     real-world scenarios also validator calls, repository lookups, SQLite queries and formatted log messages) against the scenario's
 ///     <see cref="ExpectAttribute" />, so a library that is not configured to run the scenario's behaviors fails here instead of looking fast
-///     in the results.
+///     in the results. The same check runs in the NativeAOT build (this project published with NativeAOT and run with <c>--verify</c>), where a
+///     subject that is n/a under NativeAOT (<see cref="NativeAot" />) is reported and skipped instead of called.
 /// </summary>
 internal static class Verification
 {
+    /// <summary>
+    ///     Every comparison scenario, listed rather than found by scanning the assembly so the NativeAOT build can call them without trim
+    ///     warnings. <see cref="ScenarioListValidator" /> fails a benchmark run that finds a <see cref="ComparisonBenchmark" /> missing here.
+    /// </summary>
+    public static readonly IReadOnlyList<Scenario> Scenarios =
+    [
+        Scenario.Of<PublishTo1>(),
+        Scenario.Of<PublishTo5>(),
+        Scenario.Of<RealWorldBehaviors>(),
+        Scenario.Of<RealWorldBehaviorsScopePerRequest>(),
+        Scenario.Of<RealWorldPing>(),
+        Scenario.Of<RealWorldPingScopePerRequest>(),
+        Scenario.Of<RealWorldPublish1ScopePerRequest>(),
+        Scenario.Of<RealWorldPublish5ScopePerRequest>(),
+        Scenario.Of<RealWorldPublishAsync1>(),
+        Scenario.Of<RealWorldPublishAsync5>(),
+        Scenario.Of<RealWorldPublishBehavior1ScopePerRequest>(),
+        Scenario.Of<RealWorldPublishBehavior5ScopePerRequest>(),
+        Scenario.Of<RealWorldPublishParallel1>(),
+        Scenario.Of<RealWorldPublishParallel5>(),
+        Scenario.Of<RealWorldSqlite>(),
+        Scenario.Of<SendSyncDepth0>(),
+        Scenario.Of<SendSyncDepth1>(),
+        Scenario.Of<SendSyncDepth3>(),
+        Scenario.Of<SendSyncDepth8>(),
+        Scenario.Of<SendUnitYieldTask>(),
+        Scenario.Of<SendUnitYieldValueTask>(),
+        Scenario.Of<SendYieldDepth0>(),
+        Scenario.Of<SendYieldDepth1>(),
+        Scenario.Of<SendYieldDepth3>(),
+        Scenario.Of<SendYieldDepth8>(),
+        Scenario.Of<StreamDepth0>(),
+        Scenario.Of<StreamDepth3>(),
+    ];
+
     public static async Task<int> RunAsync()
     {
         if (!Probe.Enabled)
@@ -20,34 +57,47 @@ internal static class Verification
             throw new InvalidOperationException($"Set the {Probe.SwitchName} AppContext switch before verifying.");
         }
 
+        var runtime = NativeAot.IsActive ? "NativeAOT" : "JIT";
         var failures = new List<string>();
+        var notApplicable = new List<(string Benchmark, string Scenario, string Reason)>();
         var checkedCount = 0;
-        var scenarios = typeof(ComparisonBenchmark)
-                       .Assembly.GetTypes()
-                       .Where(static type => type is { IsAbstract: false } && type.IsSubclassOf(typeof(ComparisonBenchmark)))
-                       .OrderBy(static type => type.Name, StringComparer.Ordinal);
-        foreach (var scenario in scenarios)
+        foreach (var scenario in Scenarios.OrderBy(static scenario => scenario.Type.Name, StringComparer.Ordinal))
         {
-            var expect = scenario.GetCustomAttribute<ExpectAttribute>()
-             ?? throw new InvalidOperationException($"{scenario.Name} has no [Expect].");
-            var benchmark = (ComparisonBenchmark)Activator.CreateInstance(scenario)!;
+            var expect = scenario.Type.GetCustomAttribute<ExpectAttribute>()
+             ?? throw new InvalidOperationException($"{scenario.Type.Name} has no [Expect].");
+            var benchmark = scenario.Create();
             benchmark.Setup();
             try
             {
-                foreach (var method in scenario.GetMethods().Where(static method => method.IsDefined(typeof(BenchmarkAttribute))).OrderBy(static method => method.Name, StringComparer.Ordinal))
+                foreach (var method in scenario.Benchmarks)
                 {
+                    if (NativeAot.IsActive && NativeAot.NotApplicable(method.Name) is { } reason)
+                    {
+                        notApplicable.Add((method.Name, scenario.Type.Name, reason));
+                        continue;
+                    }
+
                     var isBaseline = method.GetCustomAttribute<BenchmarkAttribute>()!.Baseline;
                     var hits = isBaseline && expect.BaselineHits >= 0 ? expect.BaselineHits : expect.Hits;
                     for (var run = 0; run < 2; run++)
                     {
                         _ = Probe.Take();
-                        var (result, name) = await InvokeAsync(benchmark, method);
-                        var actualHits = Probe.Take();
-                        if (result != expect.Result || name != expect.Name || actualHits != hits)
+                        try
                         {
-                            failures.Add(
-                                $"{scenario.Name}.{method.Name} (call {run + 1}): result {result} {name}, expected {expect.Result} {expect.Name}; hits {actualHits}, expected {hits}"
-                            );
+                            var (result, name) = await InvokeAsync(benchmark, method);
+                            var actualHits = Probe.Take();
+                            if (result != expect.Result || name != expect.Name || actualHits != hits)
+                            {
+                                failures.Add(
+                                    $"{scenario.Type.Name}.{method.Name} (call {run + 1}): result {result} {name}, expected {expect.Result} {expect.Name}; hits {actualHits}, expected {hits}"
+                                );
+                            }
+                        }
+                        catch (Exception exception)
+                        {
+                            var thrown = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+                            failures.Add($"{scenario.Type.Name}.{method.Name} (call {run + 1}): threw {thrown}");
+                            break;
                         }
                     }
 
@@ -60,12 +110,19 @@ internal static class Verification
             }
         }
 
+        foreach (var subject in notApplicable.GroupBy(static skipped => (skipped.Benchmark, skipped.Reason)))
+        {
+            Console.WriteLine($"n/a under NativeAOT: {subject.Key.Benchmark} in {subject.Count()} scenarios. {subject.Key.Reason}");
+        }
+
         foreach (var failure in failures)
         {
             Console.Error.WriteLine("FAILED: " + failure);
         }
 
-        Console.WriteLine($"Verified {checkedCount} comparison benchmarks: {( failures.Count == 0 ? "all passed" : $"{failures.Count} failed" )}.");
+        var skipped = notApplicable.Count == 0 ? "" : $", {notApplicable.Count} n/a";
+        var outcome = failures.Count == 0 ? "all passed" : $"{failures.Count} failed";
+        Console.WriteLine($"Verified {checkedCount} comparison benchmarks ({runtime}{skipped}): {outcome}.");
         return failures.Count == 0 ? 0 : 1;
     }
 
@@ -94,5 +151,39 @@ internal static class Verification
     {
         _ = await task;
         return -1;
+    }
+
+    /// <summary>A comparison scenario: its type, how to create it, and its <c>[Benchmark]</c> methods in name order.</summary>
+    internal sealed class Scenario
+    {
+        private readonly Func<ComparisonBenchmark> _create;
+
+        private Scenario(Type type, Func<ComparisonBenchmark> create, IReadOnlyList<MethodInfo> benchmarks)
+        {
+            Type = type;
+            _create = create;
+            Benchmarks = benchmarks;
+        }
+
+        public Type Type { get; }
+        public IReadOnlyList<MethodInfo> Benchmarks { get; }
+
+        public ComparisonBenchmark Create() => _create();
+
+        /// <summary>
+        ///     The annotation keeps <typeparamref name="T" />'s public methods (the benchmarks) for reflection in a trimmed or NativeAOT build.
+        /// </summary>
+        public static Scenario Of<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)] T>()
+            where T : ComparisonBenchmark, new() =>
+            new(
+                typeof(T),
+                static () => new T(),
+                [
+                    .. typeof(T)
+                      .GetMethods()
+                      .Where(static method => method.IsDefined(typeof(BenchmarkAttribute)))
+                      .OrderBy(static method => method.Name, StringComparer.Ordinal),
+                ]
+            );
     }
 }

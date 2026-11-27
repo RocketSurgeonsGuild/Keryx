@@ -493,9 +493,15 @@ lookup and a log message each) published per request scope, again with the loggi
 other libraries' behaviors wrap requests only), to handlers that await the SQLite query published sequentially, and with each library's
 parallel strategy (Keryx `PublishStrategy.Parallel`, Mediator and MediatR `TaskWhenAllPublisher`, ZeroAlloc.Mediator
 `[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same bodies
-in every subject, 104 real-world benchmarks that `--verify` counts, the setup in OQ-72. The benchmarks workflow runs
-the suite with `--verify` and `--job Dry`, and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser` (OQ-36), whose
-output is the CI evidence for gate criterion 2.
+in every subject, 104 real-world benchmarks that `--verify` counts, the setup in OQ-72. The comparison suite also runs with
+BenchmarkDotNet's NativeAOT toolchain (owner decisions 29 and 31, `--runtimes nativeaot10.0`): a subject that cannot run there is n/a with
+the reason found by building and running it (MediatR 15, in every scenario; `Comparison/NativeAot.cs`), and `--verify` runs in the
+benchmark project published with NativeAOT (`-p:KeryxBenchmarksNativeAot=true`), with no trim or AOT warning in Keryx's own code and none
+suppressed (open-questions, "NativeAOT benchmark run"; the probe's NativeAOT cost is OQ-73). The benchmarks workflow runs the suite with
+`--verify` and `--job Dry`, a NativeAOT job publishes it with NativeAOT, runs `--verify` in that binary and runs it with
+`--job Dry --runtimes nativeaot10.0` (the Phase 4 prototype is JIT-only and left out there; run `--runtimes nativeaot10.0` on its own, since
+side by side with the JIT the NativeAOT rows get no ratios), and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser`
+(OQ-36), whose output is the CI evidence for gate criterion 2.
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
@@ -506,7 +512,8 @@ KRX043), where requests are handled (their own assembly; KRX023) and what contra
 through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details. A short "what is left" note in
 `docs/whats-left.md`.
 
-**Done when:** benchmarks run locally and in CI with `--job Dry`, and `Keryx.Benchmarks --verify` passes; the Linux `PipelinePrototype`
+**Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`
+passes in both builds; the Linux `PipelinePrototype`
 job runs, and its output (the static behavior method and `next.InvokeAsync` called directly) is recorded with the gate result in
 `open-questions.md`; the README is complete, its tables come from a local run, and every hit of a grep of `Readme.md` for the removed
 names (`PipelineBehavior`, `IStreamHookBehavior`, `PublishBehavior`, `NotificationHandlerBehavior`, per-handler, per-publish,

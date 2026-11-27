@@ -58,6 +58,10 @@ request, typical logging and validation behaviors around a handler with a scoped
 to 1 and 5 handlers published per request scope (with a notification logging behavior where the library has one), to async handlers
 sequentially, and with each library's parallel strategy (Benchmarks; open-questions, "Real-world benchmark scenarios"; their per-library
 setup is OQ-72, open).
+Amended an eleventh time 2026-11-27 (owner decisions 29 and 31): the comparison suite also runs with BenchmarkDotNet's NativeAOT toolchain,
+with the subjects that cannot run there shown n/a with a verified reason (MediatR), `--verify` checks the NativeAOT build, and a CI job
+builds and dry-runs the suite under NativeAOT (Benchmarks; open-questions, "NativeAOT benchmark run"; the verification probe's cost in
+NativeAOT builds is OQ-73, open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1501,13 +1505,31 @@ Setup rules, which every number depends on:
 - "Typed" is each library's per-request entry point, "generic" its `IMediator`/`ISender` generic method. A scenario a library has no API
   for is left out and shown as n/a.
 
+**NativeAOT** (owner decisions 29 and 31, 2026-11-27). The comparison suite also runs with BenchmarkDotNet's NativeAOT toolchain on net10.0
+(`--runtimes nativeaot10.0`, run on its own for its ratio columns), with the same scenarios and subjects. A subject that cannot run under
+NativeAOT is n/a there with the reason found by building and running it, never assumed; the benchmark runner's config leaves those
+benchmarks out of NativeAOT jobs only (`Comparison/NativeAot.cs`). MediatR 15 is the one such subject, in every scenario: `AddMediatR`
+throws at startup with the suite's behaviors, and without behaviors the container cannot construct MediatR's `Mediator`. Every other subject
+runs every scenario it runs under the JIT. The same config leaves the Phase 4 pipeline prototype out of NativeAOT jobs: it is JIT
+disassembly evidence, and BenchmarkDotNet rejects its `DisassemblyDiagnoser` for a NativeAOT job on Linux and Windows. The benchmark classes
+with a baseline group by job, so a run with several runtimes never computes one runtime's ratios against another's baseline (BenchmarkDotNet
+0.15.8 then shows `?` for the runtimes after the first). `--verify` runs in the NativeAOT build too: the benchmark project published with
+NativeAOT (`-p:KeryxBenchmarksNativeAot=true`, which sets `PublishAot` for that publish only, since `PublishAot` writes the AOT feature
+switches into a JIT build's runtimeconfig) checks every NativeAOT subject's results and handler and behavior calls, and lists the n/a ones.
+Its scenarios are listed, not found by scanning the assembly, so the check has no trim warnings, and a benchmark run fails when a comparison
+scenario is missing from the list. The benchmark and subject projects build with the trim, AOT and single-file analyzers on; in the
+NativeAOT publish, warnings in Keryx and the subject projects are errors and none are suppressed, while the package assemblies' warnings
+(BenchmarkDotNet and its dependencies, MediatR) stay warnings.
+
 CI builds the benchmarks, runs `Keryx.Benchmarks --verify` (every comparison benchmark is called with a call counter on, and the run
 fails when a library does not run the scenario's handlers and behaviors), and runs every benchmark, the real-world scenarios included,
-with `--job Dry` only; numbers are
-never published from shared runners. The README's numbers come from local runs, with the machine and job stated. Before a release the
-comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream behaviors, which measured
-20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision 22, 2026-11-27: tracked
-for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
+with `--job Dry` only. Its NativeAOT job (Linux, with the ILCompiler's prerequisites installed) publishes the suite with NativeAOT, runs
+`--verify` in that binary, and runs every benchmark but the JIT-only prototype once with `--job Dry --runtimes nativeaot10.0`, so
+NativeAOT breakage fails the pull
+request. Numbers are never published from shared runners. The README's numbers come from local runs, with the machine and job stated.
+Before a release the comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream
+behaviors, which measured 20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision
+22, 2026-11-27: tracked for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
 
 ## AOT verification
 

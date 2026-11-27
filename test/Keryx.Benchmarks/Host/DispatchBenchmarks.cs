@@ -3,6 +3,7 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 
 namespace Keryx.Benchmarks.Host;
 
@@ -14,6 +15,7 @@ namespace Keryx.Benchmarks.Host;
 ///     the result with <c>Unsafe.As</c>, as the generated code does (OQ-15).
 /// </summary>
 [MemoryDiagnoser]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByJob)]
 public class DispatchBenchmarks
 {
     private static readonly IRequest<int>[] Requests =

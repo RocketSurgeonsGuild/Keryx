@@ -11,8 +11,14 @@ namespace Keryx.Benchmarks.Comparison;
 ///     (<see cref="Subjects" />) and copies the mediators into fields, so each benchmark method is one call on a field. Each derived class is
 ///     one scenario; its <see cref="ExpectAttribute" /> says what <c>--verify</c> checks.
 /// </summary>
+/// <remarks>
+///     Grouped by job as well as category, so a run with several runtimes never takes one runtime's rows as ratios of another runtime's
+///     <c>Baseline</c>. BenchmarkDotNet 0.15.8 marks the first of several <c>--runtimes</c> as the baseline job and then counts as the
+///     baseline only the case that is both the baseline method and in that job, so the other runtimes' ratio columns show <c>?</c>: run
+///     <c>--runtimes nativeaot10.0</c> on its own for NativeAOT ratios.
+/// </remarks>
 [MemoryDiagnoser]
-[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory, BenchmarkLogicalGroupRule.ByJob)]
 public abstract class ComparisonBenchmark
 {
     private Subjects? _subjects;

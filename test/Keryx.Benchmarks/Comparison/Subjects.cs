@@ -17,7 +17,8 @@ namespace Keryx.Benchmarks.Comparison;
 ///     ZeroAlloc.Mediator's static <c>Mediator</c> class needs no container. The real-world scenarios also read each container's
 ///     long-lived scope (<see cref="LongLived" />) and its scope factory (<see cref="Scopes" />), to create a scope per request; the real-world
 ///     parallel publish scenario uses two more containers, Mediator with its <c>TaskWhenAllPublisher</c> (its own assembly) and MediatR with
-///     its <c>TaskWhenAllPublisher</c>. Every container's SQLite connection is opened here, before any benchmark call.
+///     its <c>TaskWhenAllPublisher</c>. Every container's SQLite connection is opened here, before any benchmark call. In a NativeAOT build the
+///     containers of the libraries that are n/a there (<see cref="NativeAot" />) are not built.
 /// </summary>
 internal sealed class Subjects : IDisposable
 {
@@ -43,7 +44,11 @@ internal sealed class Subjects : IDisposable
         MediatorSingletonTyped = mediatorSingleton.GetRequiredService<MediatorSingleton.Mediator>();
         MediatorSingletonGeneric = mediatorSingleton.GetRequiredService<Mediator.IMediator>();
 
-        MediatR = Container(Library.MediatR, new ServiceCollection().AddMediatRBenchmarks()).GetRequiredService<MediatR.IMediator>();
+        // MediatR is n/a under NativeAOT (NativeAot.MediatRReason): there its containers are not built and its mediators stay null.
+        if (!NativeAot.Skips(Library.MediatR))
+        {
+            MediatR = Container(Library.MediatR, new ServiceCollection().AddMediatRBenchmarks()).GetRequiredService<MediatR.IMediator>();
+        }
 
         _ = Container(Library.ImmediateHandlers, new ServiceCollection().AddImmediateHandlersBenchmarks());
 
@@ -56,8 +61,11 @@ internal sealed class Subjects : IDisposable
         MediatorParallelTyped = mediatorParallel.GetRequiredService<MediatorParallel.Mediator>();
         MediatorParallelGeneric = mediatorParallel.GetRequiredService<Mediator.IMediator>();
 
-        MediatRParallel = Container(Library.MediatRParallel, new ServiceCollection().AddMediatRParallelBenchmarks())
-           .GetRequiredService<MediatR.IMediator>();
+        if (!NativeAot.Skips(Library.MediatRParallel))
+        {
+            MediatRParallel = Container(Library.MediatRParallel, new ServiceCollection().AddMediatRParallelBenchmarks())
+               .GetRequiredService<MediatR.IMediator>();
+        }
     }
 
     public KeryxMediator KeryxTyped { get; }
@@ -66,11 +74,11 @@ internal sealed class Subjects : IDisposable
     public Mediator.IMediator MediatorScopedGeneric { get; }
     public MediatorSingleton.Mediator MediatorSingletonTyped { get; }
     public Mediator.IMediator MediatorSingletonGeneric { get; }
-    public MediatR.IMediator MediatR { get; }
+    public MediatR.IMediator MediatR { get; } = null!;
     public ZeroAlloc.Mediator.IMediator ZeroAllocMediator { get; }
     public MediatorParallel.Mediator MediatorParallelTyped { get; }
     public Mediator.IMediator MediatorParallelGeneric { get; }
-    public MediatR.IMediator MediatRParallel { get; }
+    public MediatR.IMediator MediatRParallel { get; } = null!;
 
     /// <summary>An Immediate.Handlers generated handler class, from the scope that lives as long as the benchmark.</summary>
     public T Immediate<T>() where T : notnull => LongLived(Library.ImmediateHandlers).GetRequiredService<T>();
@@ -78,8 +86,12 @@ internal sealed class Subjects : IDisposable
     /// <summary>The provider of <paramref name="library" />'s scope that lives as long as the benchmark.</summary>
     public IServiceProvider LongLived(Library library) => _containers[library].LongLived;
 
-    /// <summary><paramref name="library" />'s scope factory, for the scope-per-request scenarios.</summary>
-    public IServiceScopeFactory Scopes(Library library) => _containers[library].Root.GetRequiredService<IServiceScopeFactory>();
+    /// <summary>
+    ///     <paramref name="library" />'s scope factory, for the scope-per-request scenarios; <see langword="null" /> for a library whose
+    ///     container is not built (n/a under NativeAOT, <see cref="NativeAot" />), whose benchmarks do not run.
+    /// </summary>
+    public IServiceScopeFactory Scopes(Library library) =>
+        _containers.TryGetValue(library, out var container) ? container.Root.GetRequiredService<IServiceScopeFactory>() : null!;
 
     public void Dispose()
     {

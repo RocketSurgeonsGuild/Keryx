@@ -12,6 +12,25 @@
         <IsPackable>false</IsPackable>
         <GenerateDocumentationFile>false</GenerateDocumentationFile>
     </PropertyGroup>
+    <!--
+        NativeAOT (owner decision 29). BenchmarkDotNet's NativeAOT toolchain (the runtime nativeaot10.0) publishes a generated project that
+        references this one; the AOT check publishes this project itself with KeryxBenchmarksNativeAot=true and runs its verify mode
+        (Comparison/NativeAot.cs). PublishAot is set only then: it also writes the AOT feature switches (IsDynamicCodeSupported false, no
+        EventSource, ...) into the runtimeconfig of a JIT build, which would change what the JIT runs measure. Every build runs the trim,
+        AOT and single-file analyzers instead. In the AOT publish, project references (Keryx, the subjects) report their trim and AOT
+        warnings one by one, and those stay errors; the package assemblies' warnings stay warnings: BenchmarkDotNet and its dependencies
+        (CommandLine, Gee.External.Capstone, Microsoft.CodeAnalysis, TraceEvent) report IL2104, IL3053, IL3000 and IL3002, and MediatR, which
+        is n/a under NativeAOT, IL2104 and IL3053.
+    -->
+    <PropertyGroup>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+        <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(KeryxBenchmarksNativeAot)' == 'true' and '$(TargetFramework)' == 'net10.0'">
+        <PublishAot>true</PublishAot>
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053;IL3000;IL3002</WarningsNotAsErrors>
+    </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="BenchmarkDotNet" />
         <!-- The scoped container the pipeline context benchmark resolves handlers from. -->

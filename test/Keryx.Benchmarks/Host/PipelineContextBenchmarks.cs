@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Keryx.Benchmarks.Host;
@@ -10,6 +11,7 @@ namespace Keryx.Benchmarks.Host;
 ///     call. Hand-written in the shape the host generator emits; the numbers are recorded in open-questions OQ-15.
 /// </summary>
 [MemoryDiagnoser]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByJob)]
 public class PipelineContextBenchmarks : IDisposable
 {
     private readonly Ping _request = new(21);

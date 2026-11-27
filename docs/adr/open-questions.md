@@ -27,8 +27,8 @@ the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69,
 (decisions 19, 21 and 20), follow; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
 "Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) follows. OQ-61 and OQ-62, decided by the owner on
 2026-11-27 (decisions 25 and 26), follow, then OQ-59 and OQ-60 (decisions 23 and 24, the same day), and OQ-63 and OQ-64 (decisions 27
-and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) comes last; OQ-72 was raised while implementing it and
-is open.
+and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) and "NativeAOT benchmark run" (decisions 29 and 31,
+the same day) come last; OQ-72 was raised while implementing the first and OQ-73 while implementing the second, and both are open.
 
 ## Open
 
@@ -172,6 +172,25 @@ library publishes the notification scenarios (30d) sequentially and in parallel,
   baseline that does the behaviors' work inline, the singleton connection, the separate notification-behavior pair (so the per-request
   publish compares every library on the same work) and the Mediator parallel assembly. Alternative for the baseline: the handler alone, as in the
   other scenarios, which makes the ratio mostly the cost of logging. Needs a decision.
+
+### OQ-73: The verification probe in NativeAOT benchmark builds (2026-11-27)
+
+Every subject's handlers and behaviors call `Probe.Hit()` (`Keryx.Benchmarks.Common`), which counts calls only in a `--verify` run, where
+an AppContext switch turns it on. Under the JIT, `Probe.Enabled` is a `static readonly` field that Tier 1 code reads as a constant, so in a
+benchmark run `Hit()` compiles to nothing. The NativeAOT compiler has no tiers: it folds a `static readonly` field only when it can run the
+class's static constructor at compile time, and `Probe`'s reads the AppContext switch, so a NativeAOT benchmark keeps a static-base
+access, a field load and a branch in every handler and behavior call. Every subject makes the same calls in a scenario (the baseline
+makes fewer in the behavior scenarios), but the cost is inside every NativeAOT number and grows with the depth. It has not been measured
+(this step measured nothing), and the generated code was not inspected, so "not folded" follows from how the compiler preinitializes
+statics, not from an observation.
+
+- **Interim:** the probe stays as it is; the NativeAOT run (decision 29) includes it. No NativeAOT numbers are published yet (decision
+  32's full local run).
+- **Proposal:** compile the probe out of the builds BenchmarkDotNet makes: an MSBuild property (for example
+  `KeryxBenchmarksProbe=false`) that `Program.cs` sets in its own environment before BenchmarkDotNet builds, so its JIT and NativeAOT
+  builds see it the way they see `KeryxDispatchPadding`, under which `Probe.Enabled` is a `const` `false`; `--verify`, under the JIT and
+  in the NativeAOT publish, keeps the switch. Alternative: measure first (the depth-8 scenarios under NativeAOT with and without the
+  property) and keep the probe if the difference is within noise. Needs a decision.
 
 ## Decided
 
@@ -2303,3 +2322,65 @@ How each library is set up, the connection choice, the parallel publishers and t
 benchmarks, net10.0 and net11.0) and a Dry-job run of `*RealWorld*` (104 benchmarks) pass; no measured run yet (the README's numbers
 come from the full local run of decision 32). Folded into the ADR (Benchmarks), the brief (Phase 8), the README (Benchmarks) and
 whats-left.md.
+
+### NativeAOT benchmark run (2026-11-27)
+
+Owner decisions 29 and 31. The comparison suite (`test/Keryx.Benchmarks`) also runs with BenchmarkDotNet's NativeAOT toolchain (net10.0),
+next to the JIT run, with the same scenarios and subjects. A subject library that cannot run a scenario under NativeAOT shows n/a with
+the reason (a build, trim or AOT warning, or a runtime failure), verified, not assumed. `--verify` works in the NativeAOT build too, or an
+equivalent check proves that each NativeAOT subject really runs the handlers and behaviors (29). A new job in the Benchmarks workflow
+builds the suite and dry-runs it with the NativeAOT toolchain on Linux, numbers never published from shared runners, so NativeAOT breakage
+fails the pull request (31; its first part, the Dry job covering the real-world scenarios, is under "Real-world benchmark scenarios").
+
+Implemented:
+
+- **Running it.** `dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --runtimes nativeaot10.0` with the usual job options, on its
+  own. `--runtimes net10.0 nativeaot10.0` runs both in one summary but gives no NativeAOT ratios: BenchmarkDotNet 0.15.8 makes the first of
+  several runtimes the baseline job and then counts as the baseline only the case that is both the `Baseline` method and in that job
+  (`BaseliningStrategy`, checked by decompiling). The comparison, prototype and Host benchmark classes group by job
+  (`BenchmarkLogicalGroupRule.ByJob`), so such a run shows `?` in the NativeAOT rows' ratio columns instead of ratios against the JIT's
+  `Baseline` (checked with a Dry run of `*RealWorldPing*` and `*PipelineContext*` both ways: side by side, the JIT rows' ratios and `?`;
+  `--runtimes nativeaot10.0` alone, the NativeAOT `Baseline` at 1.00). BenchmarkDotNet 0.15.8 needs no extra configuration for it: its
+  NativeAOT toolchain publishes a generated project that references `Keryx.Benchmarks` with `PublishAot` and the SDK's ILCompiler (.NET
+  10.0.15 here). `Program.cs` passes a config with two additions: `NativeAot.Filter` leaves the n/a subjects and the Phase 4 pipeline
+  prototype out of NativeAOT jobs (JIT jobs keep every benchmark), and `ScenarioListValidator` (below). The prototype is JIT-only: it is
+  disassembly evidence for the JIT's code, and on Linux and Windows its `GateConfig` adds `DisassemblyDiagnoser`, whose validator in
+  BenchmarkDotNet 0.15.8 returns a critical error for any NativeAOT job ("Currently NativeAOT has no DisassemblyDiagnoser support"),
+  stopping the whole run. Config filters run before validation, so the validator never sees a NativeAOT case.
+- **n/a, verified by building and running** (`Comparison/NativeAot.cs`, which `Subjects`, `--verify` and the filter read): MediatR
+  15.0.0, in every scenario (`MediatR_Generic`, 23 benchmarks). With the suite's behaviors, `AddMediatR` throws at startup
+  (`AddOpenStreamBehavior`: "StreamPass1`2 must implement MediatR.IStreamPipelineBehavior`2"); without any behaviors (the parallel publish
+  container) the validated container cannot construct MediatR's own `Mediator` ("A suitable constructor for type 'MediatR.Mediator' could
+  not be located"); the publish reports MediatR.dll's trim and AOT warnings (IL2104, IL3053). Under NativeAOT, `Subjects` does not build
+  MediatR's two containers. Every other subject (the direct call, Keryx typed and `IMediator`, Mediator scoped, singleton and its parallel
+  assembly, Immediate.Handlers, ZeroAlloc.Mediator static and `IMediator`) runs every scenario it runs under the JIT, with the same results
+  and hit counts: 215 of the 238 comparison benchmarks. The n/a cells of OQ-72 (entry points a library does not have) are the same under
+  both.
+- **The NativeAOT check.** `dotnet publish -c Release -f net10.0 --use-current-runtime -p:KeryxBenchmarksNativeAot=true -o aot` publishes
+  `Keryx.Benchmarks` itself with NativeAOT; `aot/Keryx.Benchmarks --verify` calls every benchmark twice with the probe on and checks its
+  result and hit count exactly as under the JIT, and lists the n/a ones with the reason instead of calling them (215 verified, 23 n/a).
+  `Verification` lists the scenarios (`Verification.Scenarios`, each `Scenario.Of<T>()`, whose `[DynamicallyAccessedMembers(PublicMethods)]`
+  keeps the benchmark methods) instead of scanning the assembly, so it has no trim warnings, and reports a benchmark that throws as a
+  failure instead of stopping. `ScenarioListValidator` fails any BenchmarkDotNet run that finds a comparison scenario missing from that
+  list (checked by leaving one out: the run exits 1).
+- **Warnings.** `PublishAot` is set only for that publish (`KeryxBenchmarksNativeAot=true`, `net10.0`): in a JIT build it also writes the
+  AOT feature switches into the runtimeconfig (`RuntimeFeature.IsDynamicCodeSupported` false, EventSource off, and more), so a JIT run
+  would no longer measure what an ordinary JIT app runs (with it, the JIT build's `--verify` reported NativeAOT). Every build of the
+  benchmark and subject projects runs the trim, AOT and single-file analyzers instead (`EnableTrimAnalyzer`, `EnableAotAnalyzer`,
+  `EnableSingleFileAnalyzer`), and none reports anything. In the publish, Keryx and the subject projects are project references, whose
+  trim and AOT warnings ILC reports one by one, and those stay errors: there are none, and nothing in Keryx's own code is suppressed. The
+  package assemblies' warnings stay warnings (`WarningsNotAsErrors`): BenchmarkDotNet and its dependencies (CommandLine,
+  Gee.External.Capstone, Microsoft.CodeAnalysis, TraceEvent: IL2104, IL3053, IL3000, IL3002) and MediatR (IL2104, IL3053).
+- **CI.** The workflow's `native-aot` job (ubuntu-latest) installs clang and zlib1g-dev (the ILCompiler's linker prerequisites), builds,
+  publishes with NativeAOT and runs `--verify` in the binary, then runs every benchmark once with `--job Dry --runtimes nativeaot10.0`
+  (the filter leaves out MediatR and the prototype).
+- **Checked locally** (macOS arm64, .NET SDK 11.0.100): `--verify` under the JIT, 238 passed; in the NativeAOT publish, 215 passed and 23
+  n/a; a NativeAOT Dry run of every benchmark (`--filter '*'`, one generated executable: the 215 comparison benchmarks, the Host dispatch
+  and pipeline-context benchmarks, 242 in all; the prototype is JIT-only) and the JIT Dry run (271) both passed. The same NativeAOT job
+  steps (build, NativeAOT publish, `--verify`, `--filter '*' --job Dry --runtimes nativeaot10.0`) were run on Linux in the
+  `mcr.microsoft.com/dotnet/sdk:11.0` image with the .NET 10 runtime, clang and zlib1g-dev (linux-arm64; CI is linux-x64), where
+  `GateConfig` does add the diagnoser: no warning in Keryx or the subjects, `--verify` 215 passed and 23 n/a, and the Dry run 242
+  benchmarks, exit 0. Nothing was measured: the NativeAOT numbers come from decision 32's full local run. The verification probe's cost in
+  NativeAOT builds is OQ-73, open.
+
+Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.

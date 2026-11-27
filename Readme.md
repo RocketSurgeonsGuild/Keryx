@@ -669,6 +669,18 @@ its publish strategy is static (open-questions OQ-70): in interleaved reruns aga
 to 0.42 ns for 1 handler and 0.46 to 0.51 ns for 5 (0.65 to 0.67 ns and 0.75 to 0.80 ns before), `IMediator` with 5 handlers 2.74 ns (3.03
 ns before) and with 1 handler within noise, all still 0 B.
 
+### NativeAOT
+
+The same comparison scenarios also run with BenchmarkDotNet's NativeAOT toolchain on net10.0 (owner decision 29), each benchmark compiled
+ahead of time instead of JIT-compiled with Dynamic PGO. A library that cannot run under NativeAOT is n/a there, with the reason found by
+building and running it: **MediatR 15.0.0 is n/a in every scenario**. With the suite's behaviors, `AddMediatR` throws at startup
+(`AddOpenStreamBehavior`: "StreamPass1`2 must implement MediatR.IStreamPipelineBehavior`2"), and without any behaviors the container
+cannot construct MediatR's `Mediator`; MediatR.dll also produces trim and AOT warnings (IL2104, IL3053). Every other subject runs every
+scenario it runs under the JIT, and `--verify` checks them in a NativeAOT build of the suite (215 benchmarks pass, MediatR's 23 are
+listed as n/a). The setup is recorded in [open-questions.md](docs/adr/open-questions.md) ("NativeAOT benchmark run"). The NativeAOT
+numbers come from the next full local run. In NativeAOT builds the call counter `--verify` uses is not compiled away as it is under the
+JIT, so each handler and behavior call carries a field load and a branch (OQ-73, open).
+
 Run them yourself (the full set took about 15 minutes with these settings before the real-world scenarios were added; `--verify` checks that every library really runs each
 scenario's handlers and behaviors):
 
@@ -677,6 +689,19 @@ cd test/Keryx.Benchmarks
 dotnet run -c Release -f net10.0 -- --verify
 dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
 ```
+
+Under NativeAOT (the ILCompiler needs the platform's native toolchain: Xcode command line tools on macOS, clang and zlib1g-dev on
+Ubuntu), publish the suite with NativeAOT and run `--verify` in that binary, then run it with `--runtimes nativeaot10.0` (MediatR's
+benchmarks and the JIT-only pipeline prototype are left out of the NativeAOT job):
+
+```bash
+dotnet publish -c Release -f net10.0 --use-current-runtime -p:KeryxBenchmarksNativeAot=true -o aot
+aot/Keryx.Benchmarks --verify
+dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --runtimes nativeaot10.0 --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
+```
+
+Run it on its own: `--runtimes net10.0 nativeaot10.0` runs both in one summary, but BenchmarkDotNet then takes the JIT job's `Baseline`
+as the only baseline, so the NativeAOT rows have no ratios (`?`).
 
 The Keryx subject has fewer than 32 request, stream request and notification types, so its `Keryx_Generic` rows measure the linear type
 compares. With the environment variable `KeryxDispatchPadding=true` (an MSBuild property, so BenchmarkDotNet's own build sees it too),
@@ -690,8 +715,10 @@ KeryxDispatchPadding=true dotnet run -c Release -f net10.0 -- --filter '*Compari
 `next` links) against nested direct calls at depths 1, 3 and 8: 0 B at every depth, and 0.66x the nested calls' time at depth 3 on the
 machine above. On macOS, `--prototype-disasm` runs the same pipelines to Tier 1 for a `DOTNET_JitDisasm` listing (see `Program.cs`).
 
-CI builds the suite, runs `--verify`, runs every benchmark (the real-world scenarios included) once with `--job Dry`, and runs the pipeline prototype on Linux with
-BenchmarkDotNet's `DisassemblyDiagnoser`, uploading the disassembly as a build artifact. Numbers from shared runners are never published.
+CI builds the suite, runs `--verify`, runs every benchmark (the real-world scenarios included) once with `--job Dry`, does the same under
+NativeAOT on Linux (publish with NativeAOT and `--verify` in that binary, then `--job Dry --runtimes nativeaot10.0`, owner decision 31),
+and runs the pipeline prototype on Linux with BenchmarkDotNet's `DisassemblyDiagnoser`, uploading the disassembly as a build artifact.
+Numbers from shared runners are never published.
 
 ## Building
 

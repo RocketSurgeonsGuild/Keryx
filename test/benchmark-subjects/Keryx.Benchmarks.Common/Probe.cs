@@ -6,7 +6,8 @@ namespace Keryx.Benchmarks.Common;
 ///     Counts handler and behavior calls during <c>Keryx.Benchmarks --verify</c>, which checks that every subject really runs the scenario's
 ///     handlers and behaviors (ADR 0001, Benchmarks). <see cref="Enabled" /> is read once, from an <see cref="AppContext" /> switch only the
 ///     verify run sets, and is a <c>static readonly</c> field: once the class is initialized the JIT treats it as a constant, so in a
-///     benchmark run <see cref="Hit" /> compiles to nothing.
+///     benchmark run <see cref="Hit" /> compiles to nothing. A NativeAOT build has no tiers and cannot run this class's static constructor at
+///     compile time, so there the check stays (open-questions OQ-73).
 /// </summary>
 public static class Probe
 {

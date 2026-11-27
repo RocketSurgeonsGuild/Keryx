@@ -3,7 +3,7 @@
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
 owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 28
 (2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64; updated for owner decision 30 (real-world benchmark
-scenarios, 2026-11-27).
+scenarios, 2026-11-27) and decisions 29 and 31 (the NativeAOT benchmark run and its CI job, 2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -199,7 +199,9 @@ ADR, the brief, open-questions.md, CONTEXT.md where a term changed, the README a
 
 ## Decisions for the owner
 
-No question is open ([open-questions.md](adr/open-questions.md), **Open**).
+Two questions are open ([open-questions.md](adr/open-questions.md), **Open**), both about the benchmarks: OQ-72 (how the real-world
+scenarios set up each library) and OQ-73 (the verification probe's cost in NativeAOT benchmark builds: compile it out of
+BenchmarkDotNet's builds, or measure it first).
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
 (decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
@@ -218,8 +220,10 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - **Phase checks:** the tests, allocation tests (on an optimized test host for `async` behaviors), incremental tests, IL and jump-table
   dispatch tests and the AOT job pass.
 - **Benchmarks in CI:** `.github/workflows/benchmarks.yml` builds the suite, runs `--verify` and every benchmark with `--job Dry` on the
-  pull request, and the `prototype-disassembly` job runs `--filter *PipelinePrototype*` on Linux with `DisassemblyDiagnoser` and uploads
-  the `pipeline-prototype-disassembly` artifact.
+  pull request; the `native-aot` job (decision 31) installs clang and zlib1g-dev, publishes the suite with NativeAOT, runs `--verify` in
+  that binary and runs every benchmark but the JIT-only prototype with `--job Dry --runtimes nativeaot10.0`; and the
+  `prototype-disassembly` job runs
+  `--filter *PipelinePrototype*` on Linux with `DisassemblyDiagnoser` and uploads the `pipeline-prototype-disassembly` artifact.
 - **Real-world benchmark scenarios** (owner decision 30, 2026-11-27): `RealWorldPing`, `RealWorldPingScopePerRequest`,
   `RealWorldBehaviors`, `RealWorldBehaviorsScopePerRequest` and `RealWorldSqlite` run a plain handler, a logging and a validation
   behavior around a handler with a scoped repository, and a SQLite query, from the long-lived scope and with a scope per request; for
@@ -230,6 +234,19 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   comparison benchmarks pass on net10.0 and net11.0), and the Dry job, which already runs every benchmark, covers them (a Dry run of
   `*RealWorld*` runs 104). Their per-library setup and n/a cells are OQ-72, open. Not measured yet: the README describes them without
   numbers until the full local run (decision 32).
+- **NativeAOT benchmark run** (owner decisions 29 and 31, 2026-11-27; open-questions, "NativeAOT benchmark run"): the comparison
+  suite runs with BenchmarkDotNet's NativeAOT toolchain (`--runtimes nativeaot10.0`, on its own: side by side with the JIT the
+  NativeAOT rows get no ratios) with the same scenarios and subjects. Built and run
+  under NativeAOT, MediatR 15 is n/a in every scenario (`AddMediatR` throws at startup with the suite's behaviors; without behaviors the
+  container cannot construct MediatR's `Mediator`), and every other subject runs every scenario it runs under the JIT;
+  `Comparison/NativeAot.cs` holds the reason, `Subjects` skips MediatR's containers there and the runner's config leaves its benchmarks
+  out of NativeAOT jobs. `--verify` runs in the suite published with NativeAOT (`-p:KeryxBenchmarksNativeAot=true`): 215 benchmarks
+  pass and 23 are listed n/a; its scenarios are listed (no assembly scan, no trim warnings), and a benchmark run fails when one is missing
+  from the list. No trim or AOT warning in Keryx's own code, none suppressed; the benchmark and subject projects build with the trim, AOT
+  and single-file analyzers. The Phase 4 prototype is JIT-only (left out of NativeAOT jobs: BenchmarkDotNet rejects its Linux
+  `DisassemblyDiagnoser` there). Local Dry runs of every benchmark pass under NativeAOT (242) and the JIT (271), and the NativeAOT job's
+  steps pass on Linux (linux-arm64 container: `--verify` 215 passed, 23 n/a; Dry run 242, exit 0). Not measured yet (decision
+  32's run); the probe's NativeAOT cost is OQ-73, open.
 - **Performance contract against the comparison run** (README, Benchmarks; measured with static behaviors on 2026-11-26): Keryx
   allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1
   and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state machine); a
@@ -253,6 +270,7 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
+- Decide OQ-73 (the verification probe in NativeAOT benchmark builds) before the NativeAOT numbers are published.
 - Decide OQ-72 (the real-world scenarios' setup: the baseline that does the behaviors' work inline, the singleton SQLite connection,
   the separate notification-behavior pair, the Mediator parallel project, the n/a cells) and fold it into the ADR's Benchmarks section.
 - Re-run the comparison benchmarks on the release candidate and update the README's numbers (its tables are from before the follow-up,

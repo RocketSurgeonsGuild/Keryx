@@ -20,7 +20,7 @@ namespace Keryx.Benchmarks.Prototype;
 /// </remarks>
 [MemoryDiagnoser]
 [Config(typeof(GateConfig))]
-[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory, BenchmarkLogicalGroupRule.ByJob)]
 [CategoriesColumn]
 public class PipelinePrototypeBenchmarks
 {
