@@ -14,7 +14,8 @@ namespace Keryx.Tests.Hosts;
 ///     <c>Stream</c> and <c>Publish&lt;T&gt;</c> look the runtime type up in a <c>FrozenDictionary</c> and jump on its index; at or below the
 ///     threshold they compare types one after another. The jump table matches the exact runtime type only: a type derived from a handled
 ///     message, with no handler of its own, is not dispatched to the base type's handler. Each kind is checked at the boundary in the
-///     generated syntax and in the compiled IL (a <c>switch</c> opcode above the threshold, none at or below it), and at run time above it.
+///     generated syntax and in the compiled IL (a <c>switch</c> opcode above the threshold, none at or below it), and at run time above it;
+///     the generated mediator of each kind at the boundary, and of a host with every kind above it, is snapshotted.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class JumpTableDispatchTests : HostTest
@@ -172,13 +173,49 @@ public class JumpTableDispatchTests : HostTest
         await Assert.That(switches).IsEqualTo(count > HostEmitter.DispatchThreshold ? 1 : 0);
     }
 
+    [Test]
+    [Arguments(Kind.Request, HostEmitter.DispatchThreshold)]
+    [Arguments(Kind.Request, HostEmitter.DispatchThreshold + 1)]
+    [Arguments(Kind.Stream, HostEmitter.DispatchThreshold)]
+    [Arguments(Kind.Stream, HostEmitter.DispatchThreshold + 1)]
+    [Arguments(Kind.Notification, HostEmitter.DispatchThreshold)]
+    [Arguments(Kind.Notification, HostEmitter.DispatchThreshold + 1)]
+    public async Task The_Generated_Generic_Dispatch_At_And_Above_The_Threshold(Kind kind, int count, CancellationToken cancellationToken)
+    {
+        // The generated mediator, so a change to the generic dispatch (the linear comparisons at the threshold, the FrozenDictionary index
+        // and its switch above it) shows up in review as a snapshot diff.
+        var result = await HostBuilder.AddSources(Usings + Messages(count, sealedTypes: true, kind)).Build().GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await VerifyMediator(result).UseParameters(kind, count);
+    }
+
+    [Test]
+    public async Task The_Generated_Generic_Dispatch_Of_A_Host_With_Every_Kind_Above_The_Threshold(CancellationToken cancellationToken)
+    {
+        // Each kind gets its own table and index lookup; one kind's dispatch must not reach another kind's types.
+        var result = await HostBuilder.AddSources(Usings + Messages(HostEmitter.DispatchThreshold + 1, sealedTypes: true, Kind.Request, Kind.Stream, Kind.Notification))
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await VerifyMediator(result);
+    }
+
     /// <summary>
     ///     <paramref name="count" /> messages of one kind, each with its own handler, as non-sealed records (so another assembly can derive from
     ///     them): <c>R{n}</c> answers <c>Value + n</c>, <c>S{n}</c> streams <c>n</c> then <c>Value</c>, and <c>N{n}</c> logs <c>"{n} {Value}"</c>
     ///     to <c>Sample.Log</c>.
     /// </summary>
-    private static string Messages(Kind kind, int count)
+    private static string Messages(Kind kind, int count) => Messages(count, sealedTypes: false, kind);
+
+    /// <summary>
+    ///     <paramref name="count" /> messages of each of <paramref name="kinds" />, each with its own handler, shaped as
+    ///     <see cref="Messages(Kind, int)" /> describes; <paramref name="sealedTypes" /> seals the records.
+    /// </summary>
+    private static string Messages(int count, bool sealedTypes, params Kind[] kinds)
     {
+        var modifiers = sealedTypes ? "public sealed" : "public";
         var builder = new StringBuilder("namespace Sample;\n\n");
         builder.Append(
             """
@@ -208,6 +245,16 @@ public class JumpTableDispatchTests : HostTest
 
             """
         );
+        foreach (var kind in kinds)
+        {
+            AppendMessages(builder, kind, count, modifiers);
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendMessages(StringBuilder builder, Kind kind, int count, string modifiers)
+    {
         for (var i = 0; i < count; i++)
         {
             var name = TypeName(kind, i)[( HostNamespace.Length + 1 )..];
@@ -217,12 +264,12 @@ public class JumpTableDispatchTests : HostTest
                 kind switch
                 {
                     Kind.Request => $$"""
-                                      public record {{name}}(int Value) : IRequest<int>;
+                                      {{modifiers}} record {{name}}(int Value) : IRequest<int>;
                                       public static partial class {{name}}Handler { private static int Handle({{name}} request) => request.Value + {{index}}; }
 
                                       """,
                     Kind.Stream => $$"""
-                                     public record {{name}}(int Value) : IStreamRequest<int>;
+                                     {{modifiers}} record {{name}}(int Value) : IStreamRequest<int>;
                                      public static partial class {{name}}Handler
                                      {
                                          private static async IAsyncEnumerable<int> Handle({{name}} request)
@@ -235,7 +282,7 @@ public class JumpTableDispatchTests : HostTest
 
                                      """,
                     Kind.Notification => $$"""
-                                           public record {{name}}(int Value) : INotification;
+                                           {{modifiers}} record {{name}}(int Value) : INotification;
                                            public static partial class {{name}}Handler
                                            {
                                                private static ValueTask Handle({{name}} notification)
@@ -250,8 +297,6 @@ public class JumpTableDispatchTests : HostTest
                 }
             );
         }
-
-        return builder.ToString();
     }
 
     private static string TypeName(Kind kind, int index) =>

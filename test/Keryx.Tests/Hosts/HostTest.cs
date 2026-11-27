@@ -59,7 +59,7 @@ public abstract class HostTest : GeneratorTest
     /// <summary>
     ///     The one snapshot shape of host-generator output (testing-library review, convention 10): the generated mediator and
     ///     <c>AddKeryx()</c> as one object, in one <c>.verified.txt</c>. Every test that snapshots what the host generator emits goes through
-    ///     it. Diagnostics are asserted by the test, not snapshotted, and the handler partials have their own snapshots (HandlerGeneratorTests).
+    ///     it (or through <see cref="VerifyMediator" />, its mediator half). Diagnostics are asserted by the test, not snapshotted, and the handler partials have their own snapshots (HandlerGeneratorTests).
     /// </summary>
     protected static SettingsTask VerifyHost(GeneratorTestResults result, [CallerFilePath] string sourceFile = "") =>
         Verify(
@@ -70,6 +70,13 @@ public abstract class HostTest : GeneratorTest
             },
             sourceFile: sourceFile
         );
+
+    /// <summary>
+    ///     The <c>Mediator</c> half of <see cref="VerifyHost" /> alone, in the same shape, for tests about generic dispatch only
+    ///     (JumpTableDispatchTests), where <c>AddKeryx()</c> would only repeat one registration per handler.
+    /// </summary>
+    protected static SettingsTask VerifyMediator(GeneratorTestResults result, [CallerFilePath] string sourceFile = "") =>
+        Verify(new { Mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName) }, sourceFile: sourceFile);
 
     /// <summary>
     ///     A root provider with <c>AddKeryx()</c> applied (twice, which must change nothing) plus the test's own registrations. Scopes are
