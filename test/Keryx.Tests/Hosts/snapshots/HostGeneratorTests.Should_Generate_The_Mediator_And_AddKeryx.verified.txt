@@ -352,9 +352,10 @@ namespace Sample
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
-        ///     Registers the scoped <see cref="KeryxMediator" />, as itself and as <see cref="global::Keryx.IMediator" />,
-        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> (one instance per scope), and every
-        ///     handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.
+        ///     Registers the scoped <see cref="KeryxMediator" /> (one instance per scope), <see cref="global::Keryx.IMediator" />,
+        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> as transient factories that return that
+        ///     instance, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are static and
+        ///     are not registered.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -363,9 +364,9 @@ namespace Sample
         {
             global::System.ArgumentNullException.ThrowIfNull(services);
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.IMediator>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.ISender>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Keryx.IPublisher>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IMediator>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.AnimalHandler(serviceProvider, global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Keryx.IMediator>(serviceProvider)));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.CreateOrder(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider)));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.LookupHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IGreeter>(serviceProvider, "primary"), global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<global::Sample.IGreeter>(serviceProvider, "backup"), global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider), serviceProvider.GetService(typeof(int)) is int __value3 ? __value3 : 3, serviceProvider.GetService(typeof(int?)) is int __value4 ? (int?)__value4 : null, serviceProvider.GetService(typeof(global::Sample.Mode)) is global::Sample.Mode __value5 ? __value5 : (global::Sample.Mode)(2), (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), 1) is int __value6 ? __value6 : 2, serviceProvider.GetService(typeof(long?)) is long __value7 ? (long?)__value7 : null));

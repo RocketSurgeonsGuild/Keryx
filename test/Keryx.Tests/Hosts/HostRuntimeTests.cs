@@ -296,23 +296,75 @@ public class HostRuntimeTests : HostTest
         // A second call adds nothing.
         await Assert.That(services.Count).IsEqualTo(count);
         var keryx = services.Skip(registered).ToArray();
-        await Assert.That(keryx.All(static d => d.Lifetime == ServiceLifetime.Scoped && d.ImplementationFactory is not null)).IsTrue();
+        await Assert.That(keryx.All(static d => d.ImplementationFactory is not null)).IsTrue();
+
+        // The mediator and the handlers are scoped; IMediator, ISender and IPublisher are transient factories that forward to the scope's
+        // KeryxMediator, so resolving them adds no entry to the scope (OQ-74).
+        Type[] forwarders = [typeof(IMediator), typeof(ISender), typeof(IPublisher)];
+        await Assert.That(keryx.Where(d => forwarders.Contains(d.ServiceType)).Select(static d => d.Lifetime).ToArray())
+                    .IsEquivalentTo([ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient]);
+        await Assert.That(keryx.Where(d => !forwarders.Contains(d.ServiceType)).All(static d => d.Lifetime == ServiceLifetime.Scoped)).IsTrue();
 
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         await using var first = provider.CreateAsyncScope();
         await using var second = provider.CreateAsyncScope();
         var mediatorType = host.GetType("Sample.KeryxMediator", throwOnError: true)!;
         var mediator = first.ServiceProvider.GetRequiredService(mediatorType);
+        var other = second.ServiceProvider.GetRequiredService(mediatorType);
+        await Assert.That(other).IsNotSameReferenceAs(mediator);
 
-        await Assert.That(first.ServiceProvider.GetRequiredService<IMediator>()).IsSameReferenceAs(mediator);
-        await Assert.That(first.ServiceProvider.GetRequiredService<ISender>()).IsSameReferenceAs(mediator);
-        await Assert.That(first.ServiceProvider.GetRequiredService<IPublisher>()).IsSameReferenceAs(mediator);
-        await Assert.That(second.ServiceProvider.GetRequiredService<IMediator>()).IsNotSameReferenceAs(mediator);
-        await Assert.That(() => provider.GetRequiredService<IMediator>()).Throws<InvalidOperationException>();
+        // One mediator per scope behind all four service types, whichever is resolved first.
+        foreach (var serviceType in forwarders)
+        {
+            await Assert.That(first.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(mediator).Because(serviceType.Name);
+            await Assert.That(first.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(mediator).Because(serviceType.Name);
+            await Assert.That(second.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(other).Because(serviceType.Name);
+        }
+
+        await using (var third = provider.CreateAsyncScope())
+        {
+            var publisher = third.ServiceProvider.GetRequiredService<IPublisher>();
+            await Assert.That(publisher).IsNotSameReferenceAs(mediator).And.IsNotSameReferenceAs(other);
+            await Assert.That(third.ServiceProvider.GetRequiredService<ISender>()).IsSameReferenceAs(publisher);
+            await Assert.That(third.ServiceProvider.GetRequiredService<IMediator>()).IsSameReferenceAs(publisher);
+            await Assert.That(third.ServiceProvider.GetRequiredService(mediatorType)).IsSameReferenceAs(publisher);
+        }
+
+        // Scope validation still sees the scoped mediator behind a forwarder resolved from the root.
+        foreach (var serviceType in forwarders)
+        {
+            await Assert.That(() => provider.GetRequiredService(serviceType)).Throws<InvalidOperationException>().Because(serviceType.Name);
+        }
 
         // Handlers without injected parameters are never registered; the others are, with factories.
         await Assert.That(services.Any(d => d.ServiceType == host.GetType("Sample.PingHandler"))).IsFalse();
         await Assert.That(services.Single(d => d.ServiceType == host.GetType("Sample.GreetHandler")).ImplementationFactory).IsNotNull();
+    }
+
+    [Test]
+    public async Task A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved(CancellationToken cancellationToken)
+    {
+        // The documented cost of the transient forwarders (OQ-74, OQ-76): ValidateOnBuild cannot see inside a factory, so a singleton that
+        // captures IMediator, ISender or IPublisher is no longer reported when the provider is built. ValidateScopes still rejects it the first
+        // time it is resolved, because the forwarder then resolves the scoped KeryxMediator from the root provider.
+        var host = await CompileHostAsync(Source, cancellationToken);
+        var services = new ServiceCollection();
+        Registrations(host)(services);
+        AddKeryx(host, services);
+        services.AddSingleton<CapturesMediator>();
+        services.AddSingleton<CapturesSender>();
+        services.AddSingleton<CapturesPublisher>();
+
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
+        await using var scope = provider.CreateAsyncScope();
+
+        foreach (var captive in (Type[])[typeof(CapturesMediator), typeof(CapturesSender), typeof(CapturesPublisher)])
+        {
+            await Assert.That(() => scope.ServiceProvider.GetRequiredService(captive))
+                        .Throws<InvalidOperationException>()
+                        .WithMessageContaining("KeryxMediator")
+                        .Because(captive.Name);
+        }
     }
 
     [Test]
@@ -446,4 +498,19 @@ public class HostRuntimeTests : HostTest
     private sealed record ForeignStream : IStreamRequest<int>;
 
     private sealed record ForeignNotification : INotification;
+
+    private sealed class CapturesMediator(IMediator mediator)
+    {
+        public IMediator Mediator { get; } = mediator;
+    }
+
+    private sealed class CapturesSender(ISender sender)
+    {
+        public ISender Sender { get; } = sender;
+    }
+
+    private sealed class CapturesPublisher(IPublisher publisher)
+    {
+        public IPublisher Publisher { get; } = publisher;
+    }
 }

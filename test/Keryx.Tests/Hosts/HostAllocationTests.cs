@@ -128,6 +128,9 @@ public class HostAllocationTests : HostTest
         public sealed record Done : IRequest;
         public partial class DoneHandler { private static ValueTask Handle(Done request, Clock clock) => default; }
 
+        public sealed record Rang : INotification;
+        public partial class RangHandler { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+
         /// <summary>An abstract request base: its sealed case has its own handler (KRX024).</summary>
         public abstract record Base(int Value) : IRequest<int>;
         public sealed record Case(int Value) : Base(Value);
@@ -168,6 +171,111 @@ public class HostAllocationTests : HostTest
         // (24 bytes on 64-bit). Dispatching the boxed request adds nothing (see the pre-boxed scenarios above).
         var box = ( ( IntPtr.Size * 2 ) + sizeof(int) + IntPtr.Size - 1 ) / IntPtr.Size * IntPtr.Size;
         await Assert.That(allocated).IsEqualTo(1_000L * box);
+    }
+
+    private const string ScopeProbe = """
+
+        public static class ScopeProbe
+        {
+            private static readonly Echo EchoRequest = new("echo");
+            private static readonly Rang RangNotification = new();
+
+            public static global::System.Collections.Generic.Dictionary<string, long> Measure(IServiceProvider root)
+            {
+                var scopes = root.GetRequiredService<IServiceScopeFactory>();
+                return new()
+                {
+                    // Resolving alone.
+                    ["KeryxMediator"] = Region(scopes, static services => services.GetRequiredService<KeryxMediator>()),
+                    ["IMediator"] = Region(scopes, static services => services.GetRequiredService<IMediator>()),
+                    ["ISender"] = Region(scopes, static services => services.GetRequiredService<ISender>()),
+                    ["IPublisher"] = Region(scopes, static services => services.GetRequiredService<IPublisher>()),
+                    ["all four"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = services.GetRequiredService<IMediator>();
+                            _ = services.GetRequiredService<ISender>();
+                            _ = services.GetRequiredService<IPublisher>();
+                            return services.GetRequiredService<KeryxMediator>();
+                        }
+                    ),
+
+                    // Resolving, then the scope's normal work: the handler and its scoped service join the scope, so one more entry from a
+                    // scoped forwarder pushes the scope's resolved services past a capacity boundary (OQ-74's real-world benchmarks).
+                    ["send: KeryxMediator"] = Region(scopes, static services => Send(services.GetRequiredService<KeryxMediator>())),
+                    ["send: IMediator"] = Region(scopes, static services => Send(services.GetRequiredService<IMediator>())),
+                    ["send: ISender"] = Region(scopes, static services => Send(services.GetRequiredService<ISender>())),
+                    ["publish: KeryxMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<KeryxMediator>())),
+                    ["publish: IMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<IMediator>())),
+                    ["publish: IPublisher"] = Region(scopes, static services => Publish(services.GetRequiredService<IPublisher>())),
+                };
+            }
+
+            private static object Send(ISender sender)
+            {
+                var sent = sender.Send(EchoRequest);
+                return sent.IsCompletedSuccessfully ? sent.Result : throw new InvalidOperationException("The send did not complete synchronously.");
+            }
+
+            private static object Publish(IPublisher publisher)
+            {
+                var published = publisher.Publish(RangNotification);
+                return published.IsCompletedSuccessfully ? publisher : throw new InvalidOperationException("The publish did not complete synchronously.");
+            }
+
+            /// <summary>The bytes of 1,000 scopes that each resolve and are disposed, the smallest of five repeats after a warm-up.</summary>
+            private static long Region(IServiceScopeFactory scopes, Func<IServiceProvider, object> resolve)
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    using var scope = scopes.CreateScope();
+                    _ = resolve(scope.ServiceProvider);
+                }
+
+                var smallest = long.MaxValue;
+                for (var repeat = 0; repeat < 5; repeat++)
+                {
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < 1_000; i++)
+                    {
+                        using var scope = scopes.CreateScope();
+                        _ = resolve(scope.ServiceProvider);
+                    }
+
+                    smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                }
+
+                return smallest;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task Resolving_An_Interface_In_A_New_Scope_Allocates_The_Same_As_Resolving_The_Mediator(CancellationToken cancellationToken)
+    {
+        // IMediator, ISender and IPublisher are transient factories forwarding to the scoped KeryxMediator (OQ-74): resolving them, alone or
+        // all together, adds no entry to the scope's resolved services, so a scope costs what the same work starting from KeryxMediator costs.
+        // The scope's storage grows only when its entry count crosses a capacity boundary, so the resolve-only rows for one interface would
+        // pass with scoped forwarders too; the "all four" row and the send and publish rows (resolve, then resolve the handler and its
+        // scoped service) are the ones that fail with them.
+        var host = await CompileHostAsync(Requests + ScopeProbe, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.ScopeProbe", "Measure", provider);
+
+        await Assert.That(allocated.Count).IsEqualTo(11);
+        foreach (var (scenario, bytes) in allocated)
+        {
+            var baseline = scenario switch
+            {
+                _ when scenario.StartsWith("send: ", StringComparison.Ordinal) => "send: KeryxMediator",
+                _ when scenario.StartsWith("publish: ", StringComparison.Ordinal) => "publish: KeryxMediator",
+                _ => "KeryxMediator",
+            };
+            await Assert.That(allocated[baseline]).IsGreaterThan(0L).Because(baseline);
+            await Assert.That(bytes).IsEqualTo(allocated[baseline]).Because(scenario);
+        }
     }
 
     [Test]

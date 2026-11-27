@@ -31,7 +31,9 @@ question, the interim behavior you are using and a proposal, continue with the s
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
   net10.0 or later, OQ-61 and OQ-62) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
-  lambdas (nothing for behaviors).
+  lambdas (nothing for behaviors); `IMediator`, `ISender` and `IPublisher` are transient factories forwarding to the scoped
+  `KeryxMediator`, so they add no scope entry (owner decision 35, OQ-74); as a result `ValidateOnBuild` no longer reports a singleton
+  that injects one of them, which fails when first resolved instead (OQ-76, open).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
   kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
   kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
@@ -506,7 +508,7 @@ The README's tables come from one full local run of the comparison suite under t
 (owner decision 32: IterationCount=15, IterationTime=200ms, LaunchCount=1, WarmupCount=5, built from a clean copy of the measured commit,
 nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
 2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
-scope entry) and OQ-75 (the benchmark behaviors' type names under NativeAOT).
+scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT).
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`

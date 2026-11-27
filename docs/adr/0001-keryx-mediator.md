@@ -64,7 +64,11 @@ builds and dry-runs the suite under NativeAOT (Benchmarks; open-questions, "Nati
 NativeAOT builds is OQ-73, open).
 Amended a twelfth time 2026-11-27 (owner decision 32): the README's benchmark tables come from one full local run of the comparison
 suite, under the JIT and then under NativeAOT, with the settings and machine stated (Benchmarks; open-questions, "Full benchmark run";
-what that run found, the `IMediator` scope entry and the benchmark behaviors' type names under NativeAOT, is OQ-74 and OQ-75, open).
+what that run found, the `IMediator` scope entry and the benchmark behaviors' type names under NativeAOT, is OQ-74, decided (owner
+decision 35, below), and OQ-75, open).
+Amended a thirteenth time 2026-11-27 (owner decision 35, OQ-74): `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as
+transient factories that forward to the scoped `KeryxMediator`, so resolving them adds no scope entry, and `ValidateOnBuild` no longer
+reports a singleton that depends on one of them (Injected parameters; Generated host, DI registration; that trade-off is OQ-76, open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -410,7 +414,7 @@ handler and of a behavior method.
 | `T` with a default value             | reference type: `sp.GetService<T>() ?? <default>`; value type (including `Nullable<T>`): `sp.GetService(typeof(T)) is T __v ? __v : <default>` (no reflection, no allocation). A nullable annotation alone does not make a parameter optional. |
 | `[FromKeyedServices(key)] T`         | `sp.GetRequiredKeyedService<T>(key)`; the key must be a compile-time constant (KRX018). The parameterless (`InheritKey`) form is KRX018. With a default value, the same optional forms as above using `GetKeyedService`.                       |
 | `IServiceProvider`                   | the scope's provider itself, never resolved (counts as an injected parameter; in a pipeline context, the `ServiceProvider` field). `[FromKeyedServices(key)] IServiceProvider` is an ordinary keyed service.                                   |
-| `IMediator`, `ISender`, `IPublisher` | the scoped mediator (no cycle: handlers are resolved lazily)                                                                                                                                                                                   |
+| `IMediator`, `ISender`, `IPublisher` | the scoped mediator (no cycle: handlers are resolved lazily); the interfaces are transient registrations that forward to it                                                                                                                    |
 | `CancellationToken`                  | the call's token, never injected                                                                                                                                                                                                               |
 
 An injected service is stored in a field (of the handler class, or of the pipeline context for a behavior method), so an injected
@@ -1177,10 +1181,22 @@ internal static class KeryxServiceCollectionExtensions
 }
 ```
 
-`AddKeryx()` uses `TryAdd*`, so a second call does nothing. It registers, all scoped and all with generated factory lambdas:
+`AddKeryx()` uses `TryAdd*`, so a second call does nothing. It registers, all with generated factory lambdas:
 
-- `KeryxMediator`, and `IMediator`, `ISender`, `IPublisher` forwarding to that same instance;
-- every handler class that has injected parameters.
+- `KeryxMediator`, scoped: one instance per scope;
+- `IMediator`, `ISender`, `IPublisher`, each a transient factory that forwards to the scope's mediator
+  (`sp.GetRequiredService<KeryxMediator>()`): all four service types resolve to that one instance in a scope and to different instances
+  in different scopes. Transient, not scoped (open-questions OQ-74): Microsoft's container caches a scoped factory's result as a scope
+  entry of its own, so a scoped forwarder runs a second factory and adds an entry to the scope's resolved services (whose storage grows
+  when the count crosses a capacity boundary), while a transient result that is not disposable is not tracked, and `KeryxMediator` is not
+  disposable. Resolving an interface in a new scope therefore allocates what resolving `KeryxMediator` does. Resolving an interface from
+  the root provider still resolves the scoped mediator there, so `ValidateScopes` still throws `InvalidOperationException`. A singleton
+  that depends on `IMediator`, `ISender` or `IPublisher` is no longer reported by `ValidateOnBuild`, which cannot see inside a factory:
+  the provider builds, and the singleton fails the first time it is resolved ("Cannot resolve scoped service '…KeryxMediator' from root
+  provider") rather than at build time ("Cannot consume scoped service 'Keryx.IMediator' from singleton …"). MediatR, whose `IMediator`
+  is transient by default, behaves the same. Without scope validation such a singleton captures the root provider's mediator, as it did
+  with scoped forwarders (open-questions OQ-76, open);
+- every handler class that has injected parameters, scoped.
 
 Behaviors are not registered: they are static, and the pipeline contexts resolve their injected services.
 

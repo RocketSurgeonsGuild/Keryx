@@ -29,7 +29,8 @@ the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69,
 2026-11-27 (decisions 25 and 26), follow, then OQ-59 and OQ-60 (decisions 23 and 24, the same day), and OQ-63 and OQ-64 (decisions 27
 and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) and "NativeAOT benchmark run" (decisions 29 and 31,
 the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second, and both are open. "Full
-benchmark run" (decision 32, the same day) comes last; OQ-74 and OQ-75 were raised while doing it, and both are open.
+benchmark run" (decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27
+(decision 35), comes last; OQ-76 was raised while implementing it, and is open.
 
 ## Open
 
@@ -194,31 +195,6 @@ statics, not from an observation.
   in the NativeAOT publish, keeps the switch. Alternative: measure first (the depth-8 scenarios under NativeAOT with and without the
   property) and keep the probe if the difference is within noise. Needs a decision.
 
-### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
-
-Decision 32's run ("Full benchmark run", at the end) measured Keryx's `IMediator` rows with a scope per request slower than its typed
-overload: `RealWorldPingScopePerRequest` 80.4 ns against 54.3 ns (448 B both), `RealWorldPublish1ScopePerRequest` 219 ns and 920 B against
-161 ns and 560 B, and `RealWorldPublish5ScopePerRequest` 634 ns and 2,136 B against 557 ns and 1,336 B (the notification-behavior pair
-the same: 360 B and 800 B more). The generated typed and generic `Publish` both call the same private `__PublishN` (read in the emitted
-host source), so the difference is in resolving the entry point: `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` each as a
-scoped factory that returns `GetRequiredService<KeryxMediator>()`, and the container caches a scoped factory's result as an entry of its
-own in the scope, so resolving `IMediator` runs a second factory and adds a second entry to the scope's resolved services, whose storage
-grows when the count crosses a capacity boundary. A probe (a bare `ServiceCollection` with a scoped class, a scoped forwarding factory for
-its interface and 1 or 5 more scoped services, Microsoft.Extensions.DependencyInjection 10.0.15, `GC.GetAllocatedBytesForCurrentThread`
-over 1,000 scopes) measured 384 B per scope through the class and 744 B through the interface with 1 service, 840 B and 1,640 B with 5:
-exactly the 360 B and 800 B above. With the forwarding factory registered transient, the interface measured 384 B and 840 B, the same as
-the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`) or already crossed the boundary
-(`RealWorldBehaviorsScopePerRequest`, 1,408 B both ways) shows only the time.
-
-- **Interim:** unchanged: the three interfaces are scoped forwarding factories (ADR, the services `AddKeryx()` registers). The README
-  reports the rows as measured and points here.
-- **Proposal:** register `IMediator`, `ISender` and `IPublisher` as transient factories that return the scope's `KeryxMediator`
-  (`TryAddTransient<IMediator>(static serviceProvider => serviceProvider.GetRequiredService<KeryxMediator>())`): still one instance per
-  scope, because the factory only forwards to the scoped registration, and nothing new in the scope, because the container tracks a
-  transient result only when it is disposable and `KeryxMediator` is not. A registration snapshot and an allocation test (resolve
-  `IMediator` and `KeryxMediator` in new scopes and compare) would cover it; the ADR's registration table keeps "the scoped mediator",
-  with a note that the interfaces forward to it. Needs a decision.
-
 ### OQ-75: Type names in the benchmark behaviors' log messages under NativeAOT (2026-11-27)
 
 Every subject's real-world logging behavior reads the message type's name with `typeof(TRequest).Name` (Keryx's notification behavior
@@ -236,6 +212,28 @@ benchmark code, not to the library.
   `Keryx.Benchmarks.Common` (`public static readonly string Value = typeof(T).Name;`) that every logging behavior, and the baseline with
   its concrete types, passes to `RequestLog`, so no row allocates for it under either runtime; then re-run the behavior rows under
   NativeAOT. Alternative: keep `typeof(T).Name` and read it in the baseline too, so every row pays the same. Needs a decision.
+
+### OQ-76: `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (2026-11-27)
+
+Decision 35 (OQ-74, Decided) makes the three interfaces transient factories that forward to the scoped `KeryxMediator`. With the scoped
+forwarders, a singleton that injects one of them was rejected when the provider was built with `ValidateOnBuild`: "Cannot consume scoped
+service 'IMediator' from singleton '…'". `ValidateOnBuild` cannot see inside a factory, so with the transient forwarders the provider
+builds, and with `ValidateScopes` the singleton fails the first time it is resolved, with the less direct "Cannot resolve scoped service
+'…KeryxMediator' from root provider". A probe (Microsoft.Extensions.DependencyInjection 10.0.15, `ValidateScopes` and `ValidateOnBuild`
+on, a scoped class, a scoped or transient forwarding factory for its interface and a singleton that takes the interface) showed both
+outcomes. ASP.NET Core turns both options on in the Development environment, as do the sample host and the benchmark subjects, so a
+hosted service or other singleton that injects `IMediator` now passes the startup check, and one resolved lazily fails later. Without
+validation nothing changes: the singleton captures the root provider's mediator either way. Resolving an interface from the root still
+throws under `ValidateScopes`. MediatR registers its `IMediator`, `ISender` and `IPublisher` transient by default, with the same effect.
+Neither OQ-74 nor decision 35 named this trade-off.
+
+- **Interim:** the transient forwarders as decided; the caveat is in the ADR (DI registration) and the README (Hosts), and
+  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it: with
+  `ValidateScopes` and `ValidateOnBuild` the provider builds, and resolving a singleton that takes `IMediator`, `ISender` or `IPublisher`
+  throws `InvalidOperationException` naming `KeryxMediator`.
+- **Proposal:** accept the trade-off, as MediatR does, and keep the caveat documented. Alternative: have the host generator report a
+  singleton consumer where it can see one (a `services.AddSingleton<T>()` in the host whose `T` takes one of the interfaces), as a
+  warning; it cannot see registrations made elsewhere or by reflection. Needs a decision.
 
 ## Decided
 
@@ -2468,3 +2466,50 @@ Done:
   the behavior rows under NativeAOT for the type names in the log messages (OQ-75); both open, measured as they are.
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
+
+Decision 32's run ("Full benchmark run", at the end) measured Keryx's `IMediator` rows with a scope per request slower than its typed
+overload: `RealWorldPingScopePerRequest` 80.4 ns against 54.3 ns (448 B both), `RealWorldPublish1ScopePerRequest` 219 ns and 920 B against
+161 ns and 560 B, and `RealWorldPublish5ScopePerRequest` 634 ns and 2,136 B against 557 ns and 1,336 B (the notification-behavior pair
+the same: 360 B and 800 B more). The generated typed and generic `Publish` both call the same private `__PublishN` (read in the emitted
+host source), so the difference is in resolving the entry point: `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` each as a
+scoped factory that returns `GetRequiredService<KeryxMediator>()`, and the container caches a scoped factory's result as an entry of its
+own in the scope, so resolving `IMediator` runs a second factory and adds a second entry to the scope's resolved services, whose storage
+grows when the count crosses a capacity boundary. A probe (a bare `ServiceCollection` with a scoped class, a scoped forwarding factory for
+its interface and 1 or 5 more scoped services, Microsoft.Extensions.DependencyInjection 10.0.15, `GC.GetAllocatedBytesForCurrentThread`
+over 1,000 scopes) measured 384 B per scope through the class and 744 B through the interface with 1 service, 840 B and 1,640 B with 5:
+exactly the 360 B and 800 B above. With the forwarding factory registered transient, the interface measured 384 B and 840 B, the same as
+the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`) or already crossed the boundary
+(`RealWorldBehaviorsScopePerRequest`, 1,408 B both ways) shows only the time.
+
+- **Interim:** unchanged: the three interfaces were scoped forwarding factories (ADR, the services `AddKeryx()` registers). The README
+  reported the rows as measured and pointed here.
+- **Proposal:** register `IMediator`, `ISender` and `IPublisher` as transient factories that return the scope's `KeryxMediator`
+  (`TryAddTransient<IMediator>(static serviceProvider => serviceProvider.GetRequiredService<KeryxMediator>())`): still one instance per
+  scope, because the factory only forwards to the scoped registration, and nothing new in the scope, because the container tracks a
+  transient result only when it is disposable and `KeryxMediator` is not. A registration snapshot and an allocation test (resolve
+  `IMediator` and `KeryxMediator` in new scopes and compare) would cover it; the ADR's registration table keeps "the scoped mediator",
+  with a note that the interfaces forward to it.
+- **Decision** (owner decision 35, 2026-11-27): adopt the proposal. `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as
+  transient factories that forward to the scoped `KeryxMediator`
+  (`TryAddTransient<IMediator>(static serviceProvider => serviceProvider.GetRequiredService<KeryxMediator>())`, the same for `ISender` and
+  `IPublisher`): still one mediator per scope, and no extra scope entry. Done in `HostEmitter.ServiceCollectionExtensions` (the three
+  lines and the `AddKeryx()` doc summary); the 34 Verify snapshots that contain `AddKeryx()` change in those seven lines only.
+  Tests: `HostRuntimeTests.AddKeryx_Registers_One_Scoped_Mediator_Behind_Every_Interface` checks the lifetimes (the three interfaces
+  transient, the mediator and the handlers scoped, all factories), that `IMediator`, `ISender`, `IPublisher` and `KeryxMediator` resolve
+  to the same instance in one scope whichever is resolved first and to a different one in another scope, and that resolving any of the
+  three from the root provider still fails scope validation; `HostAllocationTests.Resolving_An_Interface_In_A_New_Scope_Allocates_The_Same_As_Resolving_The_Mediator`
+  measures 1,000 new scopes that each resolve `KeryxMediator`, `IMediator`, `ISender`, `IPublisher` or all four, and then, as a real
+  request scope does, scopes that resolve one of them and send a request or publish a notification whose handler takes a scoped service,
+  and asserts that each row allocates what the same work starting from `KeryxMediator` allocates. Checked once with the three
+  registrations reverted to `TryAddScoped` (both target frameworks): the rows that resolve a single interface and nothing else pass either
+  way (376 B per scope, like `KeryxMediator`: the scope's resolved services grow only when their count crosses a capacity boundary, and
+  two entries do not cross it), so they alone would not catch a return to scoped forwarders; the rows that fail are "all four" (736 B
+  against 376 B) and every send and publish row, `IMediator` and `ISender` then `Send`, `IMediator` and `IPublisher` then `Publish` (808 B
+  against 448 B). With the transient forwarders every row matches its baseline. A consequence for `ValidateOnBuild` was found while
+  implementing this and is OQ-76 (open). The README's
+  scope-per-request and `IMediator` rows are from decision 32's run, before this change; decision 37's run refreshes them.
+
+Folded into the ADR (status; Injected parameters; DI registration), the brief (the host), the README (Hosts, Injected parameters,
+Benchmarks notes) and whats-left.md.

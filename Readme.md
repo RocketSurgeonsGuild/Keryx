@@ -153,7 +153,7 @@ request declared in another assembly is [KRX023](#krx023). Notifications may be 
 | `T` with a default value                  | `GetService<T>()`, falling back to the default                                      |
 | `[FromKeyedServices("key")] T`            | `GetRequiredKeyedService<T>("key")`; the key is a constant ([KRX018](#krx018))      |
 | `IServiceProvider`                        | the scope's provider itself, never resolved (keyed: an ordinary keyed service)      |
-| `IMediator`, `ISender`, `IPublisher`      | the scoped mediator                                                                 |
+| `IMediator`, `ISender`, `IPublisher`      | the scoped mediator (the interfaces forward to it)                                  |
 | `CancellationToken`                       | the token of the call                                                               |
 
 ## Testing handlers
@@ -405,9 +405,14 @@ namespace:
 
 - `internal sealed partial class KeryxMediator : IMediator`, with `ISender.Send`, `ISender.Stream` and `IPublisher.Publish`, plus a typed
   overload for each request and notification (`ValueTask<Guid> Send(CreateOrder.Command)`), which skips type dispatch;
-- `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator` and `IMediator`,
-  `ISender` and `IPublisher` (one scoped instance) and every handler class with injected parameters, all with generated factories and
-  `TryAdd`. It registers no behavior types: behaviors are static.
+- `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator` (scoped), `IMediator`,
+  `ISender` and `IPublisher` (transient factories that return the scope's `KeryxMediator`, so all four resolve to one instance per scope
+  and resolving an interface adds nothing to the scope; open-questions OQ-74) and every handler class with injected parameters (scoped),
+  all with generated factories and `TryAdd`. It registers no behavior types: behaviors are static. Because the interfaces are factories,
+  `ValidateOnBuild` does not report a singleton that injects `IMediator`, `ISender` or `IPublisher` (MediatR's transient `IMediator`
+  behaves the same); with `ValidateScopes` on, as in ASP.NET Core's Development environment, that singleton fails the first time it is
+  resolved ("Cannot resolve scoped service '…KeryxMediator' from root provider"). Inject the mediator into scoped or transient services,
+  or create a scope (open-questions OQ-76).
 
 The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
 services its behavior methods inject; it never creates a behavior instance. A request or stream pipeline with a static handler whose
@@ -643,9 +648,10 @@ Requests:
   fastest here (260 ns), while from the long-lived scope it measures 187 ns, behind Immediate.Handlers (145 ns) and Keryx (128 to
   134 ns).
 - The SQLite query (about 1.3 µs and 1,144 B) is most of every row in the last column.
-- `IMediator` with a scope per request is slower than the typed overload because `AddKeryx()` registers `IMediator` as its own scoped
-  service forwarding to `KeryxMediator`, so resolving it runs a second factory and adds an entry to the scope (open-questions OQ-74,
-  open).
+- `IMediator` with a scope per request is slower than the typed overload in this run because `AddKeryx()` then registered `IMediator` as
+  its own scoped service forwarding to `KeryxMediator`, so resolving it ran a second factory and added an entry to the scope. `AddKeryx()`
+  now registers the interfaces as transient forwarders, which add nothing to the scope (open-questions OQ-74); these rows are from the
+  run before that change and are refreshed by the next full run.
 
 Notifications, each to 1 and to 5 handlers:
 
@@ -690,9 +696,10 @@ Handlers that await the SQLite query, from the long-lived scope:
 | ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,385 ns · 1,208 B | 6,826 ns · 6,040 B | 1,428 ns · 1,208 B | 6,900 ns · 6,040 B |
 
 - Per request scope, Keryx's typed overload measures 161 ns (1 handler) and 557 ns (5 handlers) against the direct call's 124 ns and
-  450 ns. Its `IMediator` rows allocate 360 B and 800 B more than the typed ones, all of it the scope entry of the forwarding `IMediator`
-  registration (a probe resolving the same registrations from a bare container allocates exactly 360 B and 800 B more per scope through
-  `IMediator`, and nothing more when the forwarding registration is transient; OQ-74).
+  450 ns. Its `IMediator` rows allocate 360 B and 800 B more than the typed ones, all of it the scope entry of the scoped forwarding
+  `IMediator` registration this run measured (a probe resolving the same registrations from a bare container allocates exactly 360 B and
+  800 B more per scope through `IMediator`, and nothing more when the forwarding registration is transient). `AddKeryx()` now registers it
+  transient (OQ-74); these rows are refreshed by the next full run.
 - SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
   handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 8% of its sequential
   publish. Keryx allocates what the direct call allocates in all four columns.

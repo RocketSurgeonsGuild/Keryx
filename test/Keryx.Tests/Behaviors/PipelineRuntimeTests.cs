@@ -319,7 +319,7 @@ public class PipelineRuntimeTests : HostTest
         AddKeryx(host, services);
         await Assert.That(services.Select(static d => d.ServiceType.Name).Order(StringComparer.Ordinal).ToArray())
                     .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator", "PingHandler"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(services.All(static d => d.Lifetime == ServiceLifetime.Scoped && d.ImplementationType is null)).IsTrue();
+        await Assert.That(services.All(static d => d.ImplementationType is null)).IsTrue();
     }
 
     private async Task<(Assembly Host, ServiceProvider Provider)> StartAsync(CancellationToken cancellationToken)

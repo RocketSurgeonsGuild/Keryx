@@ -4,7 +4,8 @@ Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.m
 owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 28
 (2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64; updated for owner decision 30 (real-world benchmark
 scenarios, 2026-11-27) and decisions 29 and 31 (the NativeAOT benchmark run and its CI job, 2026-11-27); updated for decision 32 (the
-README's numbers from a full local run under the JIT and NativeAOT, 2026-11-27).
+README's numbers from a full local run under the JIT and NativeAOT, 2026-11-27) and decision 35 (transient `IMediator`, `ISender`
+and `IPublisher` forwarders, OQ-74).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -212,13 +213,29 @@ publish scope, confirmed with a probe), and OQ-75, the benchmark behaviors' `typ
 row) while the direct call uses `nameof`. Generic `Stream` at depth 0 (decision 22) did not show its slowdown (open-questions, "Generic
 `Stream` at depth 0 is tracked for the release").
 
+## Done: transient `IMediator`, `ISender` and `IPublisher` forwarders (owner decision 35, 2026-11-27)
+
+OQ-74 is decided: `AddKeryx()` registers the three interfaces as transient factories that forward to the scoped `KeryxMediator`
+(`TryAddTransient<IMediator>(static serviceProvider => serviceProvider.GetRequiredService<KeryxMediator>())`), so a scope still has one
+mediator and resolving an interface adds no entry to it. The 34 Verify snapshots that contain `AddKeryx()` change in its doc summary and
+the three registration lines only. `HostRuntimeTests` checks the lifetimes, one instance per scope behind all four service types,
+different instances across scopes and scope validation from the root; a new allocation test asserts that a new scope resolving
+`IMediator`, `ISender`, `IPublisher` or all four, or resolving one of them and then sending or publishing through a handler with a scoped
+service, allocates the same as the same work starting from `KeryxMediator` (with the scoped forwarders, all four allocated 736 B per scope
+against 376 B and every send and publish row 808 B against 448 B; a single interface resolved alone does not cross the scope's capacity
+boundary and matches either way). A new test pins the trade-off found while doing it, OQ-76 (open): `ValidateOnBuild` no longer reports
+a singleton that injects one of the interfaces, which fails when first resolved instead. 1,576 tests pass (788 per target framework).
+Nothing was measured with BenchmarkDotNet: the README's scope-per-request and `IMediator` rows are still decision 32's and say so;
+decision 37's run refreshes them.
+
 ## Decisions for the owner
 
-Four questions are open ([open-questions.md](adr/open-questions.md), **Open**), all about the benchmarks: OQ-72 (how the real-world
-scenarios set up each library), OQ-73 (the verification probe's cost in NativeAOT benchmark builds: compile it out of BenchmarkDotNet's
-builds, or measure it first), OQ-74 (register `IMediator`, `ISender` and `IPublisher` as transient forwarding factories, so resolving
-them adds nothing to the scope; the only one that would change Keryx itself) and OQ-75 (read the benchmark behaviors' type names once,
-the same way in every subject and the baseline).
+Four questions are open ([open-questions.md](adr/open-questions.md), **Open**). Three are about the benchmarks: OQ-72 (how the
+real-world scenarios set up each library), OQ-73 (the verification probe's cost in NativeAOT benchmark builds: compile it out of
+BenchmarkDotNet's builds, or measure it first) and OQ-75 (read the benchmark behaviors' type names once, the same way in every subject and
+the baseline). OQ-76 asks whether to accept that, with the transient forwarders, `ValidateOnBuild` no longer reports a singleton that
+injects `IMediator`, `ISender` or `IPublisher` (as with MediatR), or to have the host generator warn where it can see one. OQ-74 is
+decided (decision 35, above).
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
 (decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
@@ -275,7 +292,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   NativeAOT, except in the real-world behavior rows, where the benchmark behaviors' type names add 96 B (OQ-75), and in the SQLite and
   async-handler rows, 16 B less per query, the same change as the direct call's. With a scope per
   request, Keryx's typed overload allocates 80 B more than the direct call for a plain `Ping` (the scoped `KeryxMediator`) and its
-  `IMediator` publish 360 B (1 handler) and 800 B (5 handlers) more than the typed overload (OQ-74).
+  `IMediator` publish 360 B (1 handler) and 800 B (5 handlers) more than the typed overload, measured with the scoped forwarders that
+  decision 35 replaced (OQ-74); decision 37's run re-measures them.
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.00 ns (inlined) and 0.61 ns for 1 and 5 handlers, against Keryx typed at 0.34 ns and 0.44 ns; under
   NativeAOT 0.17 ns and 1.20 ns against 0.87 ns and 1.85 ns.
@@ -290,8 +308,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Decide OQ-73 (the verification probe in NativeAOT benchmark builds; the README's NativeAOT numbers include it) and OQ-75 (the
   benchmark behaviors' type names under NativeAOT); re-run the NativeAOT tables if either changes the benchmark code.
-- Decide OQ-74 (`IMediator`, `ISender` and `IPublisher` as transient forwarding factories); if adopted, re-run the scope-per-request
-  rows.
+- Re-run the scope-per-request and `IMediator` rows now that the interfaces are transient forwarders (decision 35, OQ-74; decision 37's
+  full run).
 - Decide OQ-72 (the real-world scenarios' setup: the baseline that does the behaviors' work inline, the singleton SQLite connection,
   the separate notification-behavior pair, the Mediator parallel project, the n/a cells) and fold it into the ADR's Benchmarks section.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from

@@ -190,9 +190,10 @@ internal static partial class HostEmitter
         writer.Member();
         writer.Documentation(
             "<summary>",
-            "    Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,",
-            "    <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> (one instance per scope), and every",
-            "    handler class that has injected parameters, all scoped and with generated factories. Behaviors are static and are not registered.",
+            "    Registers the scoped <see cref=\"KeryxMediator\" /> (one instance per scope), <see cref=\"global::Keryx.IMediator\" />,",
+            "    <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> as transient factories that return that",
+            "    instance, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are static and",
+            "    are not registered.",
             "    Registrations that already exist are kept, so a second call does nothing.",
             "</summary>",
             "<param name=\"services\">The service collection.</param>",
@@ -202,10 +203,12 @@ internal static partial class HostEmitter
         writer.Open();
         writer.Line($"{ThrowIfNull}(services);");
         writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
+        // Transient forwarders (OQ-74): still the scope's one KeryxMediator, but the container caches a scoped factory's result as a scope
+        // entry of its own, and a transient one that is not disposable is not tracked, so resolving an interface adds nothing to the scope.
         foreach (var service in (string[])["global::Keryx.IMediator", "global::Keryx.ISender", "global::Keryx.IPublisher"])
         {
             writer.Line(
-                $"{DescriptorExtensions}.TryAddScoped<{service}>(services, {Factory($"{ServiceProviderExtensions}.GetRequiredService<KeryxMediator>({ServiceProviderName})")});"
+                $"{DescriptorExtensions}.TryAddTransient<{service}>(services, {Factory($"{ServiceProviderExtensions}.GetRequiredService<KeryxMediator>({ServiceProviderName})")});"
             );
         }
 
@@ -227,7 +230,7 @@ internal static partial class HostEmitter
         return writer.ToSourceText();
     }
 
-    /// <summary>A scoped registration's factory: <c>static serviceProvider =&gt; body</c>.</summary>
+    /// <summary>A registration's factory: <c>static serviceProvider =&gt; body</c>.</summary>
     private static string Factory(string body) => $"static {ServiceProviderName} => {body}";
 
     private static void WriteTypedSend(CodeWriter writer, HostHandlerModel request, int index)
