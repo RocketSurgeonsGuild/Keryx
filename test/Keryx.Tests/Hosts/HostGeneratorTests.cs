@@ -154,6 +154,34 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
+    [Arguments(".NETCoreApp", "v8.0", null)]
+    [Arguments(".NETCoreApp", "v8.0", "false")]
+    [Arguments(".NETStandard", "v2.0", null)]
+    [Arguments(".NETStandard", "v2.0", "false")]
+    [Arguments(".NETFramework", "v4.8", null)]
+    [Arguments(".NETFramework", "v4.8", "false")]
+    public async Task Should_Report_No_KRX031_Outside_A_Host_Below_Net10(
+        string identifier,
+        string version,
+        string? keryxHost,
+        CancellationToken cancellationToken
+    )
+    {
+        // OQ-62: below net10.0 KeryxHost defaults to false (or the project sets it), so a net8.0 app that references a Keryx library builds.
+        // The host flag is checked before the target framework; a referenced orphan request shows KRX030 is not reported either.
+        var generators = keryxHost is null ? HostGenerators : HostGenerators.AddGlobalOption(BuildProperties.KeryxHost, keryxHost);
+        var result = await generators.WithTargetFramework(identifier, version)
+                                     .AddCompilationReferences(await OrphanLibraryAsync(cancellationToken))
+                                     .AddSources(Usings + Requests)
+                                     .Build()
+                                     .GenerateAsync(cancellationToken);
+
+        var host = result.Results[typeof(HostGenerator)];
+        await Assert.That(host.SyntaxTrees).IsEmpty();
+        await Assert.That(host.Diagnostics).IsEmpty();
+    }
+
+    [Test]
     [Arguments("true")]
     [Arguments("True")]
     [Arguments(" TRUE ")]
@@ -213,7 +241,7 @@ public class HostGeneratorTests : HostTest
         await Assert.That(diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
                     .IsEqualTo(
                          "'Legacy.Host' is a Keryx host (its KeryxHost MSBuild property is true), so it must target net10.0 or newer, but it targets "
-                       + ".NETStandard,Version=v2.0; set <KeryxHost>false</KeryxHost> if it is not meant to be one"
+                       + ".NETStandard,Version=v2.0; target net10.0 or newer, or stop setting KeryxHost to true"
                      );
         // A host is an MSBuild property, so the project-wide diagnostic has no source location (ADR 0001, Diagnostics).
         await Assert.That(diagnostic.Location).IsEqualTo(Location.None);

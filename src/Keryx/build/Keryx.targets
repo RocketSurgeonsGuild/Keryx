@@ -1,14 +1,23 @@
 <Project>
     <!--
         Whether this project is a Keryx host (ADR 0001, Opting in): the generated KeryxMediator and AddKeryx(), composed from its own and its
-        references' handlers and behaviors. A targets file, so it runs after the project body has set OutputType and IsTestProject (NuGet
-        imports a package's build targets from nuget.g.targets, after the project). A KeryxHost the project (or its Directory.Build.props)
-        sets itself wins; otherwise executables (OutputType Exe or WinExe) and test projects are hosts, and everything else, class libraries
-        included, is not. build/Keryx.props makes it compiler visible; the generators and analyzers read build_property.KeryxHost, and treat
-        an unset value as not a host.
+        references' handlers and behaviors. A KeryxHost the project (or its Directory.Build.props) sets itself wins. Otherwise a project is a
+        host only where a host can run (OQ-61, OQ-62): it is an executable (OutputType Exe or WinExe), a test project (IsTestProject) or an
+        Android app (AndroidApplication; the .NET for Android SDK turns an app's OutputType Exe into Library), AND it targets .NET 10 or later
+        (TargetFrameworkIdentifier .NETCoreApp, TargetFrameworkVersion 10.0 or newer). Everything else is not a host: class libraries, a
+        net8.0 or .NET Framework executable or test project (each inner build of a multi-targeting one on its own), and the outer build of a
+        multi-targeting project (no target framework). So KRX031 fires only for an explicit <KeryxHost>true</KeryxHost> below net10.0.
+
+        A targets file, so every input is set by the time it runs: NuGet imports a package's build targets from nuget.g.targets (imported by
+        Microsoft.Common.CurrentVersion.targets), after the project body has set OutputType, IsTestProject and AndroidApplication, and after
+        Microsoft.NET.TargetFrameworkInference.targets (imported by Microsoft.NET.Sdk.BeforeCommon.targets, as are the workload SDKs that set
+        AndroidApplication) has inferred TargetFrameworkIdentifier and TargetFrameworkVersion from TargetFramework. The identifier is checked
+        first: MSBuild stops at the first false operand of "and", so VersionGreaterThanOrEquals never sees an empty version.
+        build/Keryx.props makes KeryxHost compiler visible; the generators and analyzers read build_property.KeryxHost, and treat an unset
+        value as not a host.
     -->
     <PropertyGroup Condition="'$(KeryxHost)' == ''">
-        <KeryxHost Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(IsTestProject)' == 'true'">true</KeryxHost>
+        <KeryxHost Condition="('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(IsTestProject)' == 'true' or '$(AndroidApplication)' == 'true') and '$(TargetFrameworkIdentifier)' == '.NETCoreApp' and $([MSBuild]::VersionGreaterThanOrEquals('$(TargetFrameworkVersion.TrimStart(vV))', '10.0'))">true</KeryxHost>
         <KeryxHost Condition="'$(KeryxHost)' == ''">false</KeryxHost>
     </PropertyGroup>
     <!--

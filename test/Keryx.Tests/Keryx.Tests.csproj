@@ -30,8 +30,8 @@
         </ItemGroup>
     </Target>
     <!--
-        The directory of the Keryx package's build files (src/Keryx: build/, buildTransitive/), which BuildFiles/KeryxHostPropertyTests
-        evaluate with MSBuild. The tests reference the analyzers as an assembly and import none of those files, so this project, an Exe and
+        The directory of the Keryx package's build files (src/Keryx: build/, buildMultiTargeting/, buildTransitive/), which
+        BuildFiles/KeryxHostPropertyTests evaluate with MSBuild. The tests reference the analyzers as an assembly and import none of those files, so this project, an Exe and
         a test project, is not a host itself: KeryxHost only exists in projects that import build/Keryx.targets.
     -->
     <ItemGroup>

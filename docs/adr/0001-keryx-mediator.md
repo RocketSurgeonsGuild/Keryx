@@ -41,6 +41,9 @@ nothing has no pipeline context either, its publish strategy being static (open-
 their output as text through an indented writer again (`CodeWriter`), every generated source unchanged, because `SyntaxFactory` measured
 slower (open-questions OQ-71, decided); the generic `Stream` slowdown at depth 0 measured after the type patterns is tracked for the
 release rather than investigated (open-questions, "Generic `Stream` at depth 0 is tracked for the release").
+Amended a seventh time 2026-11-27 (owner decisions 25 and 26): `build/Keryx.targets` defaults `KeryxHost` to `true` only where a host
+can run, for an executable, test project or Android app (`AndroidApplication`) that targets .NET 10 or later, so a project below
+`net10.0` is a host, and gets KRX031, only when it sets `KeryxHost` to `true` itself (open-questions OQ-61 and OQ-62, decided).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -119,7 +122,10 @@ One NuGet package, **`Keryx`**, contains:
   handlers) may target `netstandard2.0`. Their generated code (the
   handler partial and its attribute) uses only APIs available there.
 - A host (a project whose `KeryxHost` MSBuild property is `true`, see Opting in) must target `net10.0` or newer. Its generated dispatch uses `Unsafe.As`, `FrozenDictionary` and, where
-  it helps, `PoolingAsyncValueTaskMethodBuilder`. A host on an older TFM is error KRX031.
+  it helps, `PoolingAsyncValueTaskMethodBuilder`. A host on an older TFM is error KRX031. `KeryxHost` defaults to `true` only on
+  `net10.0` or newer (Opting in), so a project below it is a host only when it sets the property to `true` itself; a `net8.0` or .NET
+  Framework executable or test project that uses a Keryx library, and the older inner builds of a multi-targeting test project, are not
+  hosts and build.
 - The package's `build/Keryx.props` exposes `<CompilerVisibleProperty Include="KeryxHost;RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion" />`
   to the generators and analyzers. KRX031 fires unless `TargetFrameworkIdentifier` is `.NETCoreApp` with version 10.0 or newer. When the properties
   are absent (for example in a test harness), the host generator falls back to the referenced `System.Runtime` assembly version
@@ -481,7 +487,7 @@ assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placemen
 | KRX023 | Error                | analyzer                            | A handler takes a request or stream request type declared in another assembly. A request's one handler lives in the assembly that declares it, so that assembly checks it is handled (KRX001) and every host composes the same handler. Reported on the handler's request parameter, in libraries and hosts alike; the generators skip the handler, and a host counts it as handling its request (no KRX030 on top). Notifications are not affected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | KRX024 | Error                | analyzer                            | A request or stream request class or record is neither `sealed` nor abstract (or closed). A request hierarchy is an abstract or closed base with sealed cases; generic `Send` and `Stream` test each sealed type with a type pattern. Reported on the type, in libraries and hosts alike. Notifications are not affected. Code fix: make it `sealed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | KRX030 | Error (configurable) | host                                | A **referenced** request or stream request type has no handler anywhere in the composed set: a safety net, since each assembly checks its own requests (KRX001). Covers request types in referenced assemblies (from the scan), including types declared in another host; it catches a referenced handler the host excluded, an internal handler of a referenced host, or a library built with KRX001 suppressed. The host's own request types are KRX001's. Reported without a location (a referenced type has no source location), so its severity is set for the whole host: a global AnalyzerConfig file (`.globalconfig`, `is_global = true`), `<NoWarn>` or `<WarningsAsErrors>`, not a per-file `.editorconfig` section.                                                                                                                                                                                                                                                                                                                                  |
-| KRX031 | Error                | host                                | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`; the message suggests `<KeryxHost>false</KeryxHost>`. Reported without a location. The host generator emits nothing there (KRX030 is still reported).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| KRX031 | Error                | host                                | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. `KeryxHost` defaults to `true` only on `net10.0` or newer (Opting in), so this is a project that sets it to `true` itself; the message says to target `net10.0` or newer or stop setting `KeryxHost` to `true`. Reported without a location. The host generator emits nothing there (KRX030 is still reported).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | KRX032 | Error                | host                                | A referenced assembly's manifest has a newer `FormatVersion` than this Keryx understands. The message says to upgrade Keryx in this project.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | KRX033 | Warning              | host                                | A referenced assembly references Keryx but has no `[assembly: KeryxManifest]` (the generator did not run there).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | KRX034 | Error                | host                                | A type named in a manifest, or one the generated code derives from it (a referenced handler's response, item or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved, has a type argument that cannot be resolved, or is not accessible from the host (missing reference). Reported once per type and manifest assembly, without a location, naming the assembly to reference. For a behavior method's injected parameter type it is reported per behavior method, naming the method and its kind; the class stays in the pipelines of its other kinds. A second message covers a manifest entry that resolves but does not fit the types the host resolves (version skew, for example a notification type that is no longer a notification in the contracts assembly the host references). See How the host reads it.                                                                                                                                                                                    |
@@ -995,9 +1001,18 @@ public sealed class HandlerOrderAttribute(int order) : Attribute { public int Or
 ### Opting in
 
 A project is a host when its `KeryxHost` MSBuild property is `true`. The package's `build/Keryx.targets` sets it when the project leaves it
-empty, after the project body (NuGet imports a package's targets from `nuget.g.targets`), so `OutputType` and `IsTestProject` are known:
-`true` for an executable (`OutputType` `Exe` or `WinExe`) and for a test project (`IsTestProject` is `true`), `false` otherwise, class
-libraries included. A value the project or its `Directory.Build.props` sets wins:
+empty, to `true` only where a host can run (OQ-61, OQ-62):
+
+- the project is an executable (`OutputType` `Exe` or `WinExe`), a test project (`IsTestProject` is `true`) or an Android app
+  (`AndroidApplication` is `true`: the .NET for Android SDK turns an app's `OutputType` `Exe` into `Library` and sets
+  `AndroidApplication`, which is why Dovetail checks it too), **and**
+- it targets .NET 10 or later (`TargetFrameworkIdentifier` is `.NETCoreApp` and `TargetFrameworkVersion` is 10.0 or newer), the
+  framework a host needs (KRX031).
+
+Everything else is `false`: class libraries, a `net8.0` or .NET Framework executable or test project (each inner build of a
+multi-targeting project on its own, so a `net8.0;net10.0` test project is a host in its `net10.0` build only), and the outer build of a
+multi-targeting project, which has no target framework. A value the project or its `Directory.Build.props` sets wins, so KRX031 is
+reported only for a project that sets `KeryxHost` to `true` itself below `net10.0`:
 
 ```xml
 <!-- A class library that is a host (the benchmark subjects' Keryx host does this). An executable or test project that references
@@ -1006,6 +1021,14 @@ libraries included. A value the project or its `Directory.Build.props` sets wins
     <KeryxHost>true</KeryxHost>
 </PropertyGroup>
 ```
+
+Every input is known where the default is computed. NuGet imports a package's targets from `nuget.g.targets`, which
+`Microsoft.Common.CurrentVersion.targets` imports after the project body (`OutputType`, `IsTestProject`, `AndroidApplication`) and after
+the .NET SDK's `Microsoft.NET.Sdk.BeforeCommon.targets`, which infers `TargetFrameworkIdentifier` and `TargetFrameworkVersion` from
+`TargetFramework` and imports the workload SDKs (the Android SDK's `Microsoft.Android.Sdk.DefaultProperties.targets` sets
+`AndroidApplication` and rewrites `OutputType` there). The condition checks the identifier before it compares the version, so the outer
+build of a multi-targeting project (no version) is `false` without comparing an empty version. `BuildFiles/KeryxHostPropertyTests`
+evaluate the package's files from `obj/*.nuget.g.props` and `.nuget.g.targets`, where restore puts them.
 
 `build/Keryx.props` makes it compiler visible, and every generator and analyzer reads `build_property.KeryxHost`; unset (a compilation
 without the package's build files, such as a hand-wired analyzer) or anything but `true` (case-insensitive) is not a host. The package
@@ -1570,6 +1593,12 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   before compilation, so the generators and analyzers read one analyzer config option instead of the compilation's attributes. Host
   diagnostics without a source location were reported on the attribute, where a per-file `.editorconfig` section applied to them; they
   are now reported without a location.
+- **A `KeryxHost` default blind to the target framework and to Android** (2026-11-26 to 2026-11-27, until owner decisions 25 and 26):
+  every `Exe`, `WinExe` or test project was a host whatever it targeted, and an Android app (`OutputType` rewritten to `Library`) was
+  not. A `net8.0` or .NET Framework executable or test project that used a Keryx library, including transitively and in the older inner
+  builds of a multi-targeting test project, failed with KRX031 although it never asked to be a host, and had to set
+  `<KeryxHost>false</KeryxHost>` per target framework. The default now also needs .NET 10 or later and includes `AndroidApplication`
+  (Opting in).
 
 ## Consequences
 
@@ -1583,8 +1612,9 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   retry go in the handler.
 - The `Keryx` package brings `Microsoft.Extensions.DependencyInjection.Abstractions` into every project that references it, except on
   `net11.0`, where the shared framework carries it (OQ-56).
-- An executable or test project that references Keryx is a host unless it sets `<KeryxHost>false</KeryxHost>`, and a class library that
-  should be one sets `<KeryxHost>true</KeryxHost>`. A host diagnostic without a source location takes only the project-wide severity.
+- An executable, test project or Android app that references Keryx and targets .NET 10 or later is a host unless it sets
+  `<KeryxHost>false</KeryxHost>`; below `net10.0` none is a host unless it sets `<KeryxHost>true</KeryxHost>` (then KRX031), and a class
+  library that should be one sets `<KeryxHost>true</KeryxHost>`. A host diagnostic without a source location takes only the project-wide severity.
 - The mediator is scoped. Singletons need a scope to use it.
 - Typed `Send` overloads are only reachable inside the host.
 - Pipelines produce more generated code, and generic struct specialization adds code size.

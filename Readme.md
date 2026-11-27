@@ -36,7 +36,8 @@ analyzers and code fixes (`analyzers/dotnet/cs`).
 - **C# 14 or later** (the .NET 10 SDK's default) in every project that references Keryx, whatever framework it targets. The package sets
   `LangVersion` to `latest` when your project leaves it empty; a `LangVersion` below 14 that you set yourself is error [KRX022](#krx022).
 - Requests, notifications and handler libraries may target `netstandard2.0`. A **host** (the project with the mediator: by default an
-  executable or a test project, see [Hosts](#hosts)) targets `net10.0` or later ([KRX031](#krx031)).
+  executable, test project or Android app, see [Hosts](#hosts)) targets `net10.0` or later ([KRX031](#krx031)); one that targets an
+  older framework is not a host by default.
 - The `Keryx` package depends on `Microsoft.Extensions.DependencyInjection.Abstractions` (8.0.x for `netstandard2.0`, 10.0.x for
   `net10.0`), which the generated host code uses. On `net11.0` the assembly comes from the shared framework, so that target lists no
   package dependency.
@@ -166,11 +167,10 @@ var id = await handler.InvokeAsync(new CreateOrder.Command("apple", 3), Cancella
 ```
 
 A handler with nothing injected gets a `static InvokeAsync`. To test whole pipelines (behaviors, notification fan-out), reference Keryx
-from the test project, which makes it a host (a test project is one by default), call `AddKeryx()` on a `ServiceCollection` and send
-through the mediator. A test host can
-reference the app host. It can exclude one of its handlers with `[assembly: ExcludeHandler(typeof(TheHandler))]` and, for a
-notification handler, write its own; a request's handler can only be swapped through the services it injects, because a host's handler of
-a referenced request is [KRX023](#krx023) (open question OQ-59).
+from the test project, which makes it a host (a test project that targets `net10.0` or later is one by default), call `AddKeryx()` on a
+`ServiceCollection` and send through the mediator. A test host can reference the app host. It can exclude one of its handlers with
+`[assembly: ExcludeHandler(typeof(TheHandler))]` and, for a notification handler, write its own; a request's handler can only be
+swapped through the services it injects, because a host's handler of a referenced request is [KRX023](#krx023) (open question OQ-59).
 
 ## Behaviors
 
@@ -365,9 +365,11 @@ public sealed record OrderShipped(Guid Id) : INotification;
 
 ## Hosts
 
-A project (`net10.0` or later) is a **host** when its `KeryxHost` MSBuild property is `true`. The package sets it for you when the
-project leaves it empty: executables (`OutputType` `Exe` or `WinExe`) and test projects are hosts, everything else, class libraries
-included, is not. Set it yourself to change that:
+A project is a **host** when its `KeryxHost` MSBuild property is `true`. The package sets it for you when the project leaves it empty:
+executables (`OutputType` `Exe` or `WinExe`), test projects and Android apps (`AndroidApplication`) that target `net10.0` or later are
+hosts, and everything else is not: class libraries, and any project that targets an older framework (`net8.0`, .NET Framework). So a
+`net8.0` app or test project that uses a Keryx library builds without being a host, and a test project that multi-targets
+`net8.0;net10.0` is a host in its `net10.0` build only. Set the property yourself to change that:
 
 ```xml
 <PropertyGroup>
@@ -376,16 +378,7 @@ included, is not. Set it yourself to change that:
 </PropertyGroup>
 ```
 
-An executable or test project that runs the Keryx generators, through its own package reference or through a `ProjectReference` to a
-project that has one, is a host whatever framework it targets. One that targets a framework older than `net10.0` (`net8.0`, .NET
-Framework) gets [KRX031](#krx031) until it sets `<KeryxHost>false</KeryxHost>` (open question OQ-62). A test project that multi-targets
-sets it for the older frameworks only:
-
-```xml
-<PropertyGroup>
-    <KeryxHost Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">false</KeryxHost>
-</PropertyGroup>
-```
+A host needs `net10.0` or later: setting `<KeryxHost>true</KeryxHost>` in a project below it is [KRX031](#krx031).
 
 Host diagnostics about something without a source location (a referenced
 type, the target framework) are reported without a location, so their severity is set for the whole project (a `.globalconfig` or
@@ -479,7 +472,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx023"></a>KRX023      | Error    | A handler takes a request or stream request declared in another assembly. A request's handler lives in the request's own assembly; move the request or the handler. Notifications are not affected. |
 | <a id="krx024"></a>KRX024      | Error    | A request or stream request class or record is neither `sealed` nor abstract (or `closed`). Seal it, or make it an abstract base of sealed requests. Notifications are not affected. Code fix: make it `sealed`. |
 | <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an excluded referenced handler or an internal handler of a referenced host. The host's own requests are KRX001's. Reported without a location: change its severity in a `.globalconfig` or with `<NoWarn>`. |
-| <a id="krx031"></a>KRX031      | Error    | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. The host generator emits nothing there. An executable or test project is a host by default, whatever it targets: set `<KeryxHost>false</KeryxHost>` in one that is not meant to be a host, per target framework when it multi-targets ([Hosts](#hosts), OQ-62). |
+| <a id="krx031"></a>KRX031      | Error    | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. The host generator emits nothing there. Keryx defaults `KeryxHost` to `true` only on `net10.0` or later, so this means the project (or a file it imports) sets `<KeryxHost>true</KeryxHost>` itself ([Hosts](#hosts)). |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
 | <a id="krx033"></a>KRX033      | Warning  | A referenced assembly uses Keryx but has no manifest (the generator did not run there; reference the `Keryx` package directly).                               |
 | <a id="krx034"></a>KRX034      | Error    | A type a referenced manifest names, or one generated code derives from it (a handler's response or constructor parameter type, an injected parameter type of a referenced behavior method), cannot be resolved from the host, or a manifest entry no longer fits the types the host resolves. Reference the assembly the message names. For a behavior method it names the method and its kind; the class still applies through its other kinds. |

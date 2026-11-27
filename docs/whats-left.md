@@ -1,7 +1,8 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 (2026-11-27).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 25 and 26
+(2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -38,7 +39,8 @@ One commit per step, each with build and tests green:
   requests moved to `Keryx.Samples.Orders`; `Keryx.Samples.Contracts` keeps the notifications. The pre-commit `dotnet format` step is
   `dotnet format whitespace` only.
 - **5afb535, a host is an MSBuild property:** `KeryxHostAttribute` is removed; `build/Keryx.targets` defaults `KeryxHost` to `true` for
-  `OutputType` `Exe`/`WinExe` and `IsTestProject` (else `false`; the project's own value wins), and the generators and analyzers read
+  `OutputType` `Exe`/`WinExe` and `IsTestProject` (else `false`; the project's own value wins; decisions 25 and 26, below, added
+  `AndroidApplication` and the .NET 10 condition), and the generators and analyzers read
   `build_property.KeryxHost`; the package ships `buildTransitive/` (and keeps `buildMultiTargeting/`), and a pack-time check fails if any
   of the three build folders is missing; host diagnostics without a source location use `Location.None`; KRX031, KRX043 and
   `KeryxHandlerNotFoundException` name the property; `ReferenceScan` drops the referenced-host flag (`ProjectionDataVersion` 3).
@@ -146,29 +148,36 @@ Each code change is one commit, with build and tests green:
   not investigated now. The docs sweep after the text emitters and OQ-70 recorded it and checked the ADR, the brief, open-questions.md,
   CONTEXT.md, the README, the samples' READMEs and the analyzer release notes against the code.
 
+## Done: owner decisions 25 and 26 (2026-11-27)
+
+- **`KeryxHost` only where a host can run (decision 25 for OQ-61, decision 26 for OQ-62):** `build/Keryx.targets` (which
+  `buildTransitive/` and `buildMultiTargeting/` import) defaults `KeryxHost` to `true` only when the project is an `Exe`/`WinExe`, a test
+  project or an Android app (`AndroidApplication`) **and** targets `.NETCoreApp` 10.0 or later; a value the project sets still wins, so
+  KRX031 now means an explicit `<KeryxHost>true</KeryxHost>` below `net10.0`, and its message says to target `net10.0` or stop setting
+  the property. The README no longer tells `net8.0` or multi-targeting projects to set `false`. `KeryxHostPropertyTests` import the
+  package's files from `obj/*.nuget.g.props`/`.targets`, where restore puts them, and gain rows for `net8.0`, `net48`, `net10.0` and
+  `net11.0` executables and test projects, explicit values, Android apps (`net10.0-android`, `net8.0-android`, `AndroidApplication` set
+  as the Android SDK leaves it, so the rows do not need the workload) and each inner and the outer build of a `net8.0;net10.0` test
+  project. Checked by hand with the packed package: a `net8.0` console app referencing a `netstandard2.0` Keryx library builds (it did
+  not before: KRX031); a `net8.0;net10.0` test project referencing it builds, with `AddKeryx()` generated in its `net10.0` build only; a
+  `net10.0` app runs; a `net8.0` app with `<KeryxHost>true</KeryxHost>` gets KRX031.
+
 ## Decisions for the owner
 
-Six questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework. The code follows
-each one's **Interim** line:
+Four questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59, OQ-60, OQ-63 and OQ-64 from the second rework.
+The code follows each one's **Interim** line:
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
   referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
 - **OQ-60:** generated manifests can no longer make two assemblies handle one request, so the host's cross-assembly KRX005 is only a
   safety net; keep it or remove it?
-- **OQ-61:** app models whose `OutputType` is not `Exe`/`WinExe` (the .NET for Android SDK sets `Library` plus `AndroidApplication`) are
-  not hosts by default; default `KeryxHost` to `true` for `AndroidApplication` and other app models, or keep the interim (set
-  `<KeryxHost>true</KeryxHost>`) and document it?
-- **OQ-62:** every `Exe`, `WinExe` or test project that runs the Keryx generators is a host whatever it targets, so one below `net10.0`
-  (including a multi-targeting test project's older inner builds, and transitively through a `ProjectReference`) fails with KRX031;
-  default `KeryxHost` to `true` only for `.NETCoreApp` 10.0 or later, or keep the interim (set `<KeryxHost>false</KeryxHost>`, per target
-  framework)?
 - **OQ-63:** a behavior's unkeyed `IServiceProvider` is held in a shared `ServiceN` field of the context; keep that, or give the context a
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
 
-OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20) and OQ-71 (decision 21) are
-decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
+OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-61
+(decision 25) and OQ-62 (decision 26) are decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
 
 ## Gates and checks
 

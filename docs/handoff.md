@@ -28,7 +28,8 @@ question, the interim behavior you are using and a proposal, continue with the s
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
   attribute.
-- A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables and test projects) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
+- A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
+  net10.0 or later, OQ-61 and OQ-62) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
   lambdas (nothing for behaviors).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
@@ -68,8 +69,9 @@ Keryx.slnx
 src/Keryx/                      Keryx.dll + packaging; packs Keryx.Analyzers (its GetKeryxPackageFiles target) into analyzers/dotnet/cs
 src/Keryx/build/Keryx.props      LangVersion default (latest), CompilerVisibleProperty KeryxHost;RootNamespace;
                                 TargetFrameworkIdentifier;TargetFrameworkVersion, packed to build/
-src/Keryx/build/Keryx.targets    KeryxHost default (Exe/WinExe or IsTestProject: true, else false; the project's value wins), the
-                                Specular.Scanning scan cache wiring; buildTransitive/ and buildMultiTargeting/ import build/
+src/Keryx/build/Keryx.targets    KeryxHost default (Exe/WinExe, IsTestProject or AndroidApplication, and .NETCoreApp 10.0 or later:
+                                true, else false; the project's value wins), the Specular.Scanning scan cache wiring;
+                                buildTransitive/ and buildMultiTargeting/ import build/
 src/Keryx.Analyzers/            generators + DiagnosticAnalyzers + CodeFixProviders (CodeFixes/; Workspaces, RS1038 suppressed),
                                 AnalyzerReleases.*.md
 test/Keryx.Tests/               TUnit, TUnit.Assertions.Should, Verify.TUnit, Rocket.Surgery.Extensions.Testing.SourceGenerators
@@ -217,8 +219,10 @@ reported, C# 14 and `latest` are not, in a `netstandard2.0` project as well); ev
 
 ### Phase 3: host, request/response, no behaviors
 
-The `KeryxHost` MSBuild property (ADR, Opting in): `build/Keryx.targets` defaults it after the project body (`true` for `OutputType`
-`Exe`/`WinExe` and for `IsTestProject`, else `false`; a value the project sets wins), `build/Keryx.props` makes it a
+The `KeryxHost` MSBuild property (ADR, Opting in): `build/Keryx.targets` defaults it after the project body and the target framework
+inference (`true` for `OutputType` `Exe`/`WinExe`, `IsTestProject` or `AndroidApplication` when `TargetFrameworkIdentifier` is
+`.NETCoreApp` and `TargetFrameworkVersion` is 10.0 or later, else `false`, owner decisions 25 and 26, OQ-61 and OQ-62; a value the project
+sets wins, so KRX031 means an explicit `true` below `net10.0`), `build/Keryx.props` makes it a
 `CompilerVisibleProperty`, `buildTransitive/` imports `build/` for transitive consumers, and every generator and analyzer reads
 `build_property.KeryxHost` (unset is not a host; tests set it with the `WithKeryxHost()` builder helper). Host diagnostics without a source
 location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped,
@@ -248,8 +252,11 @@ that is not sealed, the only one a derived type can come from, is not dispatched
 sealed siblings still dispatch); Verify snapshots of the generated mediator per kind at and one above the
 threshold; the JIT code of the generic `Send`, `Stream` and `Publish<T>` (`DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`) keeps every
 arm's tail call and tests each sealed type with one method-table compare; a host with
-`LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`) cover the
-`KeryxHost` defaults through `build/` and `buildTransitive/`, the project's own value, and the compiler-visible property; `dotnet pack`
+`LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`, the
+package's files imported from `obj/*.nuget.g.props` and `.nuget.g.targets` as restore does) cover the `KeryxHost` defaults through
+`build/` and `buildTransitive/` (executables and test projects on `net8.0`, `net48`, `net10.0` and `net11.0`, Android apps on
+`net10.0-android` and `net8.0-android` with `AndroidApplication` set as the Android SDK leaves it, each inner build and the outer build of
+a `net8.0;net10.0` test project), the project's own value, and the compiler-visible property; `dotnet pack`
 ships `build/`, `buildMultiTargeting/` and `buildTransitive/` (the `_KeryxCheckPackedBuildFiles` target in `Keryx.csproj` fails the pack
 otherwise).
 

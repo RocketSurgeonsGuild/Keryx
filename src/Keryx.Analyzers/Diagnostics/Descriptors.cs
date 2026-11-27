@@ -315,11 +315,11 @@ internal static class Descriptors
     public static readonly DiagnosticDescriptor HostTargetFrameworkTooOld = new(
         "KRX031",
         "Host targets a framework older than net10.0",
-        "'{0}' is a Keryx host (its KeryxHost MSBuild property is true), so it must target net10.0 or newer, but it targets {1}; set <KeryxHost>false</KeryxHost> if it is not meant to be one",
+        "'{0}' is a Keryx host (its KeryxHost MSBuild property is true), so it must target net10.0 or newer, but it targets {1}; target net10.0 or newer, or stop setting KeryxHost to true",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework. A project is a host when its KeryxHost MSBuild property is true, which Keryx defaults for executables (OutputType Exe or WinExe) and test projects; set <KeryxHost>false</KeryxHost> in one that is not.",
+        description: "A host's generated mediator uses Unsafe.As and FrozenDictionary, so a host targets net10.0 or newer. Libraries with requests and handlers may target netstandard2.0. The host generator emits nothing in a host on an older framework. A project is a host when its KeryxHost MSBuild property is true. Keryx defaults it to true only for executables (OutputType Exe or WinExe), test projects and Android apps that target net10.0 or newer, so this is reported only when the project (or a file it imports) sets KeryxHost to true below net10.0.",
         helpLinkUri: HelpLinkBase + "krx031"
     );
 
