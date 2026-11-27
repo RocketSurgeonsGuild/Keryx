@@ -1,13 +1,14 @@
 # What is left
 
-Nov 26, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework and again
-after the owner's second rework.
+Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
+owner's second rework, and again after its follow-up (owner decisions 14 to 18).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
 Two reworks followed the first build, each decided by the owner on 2026-11-26 and recorded in
-[open-questions.md](adr/open-questions.md) under **Decided**; the brief's phases describe the resulting design as what they build, so there
-is no separate rework phase. This note lists the current state, what still needs a person, and what is left before a release.
+[open-questions.md](adr/open-questions.md) under **Decided**, and a follow-up to the second applied the owner's later decisions of the same
+day; the brief's phases describe the resulting design as what they build, so there is no separate rework phase. This note lists the
+current state, what still needs a person, and what is left before a release.
 
 ## Done: the static-behavior rework
 
@@ -48,56 +49,74 @@ One commit per step, each with build and tests green:
   key) its behavior methods inject, computed in the model; a transient shared by several behavior methods of a pipeline is one instance
   per scope and pipeline.
 - **1fddbdd, generated code with `SyntaxFactory`:** `HandlerEmitter` and `HostEmitter` build their output with Roslyn's `SyntaxFactory`
-  through `GeneratedSyntax` (then one `NormalizeWhitespace` per compilation unit, a layout pass and the header; since OQ-66 the whitespace
-  is built in, below); links are one
-  `readonly struct` per position with a primary constructor and target-typed `new(pipeline, request)`. Generic dispatch is written as
-  `switch` statements with exact-type `when` guards, not the switch expressions decision 7 named (the commit title still says
-  "switch-expression"): the expressions lost the arms' tail calls and measured slower (OQ-67).
-- **No code change, decision 4:** `next` stays a struct implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>`; typed next
-  delegates are recorded as rejected in the ADR's Alternatives considered.
-- **2e8e4e1, dispatch snapshots (decision 15):** Verify snapshots of the generated mediator for each kind at and one above the jump-table
-  threshold, and of a host with every kind above it.
-- **Requests are sealed (decision 14, and decision 16 for OQ-67):** a request or stream request class or record that
-  is neither sealed nor abstract (or C# 15 `closed`) is the new error KRX024, with the code fix _Make sealed_; a handler of an abstract or
-  closed request base is KRX003; notifications are not affected. Generic `Send` and `Stream` are switch statements with a type pattern
-  per sealed request type (`case global::X r: return __Dispatch0<TResponse>(r, cancellationToken);`, `default: throw
-  __HandlerNotFound(request.GetType());`), the index switch above the threshold stays keyed on `GetType()`, typed overloads of sealed
-  requests have no runtime type check, and `Publish<T>` keeps exact-type guards ending `default: return default;`. A struct request's
-  section has no pattern variable and its arm unboxes, so every arm stays a tail call. OQ-67 is decided (switch statements), and so is
-  OQ-68 (decision 18): a request or stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is
-  the new host error KRX038. OQ-69 (a closed base from a referenced assembly) is open. The code fix _Make sealed_ is not offered for a
-  type that declares its own `virtual` or `protected` members.
-- **Generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` builds every token with its spaces and every line
-  from the depth its container gives it, so `Render` writes the tree as built: no `NormalizeWhitespace` and no layout pass. Type names are
-  parsed once per file. Every snapshot is byte for byte unchanged (a temporary two-way render of 7,472 generated files found no
-  difference); two shapes no snapshot covers now read `int[,]` and `Dictionary<,>` where normalization wrote `int[, ]` and
-  `Dictionary<, >`, and `GeneratedSyntaxTests` pins each layout rule against the helpers.
-- **Pipelines that resolve nothing get no context (decision 16 for OQ-65):** a request or stream pipeline whose handler's invoker is
-  static and whose behaviors inject nothing, and a publish pipeline without handlers whose behaviors inject nothing, have no pipeline
-  context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
-  what it reads or passes on (`(pipeline, request)`, `(request)`, or nothing), so the mediator no longer suppresses CS9113. A publish
-  pipeline with handlers keeps its context even when it resolves nothing (OQ-70, open).
+  through `GeneratedSyntax` (at the time with one `NormalizeWhitespace` per compilation unit, a layout pass and the header; 38c8f74 below
+  built the whitespace in); links are one `readonly struct` per position with a primary constructor and target-typed
+  `new(pipeline, request)`. The commit title says "switch-expression dispatch", but the code it committed does not use switch expressions:
+  generic dispatch was written as `switch` statements with exact-type `when` guards, one `return` per section, because the switch
+  expressions decision 7 named lost the arms' tail calls and measured slower (OQ-67, then open). 6e7465a below replaced the guards of
+  `Send` and `Stream` with type patterns.
+- **02fb58e, docs:** decision 4 recorded with no code change (`next` stays a struct implementing `INext<TResponse>`, `INext` or
+  `IStreamNext<TItem>`; typed next delegates are rejected in the ADR's Alternatives considered), and the docs aligned with the commits
+  above.
 
-Measured in the second rework (Apple M4 Max, macOS 27.2, BenchmarkDotNet 0.15.8; details in the open-questions entries):
+## Done: the follow-up (owner decisions 14 to 18, 2026-11-26)
+
+Applied on 2026-11-27, one commit per step, each with build and tests green and each folding its decisions into the ADR, the brief,
+open-questions.md, CONTEXT.md and the README:
+
+- **2e8e4e1, dispatch snapshots (decision 15):** Verify snapshots of the generated mediator for each kind at and one above the jump-table
+  threshold (32 and 33 messages), and of a host with every kind above it, committed on the output of the time so that 6e7465a shows its
+  dispatch change as a snapshot diff.
+- **6e7465a, requests are sealed (decision 14; decision 16 for OQ-67; decision 18 for OQ-68):** a request or stream request class or
+  record that is neither sealed nor abstract (or C# 15 `closed`) is the new error KRX024, with the code fix _Make sealed_ (not offered for a
+  type that declares its own `virtual` or `protected` members); a handler of an abstract or closed request base is KRX003; notifications are
+  not affected. Generic `Send` and `Stream` are switch statements with a type pattern per sealed request type
+  (`case global::X r: return __Dispatch0<TResponse>(r, cancellationToken);`, `default: throw __HandlerNotFound(request.GetType());`), the
+  index switch above the threshold stays keyed on `GetType()`, typed overloads of request types have no runtime type check, and
+  `Publish<T>` keeps exact-type guards and ends `default: return default;`. A struct request's section has no pattern variable and its arm
+  unboxes, so every arm stays a tail call. OQ-67 is decided (switch statements, not switch expressions), and so is OQ-68: a request or
+  stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is the new host error KRX038. OQ-69
+  (a closed base from a referenced assembly) was raised and is open.
+- **bd2029b, pipelines that resolve nothing get no context (decision 16 for OQ-65):** a request or stream pipeline whose handler's invoker
+  is static and whose behaviors inject nothing, and a publish pipeline without handlers whose behaviors inject nothing, have no pipeline
+  context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
+  what it reads or passes on (`(pipeline, request)`, `(request)`, or nothing), so the mediator no longer suppresses CS9113 and its header
+  pragma is the obsolete-type one alone. OQ-65 is decided; OQ-70 (a publish pipeline with handlers that resolves nothing keeps its
+  context) was raised and is open.
+- **38c8f74, generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` builds every token with its spaces and every
+  line from the depth its container gives it, so `Render` writes the tree as built: no `NormalizeWhitespace` and no layout pass. Type
+  names are parsed once per file and constant attribute lists built once. Every snapshot is byte for byte unchanged (a temporary two-way
+  render of 7,472 generated files found no difference); two shapes no snapshot covers now read `int[,]` and `Dictionary<,>` where
+  normalization wrote `int[, ]` and `Dictionary<, >`, and `GeneratedSyntaxTests` pins each layout rule against the helpers. OQ-66 is
+  decided; OQ-71 (generator time still above the target) was raised and is open.
+
+Measured in the second rework and its follow-up (Apple M4 Max, macOS 27.2, .NET SDK 11.0.100, BenchmarkDotNet 0.15.8 default job,
+net10.0; JIT code with `DOTNET_TieredCompilation=0` and `DOTNET_JitDisasm`; details in the open-questions entries named, raw results in
+the session scratchpad of the follow-up, `followup-*/`, which is not kept in the repository):
 
 - the Phase 4 gate prototype written with primary-constructor links: Tier 1 code byte for byte the same as before, 0 B at depths 1, 3
-  and 8, depth 3 at 0.67x the nested calls ("Links with primary constructors");
-- generic dispatch: switch statements compile to the same code as the earlier `if` chains; switch expressions lost every tail call of
-  the linear `Send<int>` and cost up to about 0.3 ns per generic `Publish` and 0.3 to 1.8 ns per generic `Send` (OQ-67); the type
-  patterns on sealed requests keep every tail call (10, 43, 2 and 35 for linear and above-threshold `Send` and `Publish`), load the
-  method table once and compare it with each type, and shrink the linear `Send<int>` from 784 to 512 bytes; generic `Send` with a synchronous handler measured 0.4 to 0.7 ns faster, and
-  generic `Stream` at depth 0 20 to 60 ns slower (3 to 9%) for a reason not found in its code ("Requests are sealed");
-- pipelines without a context (OQ-65): `StreamDepth3` allocates 648 B instead of 680 B; generic `Send`, `Stream` and `Publish` keep
-  every tail call, the linear generic `Stream<int>` shrinks from 352 to 308 bytes, and the sync `Send` rows measured within noise or
-  slightly faster; the gate prototype's code is unchanged;
-- generator time on a host of 300 requests: 66 to 384 ms for the host generator and 35 to 102 ms for the handler generator with the
-  `SyntaxFactory` emitters, dominated by `NormalizeWhitespace`; with the whitespace built in, 109 ms and 48 ms on a warm compiler server
-  (372 ms and 93 ms before, the same way), still above the text emitters' 66 ms and 35 ms (OQ-66, decided; OQ-71, open).
+  and 8, depth 3 at 0.67x the nested calls ("Links with primary constructors"); unchanged by OQ-65, because every link of the prototype
+  reads or passes on its context;
+- generic dispatch (OQ-67): switch statements compile to the same code as the earlier `if` chains; switch expressions lost every tail
+  call of the linear `Send<int>` (10 to none, 43 to one above the threshold) and cost up to about 0.3 ns per generic `Publish` and 0.3 to
+  1.8 ns per generic `Send`;
+- type patterns on sealed requests ("Requests are sealed"): every tail call kept (10, 43, 2 and 35 for linear and above-threshold `Send`
+  and `Publish`); the linear `Send<int>` loads the method table once and compares it with each type, 512 bytes instead of 784; in
+  interleaved reruns generic `Send` with a synchronous handler measured 0.4 to 0.7 ns faster at every depth, and generic `Stream` at depth
+  0 20 to 60 ns slower (3 to 9%), for a reason not found in its code (the benchmark method's code is the same; code placement is the
+  suspect, not verified); everything else within noise, allocations unchanged;
+- pipelines without a context (OQ-65): `StreamDepth3` allocates 648 B instead of 680 B (typed and generic); generic `Send`, `Stream` and
+  `Publish` keep every tail call, the linear generic `Stream<int>` shrinks from 352 to 308 bytes, and the synchronous `Send` rows
+  measured within noise or slightly faster;
+- generator time on a host of 300 requests with five behaviors each, 30 stream requests and 30 notifications (`ReportAnalyzer`, Release,
+  median of ten builds): 66 ms for the host generator and 35 ms for the handler generator with the text emitters, 384 ms and 102 ms with
+  the normalized `SyntaxFactory` emitters (OQ-66); with the whitespace built in, 109 ms and 48 ms on a warm compiler server (372 ms and
+  93 ms before, measured the same way), still above the text emitters (OQ-71).
 
 ## Decisions for the owner
 
-Nine open questions are open from the second rework ([open-questions.md](adr/open-questions.md), **Open**); the code follows
-each one's **Interim** line:
+Nine questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59 to OQ-64 from the second rework and OQ-69 to OQ-71
+from its follow-up. The code follows each one's **Interim** line:
 
 - **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
   referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
@@ -122,7 +141,7 @@ each one's **Interim** line:
   and 35 ms the decision aimed for; most of the host generator's remaining time is outside the emitters. Accept it, or build repeated
   subtrees once per file (or re-measure the text emitters' commit first)?
 
-OQ-65, OQ-66 and OQ-67 (decision 16) are decided and applied.
+OQ-65, OQ-66 and OQ-67 (decision 16) and OQ-68 (decision 18) are decided and applied.
 
 ## Gates and checks
 
@@ -145,7 +164,9 @@ OQ-65, OQ-66 and OQ-67 (decision 16) are decided and applied.
   one generated async path, `UnitAdapter.ToUnit`, is checked by `SendUnitYieldValueTask` and `SendUnitYieldTask`: typed and `IMediator`
   both allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers come from one
   machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting them. The
-  second rework's dispatch comparison (OQ-67) found the switch statements within noise of the earlier code.
+  tables predate the follow-up: the dispatch comparison (OQ-67) found the switch statements within noise of the earlier code, the type
+  patterns made generic `Send` slightly faster and generic `Stream` at depth 0 slightly slower, and three stream behaviors now allocate
+  648 B instead of the table's 680 B (the README notes it).
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.04 ns (inlined) and 0.67 ns for 1 and 5 handlers, against Keryx typed at 0.65 ns and 0.84 ns.
 
@@ -158,7 +179,8 @@ OQ-65, OQ-66 and OQ-67 (decision 16) are decided and applied.
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
-- Re-run the comparison benchmarks on the release candidate and update the README's numbers.
+- Re-run the comparison benchmarks on the release candidate and update the README's numbers (its tables are from before the follow-up);
+  check whether generic `Stream` at depth 0 is still 20 to 60 ns slower than before the type patterns ("Requests are sealed").
 
 ## Out of scope for v1
 

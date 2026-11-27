@@ -1318,7 +1318,8 @@ These replace the draft's "minimal allocations" and the handoff's "must not allo
   provided the behaviors' own work completes synchronously. Holds for the typed overloads and, for class requests, the generic entry point,
   for value-type and reference-type responses. A struct request sent through `ISender` is boxed at the call site (KRX021); that box is not
   counted against Keryx. Behaviors are static methods, so no behavior instance is allocated, per scope or per call; the pipeline context,
-  created once per scope and pipeline, holds the handler and the behaviors' injected services.
+  created once per scope and pipeline, holds the handler and the behaviors' injected services, and a pipeline that resolves nothing has
+  none (open-questions OQ-65).
 - **Send, yielding handler:** Keryx-generated code allocates nothing beyond the state-machine boxes of async methods the user wrote
   (handler and behaviors). The only generated async path is `UnitAdapter.ToUnit` (non-generic `ValueTask`/`Task` → `ValueTask<Unit>`). It
   uses `PoolingAsyncValueTaskMethodBuilder` on net10+ and must add 0 bytes in steady state; a benchmark checks it. Typed `IRequest`
@@ -1359,7 +1360,8 @@ behavior methods, and passed on all three criteria again (OQ-36): 0 B at every d
 generic-virtual-method lookup, and depth 3 at 0.66× the baseline. Static calls inline at least as well as the instance behaviors did.
 It was re-run once more after the links moved to primary constructors and target-typed `new(pipeline, request)` (decided 2026-11-26),
 with the prototype written in that spelling: the Tier 1 code of every depth is byte for byte the same, it allocates nothing, and depth 3
-runs at 0.67× the baseline.
+runs at 0.67× the baseline. Dropping the contexts of pipelines that resolve nothing (OQ-65) left the prototype as it was, because it holds a
+handler and services, so every link reads or passes on its context; its Tier 1 code is unchanged.
 
 A failed gate does **not** stop implementation (decided 2026-11-26). The measured numbers and the disassembly findings are recorded in
 `docs/adr/open-questions.md`, the work is committed with the struct-based pipeline as designed, and work continues. The ADR's fallback
