@@ -28,7 +28,8 @@ the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69,
 "Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) follows. OQ-61 and OQ-62, decided by the owner on
 2026-11-27 (decisions 25 and 26), follow, then OQ-59 and OQ-60 (decisions 23 and 24, the same day), and OQ-63 and OQ-64 (decisions 27
 and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) and "NativeAOT benchmark run" (decisions 29 and 31,
-the same day) come last; OQ-72 was raised while implementing the first and OQ-73 while implementing the second, and both are open.
+the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second, and both are open. "Full
+benchmark run" (decision 32, the same day) comes last; OQ-74 and OQ-75 were raised while doing it, and both are open.
 
 ## Open
 
@@ -53,7 +54,8 @@ library publishes the notification scenarios (30d) sequentially and in parallel,
       measured method; every one of those methods is `async`, so each row carries the same state machine. The SQLite scenario has no
       per-request variant: with the singleton connection below, it would add only the scope cost the `Ping` pair already shows.
     - **Logging behavior** (outermost). It injects `ILogger<TRequest>` and writes two source-generated messages per request
-      (`RequestLog.Handling` with the request type's name, `RequestLog.Handled` with the `Pong`, formatted through its `ToString`). The
+      (`RequestLog.Handling` with the request type's name, `RequestLog.Handled` with the `Pong`, formatted through its `ToString`; the
+      subjects read the name with `typeof(TRequest).Name`, the baseline writes `nameof`, which differs under NativeAOT: OQ-75). The
       only provider is `InMemoryLoggerProvider` at `Information`: it calls the formatter for every message, as a console or file provider
       does, and keeps the last 1,024 messages in a ring buffer, so nothing grows across iterations. MediatR's license category stays
       filtered.
@@ -166,8 +168,8 @@ library publishes the notification scenarios (30d) sequentially and in parallel,
     - **Effect on the existing scenarios.** Every container now also registers logging, the repository and the connection (opened in
       setup), and every comparison benchmark's setup builds the two parallel-publish containers too, and the
       logging and validation behaviors join the Mediator scoped and MediatR open behavior lists (their marker constraints exclude every
-      other request). The existing scenarios' setup is otherwise unchanged; their README tables are re-run at the commit that adds these
-      scenarios (decision 32).
+      other request). The existing scenarios' setup is otherwise unchanged; their README tables were re-run at the commit that adds these
+      scenarios (decision 32, "Full benchmark run", at the end).
 - **Proposal:** confirm, and add these setup rules to the ADR's Benchmarks section beside OQ-51's, in particular the behavior-scenario
   baseline that does the behaviors' work inline, the singleton connection, the separate notification-behavior pair (so the per-request
   publish compares every library on the same work) and the Mediator parallel assembly. Alternative for the baseline: the handler alone, as in the
@@ -184,13 +186,56 @@ makes fewer in the behavior scenarios), but the cost is inside every NativeAOT n
 (this step measured nothing), and the generated code was not inspected, so "not folded" follows from how the compiler preinitializes
 statics, not from an observation.
 
-- **Interim:** the probe stays as it is; the NativeAOT run (decision 29) includes it. No NativeAOT numbers are published yet (decision
-  32's full local run).
+- **Interim:** the probe stays as it is; the NativeAOT run (decision 29) includes it. The NativeAOT numbers decision 32's run put in
+  the README (2026-11-27, "Full benchmark run" at the end) include it, and the README says so.
 - **Proposal:** compile the probe out of the builds BenchmarkDotNet makes: an MSBuild property (for example
   `KeryxBenchmarksProbe=false`) that `Program.cs` sets in its own environment before BenchmarkDotNet builds, so its JIT and NativeAOT
   builds see it the way they see `KeryxDispatchPadding`, under which `Probe.Enabled` is a `const` `false`; `--verify`, under the JIT and
   in the NativeAOT publish, keeps the switch. Alternative: measure first (the depth-8 scenarios under NativeAOT with and without the
   property) and keep the probe if the difference is within noise. Needs a decision.
+
+### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
+
+Decision 32's run ("Full benchmark run", at the end) measured Keryx's `IMediator` rows with a scope per request slower than its typed
+overload: `RealWorldPingScopePerRequest` 80.4 ns against 54.3 ns (448 B both), `RealWorldPublish1ScopePerRequest` 219 ns and 920 B against
+161 ns and 560 B, and `RealWorldPublish5ScopePerRequest` 634 ns and 2,136 B against 557 ns and 1,336 B (the notification-behavior pair
+the same: 360 B and 800 B more). The generated typed and generic `Publish` both call the same private `__PublishN` (read in the emitted
+host source), so the difference is in resolving the entry point: `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` each as a
+scoped factory that returns `GetRequiredService<KeryxMediator>()`, and the container caches a scoped factory's result as an entry of its
+own in the scope, so resolving `IMediator` runs a second factory and adds a second entry to the scope's resolved services, whose storage
+grows when the count crosses a capacity boundary. A probe (a bare `ServiceCollection` with a scoped class, a scoped forwarding factory for
+its interface and 1 or 5 more scoped services, Microsoft.Extensions.DependencyInjection 10.0.15, `GC.GetAllocatedBytesForCurrentThread`
+over 1,000 scopes) measured 384 B per scope through the class and 744 B through the interface with 1 service, 840 B and 1,640 B with 5:
+exactly the 360 B and 800 B above. With the forwarding factory registered transient, the interface measured 384 B and 840 B, the same as
+the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`) or already crossed the boundary
+(`RealWorldBehaviorsScopePerRequest`, 1,408 B both ways) shows only the time.
+
+- **Interim:** unchanged: the three interfaces are scoped forwarding factories (ADR, the services `AddKeryx()` registers). The README
+  reports the rows as measured and points here.
+- **Proposal:** register `IMediator`, `ISender` and `IPublisher` as transient factories that return the scope's `KeryxMediator`
+  (`TryAddTransient<IMediator>(static serviceProvider => serviceProvider.GetRequiredService<KeryxMediator>())`): still one instance per
+  scope, because the factory only forwards to the scoped registration, and nothing new in the scope, because the container tracks a
+  transient result only when it is disposable and `KeryxMediator` is not. A registration snapshot and an allocation test (resolve
+  `IMediator` and `KeryxMediator` in new scopes and compare) would cover it; the ADR's registration table keeps "the scoped mediator",
+  with a note that the interfaces forward to it. Needs a decision.
+
+### OQ-75: Type names in the benchmark behaviors' log messages under NativeAOT (2026-11-27)
+
+Every subject's real-world logging behavior reads the message type's name with `typeof(TRequest).Name` (Keryx's notification behavior
+with `typeof(TNotification).Name`) for its two messages, while the baseline, which does the behaviors' work inline (OQ-72), writes
+`nameof(TypicalPing)`. Under the JIT a type's name is cached and the read allocates nothing; under NativeAOT every read allocates a new
+string: a probe (`typeof(TypicalPing).Name` in a shared generic method, 1,000 reads) measured 0 B per read under the JIT and 48 B
+published with NativeAOT. Two reads per request or publish make Keryx's NativeAOT behavior rows 96 B larger than its JIT rows in decision
+32's run (`RealWorldBehaviors` 520 to 616 B, `RealWorldBehaviorsScopePerRequest` 1,408 to 1,504 B,
+`RealWorldPublishBehavior1ScopePerRequest` 712 to 808 B), and the same reads are in the other libraries' behavior rows, but not in the
+direct call's. Under NativeAOT, those rows' distance from the direct call therefore includes two string allocations that belong to the
+benchmark code, not to the library.
+
+- **Interim:** as measured; the README's NativeAOT section says so.
+- **Proposal:** read the name once per type, the same way in every subject and in the baseline: a `MessageName<T>` static class in
+  `Keryx.Benchmarks.Common` (`public static readonly string Value = typeof(T).Name;`) that every logging behavior, and the baseline with
+  its concrete types, passes to `RequestLog`, so no row allocates for it under either runtime; then re-run the behavior rows under
+  NativeAOT. Alternative: keep `typeof(T).Name` and read it in the baseline too, so every row pays the same. Needs a decision.
 
 ## Decided
 
@@ -2079,6 +2124,11 @@ before-release list in [whats-left.md](../whats-left.md) (check it when the comp
 then decide whether it needs work). No code changed. Folded into the ADR (status, Benchmarks), the brief (Phase 8), the README
 (Benchmarks) and whats-left.md (owner decisions 19 to 22, Gates and checks, Before a first release).
 
+**Measured again** (2026-11-27, decision 32's full run at 1652e50, "Full benchmark run" at the end): the slowdown does not show.
+`StreamDepth0` measured 637.8 ns through `IMediator` (standard deviation 5.0 ns), 631.9 ns through the typed overload (2.4 ns) and 632.5 ns
+for the direct call (1.8 ns): 6 ns (1%) between generic and typed, and all three below the 649 to 661 ns the reruns measured before the
+type patterns. That run is not an interleaved before-and-after comparison, so the item stays on the before-release list as decided.
+
 ### OQ-61: Apps whose `OutputType` is not `Exe` or `WinExe` (2026-11-27)
 
 "A host is an MSBuild property" (below) defaults `KeryxHost` to `true` for `OutputType` `Exe` or `WinExe` and for test projects. Some app
@@ -2382,5 +2432,39 @@ Implemented:
   `GateConfig` does add the diagnoser: no warning in Keryx or the subjects, `--verify` 215 passed and 23 n/a, and the Dry run 242
   benchmarks, exit 0. Nothing was measured: the NativeAOT numbers come from decision 32's full local run. The verification probe's cost in
   NativeAOT builds is OQ-73, open.
+
+Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+### Full benchmark run (2026-11-27)
+
+Owner decision 32 (session default). The README's existing tables are refreshed from a full local JIT run at the commit that adds the new
+scenarios, with the same settings (IterationCount=15, IterationTime=200ms, LaunchCount=1, WarmupCount=5), and gain sections for the
+real-world scenarios (30d's notification benchmarks included) and for the NativeAOT run; the benchmarks run with nothing else heavy
+running on the machine.
+
+Done:
+
+- **The runs.** At 1652e50 (the NativeAOT commit, after the real-world scenarios' 1a14841), built from a clean `git archive` copy so the
+  working tree was not used, on an Apple M4 Max (macOS 27.2.1, .NET SDK 11.0.100, .NET 10.0.15). Nothing else was building, testing or
+  benchmarking (checked with `ps`; the run script also waited before each run until no `dotnet` process was busy). `--verify` passed
+  first: 238 under the JIT; in the NativeAOT publish, 215 passed and 23 were n/a (MediatR). Then `--filter '*Comparison*'` with those
+  settings under the JIT (238 benchmarks, 25 min 29 s, exit 0) and right after with `--runtimes nativeaot10.0` (215 benchmarks, MediatR's
+  23 left out, 21 min 58 s, exit 0). The reports (CSV, GitHub markdown and HTML per scenario, and the logs) are in the session
+  scratchpad, `bench-final/jit` and `bench-final/aot`; every number in the README comes from them. The allocations are the exact bytes
+  per call from each benchmark's `// GC:` line in the logs (total bytes over total operations, rounded, as BenchmarkDotNet computes
+  them), because the CSV and markdown reports give a column in KB with two decimals once every row in it is 1 KB or more.
+- **README.** Every existing table is refreshed from the JIT run, with the date, commit and environment. The real-world scenarios have
+  three tables (requests; publish per request scope with and without the notification behavior; async handlers sequential and parallel)
+  and notes. The NativeAOT section shows, for every scenario, the JIT and NativeAOT time side by side with the allocations (for the
+  yielding ones the allocations are the meaningful column, since the hop dominates the time), and MediatR n/a with its reason. The "since
+  that run" paragraphs became what this run shows, and the how-to-read notes were brought up to date (the yield range, the direct call's
+  113 to 114 B, comparing real-world rows with the direct call, the NativeAOT floor of 1.49 to 1.52 ns for `Send` and the `Publish` rows
+  that still measure about a nanosecond or less, the probe of OQ-73 and the type names of OQ-75).
+- **What the run shows of earlier caveats.** Keryx's `IMediator` `Send` with a synchronous handler measured 2.44 to 2.74 ns (3.22 to 3.51
+  ns in the 2026-11-26 run, before the type patterns); three stream behaviors allocate 648 B (OQ-65); the typed `Publish` measured 0.34
+  and 0.44 ns (OQ-70); the generic `Stream` depth-0 slowdown of decision 22 does not show ("Generic `Stream` at depth 0 is tracked for
+  the release", above).
+- **Found while reading the results.** Keryx's `IMediator` rows with a scope per request pay for the forwarding registration (OQ-74), and
+  the behavior rows under NativeAOT for the type names in the log messages (OQ-75); both open, measured as they are.
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.

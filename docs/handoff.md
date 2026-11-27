@@ -502,6 +502,11 @@ suppressed (open-questions, "NativeAOT benchmark run"; the probe's NativeAOT cos
 `--job Dry --runtimes nativeaot10.0` (the Phase 4 prototype is JIT-only and left out there; run `--runtimes nativeaot10.0` on its own, since
 side by side with the JIT the NativeAOT rows get no ratios), and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser`
 (OQ-36), whose output is the CI evidence for gate criterion 2.
+The README's tables come from one full local run of the comparison suite under the JIT and right after it under NativeAOT
+(owner decision 32: IterationCount=15, IterationTime=200ms, LaunchCount=1, WarmupCount=5, built from a clean copy of the measured commit,
+nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
+2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
+scope entry) and OQ-75 (the benchmark behaviors' type names under NativeAOT).
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
@@ -509,7 +514,7 @@ wrapping the whole publish, examples with the message constraint, attaching per 
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the scoped mediator
 creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
-through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details. A short "what is left" note in
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT, decision 32). A short "what is left" note in
 `docs/whats-left.md`.
 
 **Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`

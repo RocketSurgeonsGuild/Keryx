@@ -62,6 +62,9 @@ Amended an eleventh time 2026-11-27 (owner decisions 29 and 31): the comparison 
 with the subjects that cannot run there shown n/a with a verified reason (MediatR), `--verify` checks the NativeAOT build, and a CI job
 builds and dry-runs the suite under NativeAOT (Benchmarks; open-questions, "NativeAOT benchmark run"; the verification probe's cost in
 NativeAOT builds is OQ-73, open).
+Amended a twelfth time 2026-11-27 (owner decision 32): the README's benchmark tables come from one full local run of the comparison
+suite, under the JIT and then under NativeAOT, with the settings and machine stated (Benchmarks; open-questions, "Full benchmark run";
+what that run found, the `IMediator` scope entry and the benchmark behaviors' type names under NativeAOT, is OQ-74 and OQ-75, open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1526,10 +1529,17 @@ fails when a library does not run the scenario's handlers and behaviors), and ru
 with `--job Dry` only. Its NativeAOT job (Linux, with the ILCompiler's prerequisites installed) publishes the suite with NativeAOT, runs
 `--verify` in that binary, and runs every benchmark but the JIT-only prototype once with `--job Dry --runtimes nativeaot10.0`, so
 NativeAOT breakage fails the pull
-request. Numbers are never published from shared runners. The README's numbers come from local runs, with the machine and job stated.
+request. Numbers are never published from shared runners. The README's numbers come from local runs, with the machine and job stated:
+since owner decision 32 (2026-11-27), one full run of the comparison suite (`--filter '*Comparison*'`, IterationCount=15,
+IterationTime=200ms, LaunchCount=1, WarmupCount=5) under the JIT and right after it under NativeAOT, built from a clean copy of the commit
+it measures, with nothing else running on the machine; the README states the date, the commit and BenchmarkDotNet's environment block,
+shows the NativeAOT times beside the JIT times, and notes what is in the NativeAOT numbers that is not the library's (the verification
+probe, OQ-73; the log messages' type names, OQ-75).
 Before a release the comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream
 behaviors, which measured 20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision
 22, 2026-11-27: tracked for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
+Decision 32's full run did not show it (generic 637.8 ns, typed 631.9 ns, direct call 632.5 ns), but it was not a before-and-after
+comparison, so the release candidate's run checks it again.
 
 ## AOT verification
 
