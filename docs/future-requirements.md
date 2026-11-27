@@ -10,8 +10,8 @@ Removed 2026-11-26 (owner decision; [open-questions "Requests are handled in the
 assembly"](adr/open-questions.md#requests-are-handled-in-their-own-assembly-2026-11-26)). The current rule: a request's or stream request's
 one handler lives in the assembly that declares the request. KRX001 (a request without a handler in its assembly) applies in every assembly,
 hosts included, and a handler of a request declared in another assembly is KRX023. Notifications are not affected: they may be declared
-anywhere and handled in any assembly. Host KRX030 stays as a safety net for referenced requests (a handler the host excludes, or an internal
-handler of a referenced host).
+anywhere and handled in any assembly. Host KRX030 stays as a safety net for referenced requests (an internal handler of a referenced host,
+or a library built with KRX001 suppressed); a host cannot exclude a request handler (`ExcludeHandler` naming one is KRX039, OQ-59).
 
 Two attributes existed to let a request be declared in one assembly and handled in another. Both are removed, with everything tied to
 them: their `KnownTypeNames` and `KeryxSymbols` entries, `KeryxSymbols.IsContracts`, the KRX001 code-fix action "Mark this assembly as a

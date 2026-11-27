@@ -14,11 +14,11 @@ day added "One notification behavior kind" and "Message constraint on open behav
 OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end). OQ-56 to OQ-58 were
 raised while implementing the static-behavior rework and decided by the owner the same day (at the end). The owner's decisions for the
 second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
-raised while implementing it and were decided by the owner on 2026-11-27 (at the end), and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and
-were decided by the owner on 2026-11-27 (at the end).
-"Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
-"A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
-were decided by the owner on 2026-11-27 (at the end). "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
+raised while implementing it and were decided by the owner on 2026-11-27 (at the end), and OQ-61 and OQ-62 were raised while
+implementing "A host is an MSBuild property" and were decided by the owner on 2026-11-27 (at the end). "Test compilations go through the
+testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and "A pipeline context resolves each shared
+service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and were decided by the owner on 2026-11-27 (at
+the end). "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
 (decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, and OQ-68, decided by the owner (decision 18),
@@ -2095,8 +2095,8 @@ and the message, and the context does not otherwise keep the provider, so the ca
   notification handler's provider are the scope's (`Behaviors_Of_One_Pipeline_Receive_The_Same_Instance_Of_A_Transient`).
   `PipelineAllocationTests`' injecting behaviors also take the provider: still 0 B at depths 1, 3 and 8. The link and context shapes are
   unchanged (one more field read), so `--prototype-disasm` was not re-run. Folded into the ADR (status; Injected parameters; Generated
-  pipeline shape), the brief (Phase 4), CONTEXT.md (pipeline context), the README (Injected parameters, Behavior methods) and
-  whats-left.md.
+  pipeline shape; Alternatives considered, added by the docs sweep after OQ-59 to OQ-64), the brief (Phase 4), CONTEXT.md (pipeline
+  context), the README (Injected parameters, Behavior methods) and whats-left.md.
 
 ### OQ-64: Shared service field names and set-preserving edits (2026-11-27)
 
@@ -2125,8 +2125,8 @@ text and the order of the model's `ContextServices`.
   first run's, and so do the fields), and `Should_Number_The_Services_By_Type_And_Key_Not_By_First_Use` pins the order (types, then no key,
   then keys). Snapshots that changed, each reviewed: `Should_Keep_Keyed_And_Unkeyed_Services_Of_One_Type_Apart` (`"earth"` is now
   `Service1` and `"utc"` `Service2`), `Should_Resolve_A_Service_With_Only_Optional_Consumers_Once_And_Apply_Each_Default` (fields sorted
-  by type: `IClock?`, `TimeSpan?`, `int?`, `int?` for `int?`, `string?`; the call sites read the renumbered fields with the same
+  by service type: `IClock`, `TimeSpan`, `int`, `int?` (`Nullable<int>`) and the keyed `string`, each held nullable; the call sites read the renumbered fields with the same
   defaults) and `Should_Resolve_A_Service_With_A_Required_Consumer_As_Required_For_All` (OQ-63's change only; its three services were
   already in sorted order). No other host snapshot changed: their pipelines share one service, or already used them in sorted order.
-  Folded into the ADR (status; Injected parameters; Generated pipeline shape), the brief (Phase 4), CONTEXT.md (pipeline context), the
-  README (Behavior methods) and whats-left.md.
+  Folded into the ADR (status; Injected parameters; Generated pipeline shape; Alternatives considered, added by the docs sweep after
+  OQ-59 to OQ-64), the brief (Phase 4), CONTEXT.md (pipeline context), the README (Behavior methods) and whats-left.md.

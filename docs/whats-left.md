@@ -1,16 +1,17 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22, 23 to 26 and 27
-and 28 (2026-11-27).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 28
+(2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64.
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
 Two reworks followed the first build, each decided by the owner on 2026-11-26 and recorded in
 [open-questions.md](adr/open-questions.md) under **Decided**, and a follow-up to the second applied the owner's later decisions of the same
-day; the owner's decisions 19 to 22 of 2026-11-27 answered the questions the follow-up raised. The brief's phases describe the resulting
-design as what they build, so there is no separate rework phase. This note lists the current state, every commit since the second
-rework, what still needs a person, and what is left before a release.
+day; the owner's decisions 19 to 22 of 2026-11-27 answered the questions the follow-up raised, and decisions 23 to 28 of the same day
+answered OQ-59 to OQ-64, the questions the second rework had left open. The brief's phases describe the resulting design as what they
+build, so there is no separate rework phase. This note lists the current state, every commit since the second rework, what still needs
+a person, and what is left before a release.
 
 ## Done: the static-behavior rework
 
@@ -149,49 +150,51 @@ Each code change is one commit, with build and tests green:
   not investigated now. The docs sweep after the text emitters and OQ-70 recorded it and checked the ADR, the brief, open-questions.md,
   CONTEXT.md, the README, the samples' READMEs and the analyzer release notes against the code.
 
-## Done: owner decisions 27 and 28 (2026-11-27)
+## Done: owner decisions 23 to 28 (2026-11-27)
 
-- **A fixed `IServiceProvider` field (decision 27 for OQ-63):** a pipeline context (request, stream, publish) whose behavior methods inject
-  the unkeyed `IServiceProvider` holds it in a dedicated `ServiceProvider` field, assigned the provider the context is built with and
-  never resolved, outside the numbered `ServiceN` fields; a context without such a behavior has no field, and a behavior that injects
-  only the provider gives a static-handler pipeline a context. The model carries it as `ContextServiceProvider` (and slot
+One commit per pair of decisions, in the order they landed, each with build and tests green and each folding its decisions into the
+ADR, the brief, open-questions.md, CONTEXT.md where a term changed, the README and this note:
+
+- **7a94d0d, `KeryxHost` only where a host can run (decision 25 for OQ-61, decision 26 for OQ-62):** `build/Keryx.targets` (which
+  `buildTransitive/` and `buildMultiTargeting/` import) defaults `KeryxHost` to `true` only when the project is an `Exe`/`WinExe`, a test
+  project or an Android app (`AndroidApplication`) **and** targets `.NETCoreApp` 10.0 or later; a value the project sets still wins, so
+  KRX031 now means an explicit `<KeryxHost>true</KeryxHost>` below `net10.0`, and its message says to target `net10.0` or stop setting the
+  property. The README no longer tells `net8.0` or multi-targeting projects to set `false`. `KeryxHostPropertyTests` import the package's
+  files from `obj/*.nuget.g.props`/`.targets`, where restore puts them, and gain rows for `net8.0`, `net48`, `net10.0` and `net11.0`
+  executables and test projects, explicit values, Android apps (`net10.0-android`, `net8.0-android`, `AndroidApplication` set as the Android
+  SDK leaves it, so the rows do not need the workload) and each inner and the outer build of a `net8.0;net10.0` test project. Checked by
+  hand with the packed package: a `net8.0` console app referencing a `netstandard2.0` Keryx library builds (it did not before: KRX031); a
+  `net8.0;net10.0` test project referencing it builds, with `AddKeryx()` generated in its `net10.0` build only; a `net10.0` app runs; a
+  `net8.0` app with `<KeryxHost>true</KeryxHost>` gets KRX031.
+- **98bcacd, `ExcludeHandler` names only notification handlers (decision 23 for OQ-59):** naming a request or stream request handler,
+  referenced or the host's own, is the new host error KRX039 (the next free ID in the host range; KRX036 is a warning about an exclusion
+  without effect, and this one is an error), reported on the attribute; the handler is not excluded and stays dispatched, and the exclusion
+  is not also KRX036. There is no exception to KRX023 for hosts: a test swaps what a request handler does through the services it injects
+  (ADR, Host control; README, Testing handlers). The tests that excluded request handlers now assert KRX039 (referenced request and stream
+  request handlers, the host's own, a referenced one beside the host's KRX023 replacement, and one the host cannot resolve, which is KRX034
+  since it is no longer skipped); the exclusion of a notification handler the host cannot resolve keeps its test.
+- **98bcacd, no host KRX005 (decision 24 for OQ-60):** the host's cross-assembly KRX005, the `DuplicateHandlerInHost` descriptor and its
+  hand-written-manifest test are removed; KRX005 is the analyzer's rule within one assembly. Duplicates inside one referenced assembly still
+  leave the request undispatched, with no host diagnostic (the test says so).
+- **4df2f3d, a fixed `IServiceProvider` field (decision 27 for OQ-63):** a pipeline context (request, stream, publish) whose behavior
+  methods inject the unkeyed `IServiceProvider` holds it in a dedicated `ServiceProvider` field, assigned the provider the context is built
+  with and never resolved, outside the numbered `ServiceN` fields; a context without such a behavior has no field, and a behavior that
+  injects only the provider gives a static-handler pipeline a context. The model carries it as `ContextServiceProvider` (and slot
   `PipelineBehaviors.ServiceProviderSlot`); `ContextServiceModel` lost `IsServiceProvider`. A handler's injected `IServiceProvider` was
   already the provider directly (its factory passes `serviceProvider`); a keyed `IServiceProvider` is an ordinary keyed service and
   `IServiceScope` has no special case. Tests: a snapshot of request, stream and publish pipelines whose two behaviors each inject the
-  provider (required and optional), a keyed provider beside the unkeyed one, a handler that injects both, and at run time every behavior
-  and handler provider is the scope's; the allocation test's injecting behaviors also take the provider and still allocate 0 B.
-- **Stable service numbering (decision 28 for OQ-64):** `PipelineBehaviors.ShareServices` numbers a context's services by an ordinal sort
-  of (service type, then key: none first, then the key's literal text) instead of first use, so any edit that keeps the set keeps every
-  name. `SharedServiceTests` replaces the renumbering test with one that asserts unchanged `ContextServices` and fields for a
-  set-preserving reorder, and adds a test of the order itself. Snapshots that changed: the keyed `IClock` keys (`"earth"` before
-  `"utc"`), the all-optional consumers (sorted by type) and the required-consumer one (the provider moved to `ServiceProvider`).
-
-## Done: owner decisions 25 and 26 (2026-11-27)
-
-- **`KeryxHost` only where a host can run (decision 25 for OQ-61, decision 26 for OQ-62):** `build/Keryx.targets` (which
-  `buildTransitive/` and `buildMultiTargeting/` import) defaults `KeryxHost` to `true` only when the project is an `Exe`/`WinExe`, a test
-  project or an Android app (`AndroidApplication`) **and** targets `.NETCoreApp` 10.0 or later; a value the project sets still wins, so
-  KRX031 now means an explicit `<KeryxHost>true</KeryxHost>` below `net10.0`, and its message says to target `net10.0` or stop setting
-  the property. The README no longer tells `net8.0` or multi-targeting projects to set `false`. `KeryxHostPropertyTests` import the
-  package's files from `obj/*.nuget.g.props`/`.targets`, where restore puts them, and gain rows for `net8.0`, `net48`, `net10.0` and
-  `net11.0` executables and test projects, explicit values, Android apps (`net10.0-android`, `net8.0-android`, `AndroidApplication` set
-  as the Android SDK leaves it, so the rows do not need the workload) and each inner and the outer build of a `net8.0;net10.0` test
-  project. Checked by hand with the packed package: a `net8.0` console app referencing a `netstandard2.0` Keryx library builds (it did
-  not before: KRX031); a `net8.0;net10.0` test project referencing it builds, with `AddKeryx()` generated in its `net10.0` build only; a
-  `net10.0` app runs; a `net8.0` app with `<KeryxHost>true</KeryxHost>` gets KRX031.
-
-## Done: owner decisions 23 and 24 (2026-11-27)
-
-- **`ExcludeHandler` names only notification handlers (decision 23 for OQ-59):** naming a request or stream request handler, referenced
-  or the host's own, is the new host error KRX039 (the next free ID in the host range; KRX036 is a warning about an exclusion without
-  effect, and this one is an error), reported on the attribute; the handler is not excluded and stays dispatched, and the exclusion is
-  not also KRX036. There is no exception to KRX023 for hosts: a test swaps what a request handler does through the services it injects
-  (ADR, Host control; README, Testing handlers). The tests that excluded request handlers now assert KRX039 (referenced request and
-  stream request handlers, the host's own, a referenced one beside the host's KRX023 replacement, and one the host cannot resolve, which
-  is KRX034 since it is no longer skipped); the exclusion of a notification handler the host cannot resolve keeps its test.
-- **No host KRX005 (decision 24 for OQ-60):** the host's cross-assembly KRX005, the `DuplicateHandlerInHost` descriptor and its
-  hand-written-manifest test are removed; KRX005 is the analyzer's rule within one assembly. Duplicates inside one referenced assembly
-  still leave the request undispatched, with no host diagnostic (the test says so).
+  provider (required and optional), a keyed provider beside the unkeyed one, a handler that injects both, and at run time every behavior and
+  handler provider is the scope's; the allocation test's injecting behaviors also take the provider and still allocate 0 B.
+- **4df2f3d, stable service numbering (decision 28 for OQ-64):** `PipelineBehaviors.ShareServices` numbers a context's services by an
+  ordinal sort of (service type, then key: none first, then the key's literal text) instead of first use, so any edit that keeps the set
+  keeps every name. `SharedServiceTests` replaces the renumbering test with one that asserts unchanged `ContextServices` and fields for a
+  set-preserving reorder, and adds a test of the order itself. Snapshots that changed: the keyed `IClock` keys (`"earth"` before `"utc"`),
+  the all-optional consumers (sorted by type) and the required-consumer one (the provider moved to `ServiceProvider`).
+- **Docs sweep after OQ-59 to OQ-64:** the ADR, the brief, open-questions.md, CONTEXT.md, the README, the samples' READMEs,
+  future-requirements.md and the analyzer release notes checked against the code after 7a94d0d, 98bcacd and 4df2f3d. The ADR's Alternatives
+  considered gained the two designs OQ-63 and OQ-64 replaced (the provider as a numbered service, first-use numbering); the brief's rework
+  summary names the three commits; future-requirements.md no longer says a host can exclude a request handler; the sample host README says
+  the host default needs `net10.0` or later. No code or snapshot changed.
 
 ## Decisions for the owner
 
@@ -245,6 +248,9 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
   generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified
   suspect. Check it on the release candidate and decide then whether it needs work.
+- Build one `net10.0-android` app that references the packed Keryx (decision 25): `KeryxHostPropertyTests` evaluate the targets with
+  `AndroidApplication` and `OutputType` set as the Android SDK leaves them, and the SDK's import order was checked in a preprocessed
+  project (OQ-61), but no full Android app build with Keryx has run.
 
 ## Out of scope for v1
 

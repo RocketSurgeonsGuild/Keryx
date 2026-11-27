@@ -4,9 +4,9 @@ A source-generated mediator for .NET. Handlers are plain `private static` method
 same package emits all dispatch and pipeline code at compile time: no reflection, no delegate chains, no closures, nothing allocated
 per call by the mediator itself, and safe for Native AOT and trimming.
 
-> **Status:** early development, not yet on nuget.org. The design is recorded in [ADR 0001](docs/adr/0001-keryx-mediator.md); undecided
-> points and their interim behavior are in [open-questions.md](docs/adr/open-questions.md); what is left before a first release is in
-> [docs/whats-left.md](docs/whats-left.md).
+> **Status:** early development, not yet on nuget.org. The design is recorded in [ADR 0001](docs/adr/0001-keryx-mediator.md); the
+> decisions behind it, and any undecided points with their interim behavior, are in [open-questions.md](docs/adr/open-questions.md); what
+> is left before a first release is in [docs/whats-left.md](docs/whats-left.md).
 
 - [Install](#install)
 - [Quick start](#quick-start)
@@ -141,9 +141,9 @@ public static partial class Orders
 }
 ```
 
-Each request has one handler in the whole application ([KRX005](#krx005)), in the request's own assembly: a request without one is
-[KRX001](#krx001) in its assembly, hosts included (code fix: add a handler stub), and a handler of a request declared in another assembly
-is [KRX023](#krx023). Notifications may be handled in any assembly.
+Each request has one handler in the whole application, in the request's own assembly ([KRX005](#krx005) within it, [KRX023](#krx023)
+elsewhere): a request without one is [KRX001](#krx001) in its assembly, hosts included (code fix: add a handler stub), and a handler of a
+request declared in another assembly is [KRX023](#krx023). Notifications may be handled in any assembly.
 
 **Injected parameters** are resolved by generated code, never by reflection:
 

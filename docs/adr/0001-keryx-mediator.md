@@ -321,7 +321,7 @@ synchronous `void`.
   (code fix: remove `static`).
 - One handler method per class, counting direct members only (KRX006). Grouping is done with nested classes, for example a
   `public static partial class Orders` containing `public partial class Create` and `public partial class Cancel`.
-- One handler per request type per application (KRX005). Notifications may have any number of handlers, including none.
+- One handler per request type per application: one per assembly (KRX005), in the request's own assembly (KRX023). Notifications may have any number of handlers, including none.
 - Where the handler lives is a convention of the code fix only. Any class in the same assembly may host a request's handler.
 - A user member named `InvokeAsync` in a handler class is an error (KRX015). Generated fields use reserved names
   (`__keryx_<parameterName>`).
@@ -1639,6 +1639,14 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - **KRX005 across a host's assemblies** (open-questions OQ-49, OQ-60): the host reported a request handled in more than one assembly of its
   composed set, with its own message naming each handler and assembly, until owner decision 24 (2026-11-27). Since KRX023 no generated
   manifest can describe such a handler, so only a hand-written manifest reached it; the check and its descriptor were removed.
+- **The scope's `IServiceProvider` as a numbered shared service** (open-questions OQ-63's interim, 2026-11-26 to 2026-11-27, until
+  owner decision 27): a pipeline context held the provider in one of its `ServiceN` fields, assigned from the constructor and counted as
+  required. It is now the dedicated `ServiceProvider` field (Injected parameters), the same rule as a handler's provider. Reaching the
+  provider through the mediator, with the context holding the mediator, was also proposed and not taken.
+- **Shared services numbered in first-use order** (open-questions OQ-64's interim, 2026-11-26 to 2026-11-27, until owner decision 28):
+  `Service0` was the outermost behavior's first service, but adding a behavior that used the same services in another order renumbered
+  them although the set had not changed. The stable ordinal sort of (service type, key) keeps every name for any edit that keeps the set
+  (Injected parameters).
 
 ## Consequences
 

@@ -37,8 +37,9 @@ question, the interim behavior you are using and a proposal, continue with the s
   kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
   ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore` (`typeof` form only, naming the class), type name. No
   behavior instance exists: pipelines are flat link structs over a per-scope pipeline context that holds the handler and the behaviors'
-  injected services, each distinct service (type and key) once; a pipeline that resolves nothing has no context (OQ-65). Generated code
-  is written as text through an indented writer, `CodeWriter` (OQ-71).
+  injected services, each distinct service (type and key) once, numbered by a stable sort (OQ-64), and the unkeyed `IServiceProvider` in
+  its own `ServiceProvider` field (OQ-63); a pipeline that resolves nothing has no context (OQ-65). Generated code is written as text
+  through an indented writer, `CodeWriter` (OQ-71).
 - Streams: a `[StreamBehavior]` wraps the stream (Immediate.Handlers `StreamingBehavior` model with a struct `IStreamNext<TItem>` link:
   get the inner stream from `next`, re-yield it with `await foreach`). There are no hook behaviors.
 - Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
@@ -154,7 +155,10 @@ service) and 1fddbdd (`SyntaxFactory` emitters, switch-statement dispatch, prima
 bd2029b, 38c8f74) sealed the requests, dropped the contexts of pipelines that resolve nothing and built the syntax's whitespace in, and
 the owner's decisions of 2026-11-27 then returned the emitters to text (100bfe1: `CodeWriter`, OQ-71; OQ-69 accepted) and dropped the
 contexts of publish pipelines that resolve nothing (febb1a6, OQ-70), keep the generic `Stream` depth-0 slowdown on the release list
-(decision 22), limit `ExcludeHandler` to notification handlers (KRX039, OQ-59) and drop the host's cross-assembly KRX005 (OQ-60). The phases below describe the resulting design as what each phase builds.
+(decision 22), default `KeryxHost` only for .NET 10 executables, test projects and Android apps (7a94d0d, OQ-61 and OQ-62), limit
+`ExcludeHandler` to notification handlers and drop the host's cross-assembly KRX005 (98bcacd: KRX039, OQ-59 and OQ-60), and hold the
+unkeyed `IServiceProvider` in its own context field and number shared services by a stable sort (4df2f3d, OQ-63 and OQ-64). The phases
+below describe the resulting design as what each phase builds.
 
 ## Phases
 
@@ -465,7 +469,7 @@ without a manifest (KRX033), duplicate handlers inside one referenced assembly (
 referenced notification handler (including one whose types the host cannot resolve, and KRX036 for `ExcludeHandler`), KRX039 for a
 referenced or own request and stream request handler named in `ExcludeHandler` (the handler still dispatched; a referenced one the host
 cannot resolve is KRX034), a referenced global behavior marked only on a method, KRX023 for a host's handler of a referenced request
-(also when the host names the referenced handler in `ExcludeHandler`), KRX030
+(also when the host names the referenced handler in `ExcludeHandler`, then beside KRX039), KRX030
 for a referenced request without a handler, KRX038 for a referenced request and stream request type that is not sealed (not for the
 host's own type, an abstract or closed base, a sealed type or a notification; at run time not dispatched while a sealed sibling is),
 KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host
