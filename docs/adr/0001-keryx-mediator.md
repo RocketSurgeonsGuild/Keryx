@@ -53,6 +53,11 @@ Amended a ninth time 2026-11-27 (owner decisions 27 and 28): a pipeline context 
 methods inject in a dedicated `ServiceProvider` field, the provider it is built with, outside its numbered services, as a handler holds
 its own (open-questions OQ-63, decided); and those services are numbered by a stable ordinal sort of (service type, key), so any edit
 that keeps the set of services keeps every field name (open-questions OQ-64, decided).
+Amended a tenth time 2026-11-27 (owner decision 30): the comparison benchmarks gain real-world `Ping` -> `Pong` scenarios, a scope per
+request, typical logging and validation behaviors around a handler with a scoped repository, a SQLite query, and `Pinged` notifications
+to 1 and 5 handlers published per request scope (with a notification logging behavior where the library has one), to async handlers
+sequentially, and with each library's parallel strategy (Benchmarks; open-questions, "Real-world benchmark scenarios"; their per-library
+setup is OQ-72, open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1441,7 +1446,8 @@ A failed gate does **not** stop implementation (decided 2026-11-26). The measure
 
 - a hand-written direct-call baseline;
 - Keryx;
-- Mediator (martinothamar) 3.0.2, scoped and singleton lifetimes;
+- Mediator (martinothamar) 3.0.2, scoped and singleton lifetimes (and a singleton assembly with its `TaskWhenAllPublisher` for the
+  real-world parallel publish);
 - MediatR 15.x, pinned exactly, run without a license key (allowed for benchmarking), with the `LuckyPennySoftware.MediatR.License` log
   category filtered; no key is ever committed;
 - Immediate.Handlers 4.4.0;
@@ -1451,6 +1457,34 @@ Scenarios: `Send` through the typed overload and the generic entry point; 0, 1, 
 `Stream` of 100 items with 0 and 3 stream behaviors; `Publish` to 1 and 5 handlers. Keryx also runs `SendUnitYieldValueTask` and
 `SendUnitYieldTask` (an `IRequest` whose `ValueTask`/`Task` handler yields, against the same handler awaited directly), the benchmark the
 Performance contract names for `UnitAdapter.ToUnit`.
+
+Real-world `Ping` -> `Pong` scenarios (owner decision 30, 2026-11-27), for every subject where the library has an API for them:
+
+- **Scope per request:** create a DI scope, resolve the mediator (or the library's entry point) from it, `Send(Ping)`, dispose the scope,
+  all inside the measured method. It shows the first-call-per-scope cost (the pipeline context for Keryx) that the scenarios above hide.
+  The plain `Ping` (a handler that returns a new `Pong`) runs both from the long-lived scope and per request.
+- **Typical behaviors:** a logging behavior through Microsoft.Extensions.Logging with an in-memory provider that formats every message
+  (bounded, so it does not grow across iterations), a validation behavior calling a hand-written `IValidator<TRequest>`, and a handler
+  that injects a scoped repository doing a dictionary lookup; run from the long-lived scope and per request.
+- **Data access:** a handler that runs a parameterized scalar query against an in-memory Microsoft.Data.Sqlite database, created and
+  seeded once per benchmark process (and every container's connection opened in setup, so neither is in a measured call); SQLite's async
+  methods complete synchronously.
+- **Notifications** (decision 30d), 1 and 5 handlers each, for every subject with a publish API (Immediate.Handlers has none):
+    - **Publish per request scope:** create a scope, resolve the entry point, publish a `Pinged` notification, dispose the scope, inside
+      the measured method; each handler looks the pong up in the scoped repository and writes a log message. A second pair adds the same
+      logging behavior as a notification behavior, where the library has notification behaviors (only Keryx; Mediator, MediatR and
+      ZeroAlloc.Mediator wrap requests only).
+    - **Async handlers:** the same handlers, but each awaits the SQLite query (not `Task.Yield`, so the await is the query's), published
+      sequentially from the long-lived scope.
+    - **Parallel strategy:** the async-handler publish with each library's parallel strategy, beside the sequential one: Keryx's
+      `PublishStrategy.Parallel`, Mediator's `TaskWhenAllPublisher` (a generator option, so a subject assembly of its own), MediatR's
+      `TaskWhenAllPublisher` (a second container), ZeroAlloc.Mediator's `[ParallelNotification]`.
+
+The handler bodies and behaviors are the same in every subject (the notification handlers all call one body in the common project), and
+`--verify` counts their handler, behavior, validator, repository, query and log calls. How each library is set up for them (the baseline,
+the lifetimes, the connection, the parallel publishers, the n/a cells: Mediator singleton in the behavior scenarios and the per-request
+publish, ZeroAlloc.Mediator's static class in the behavior scenarios and everything per request, every library but Keryx in the
+notification-behavior pair) is open-questions OQ-72, still open.
 
 Setup rules, which every number depends on:
 
@@ -1468,7 +1502,8 @@ Setup rules, which every number depends on:
   for is left out and shown as n/a.
 
 CI builds the benchmarks, runs `Keryx.Benchmarks --verify` (every comparison benchmark is called with a call counter on, and the run
-fails when a library does not run the scenario's handlers and behaviors), and runs every benchmark with `--job Dry` only; numbers are
+fails when a library does not run the scenario's handlers and behaviors), and runs every benchmark, the real-world scenarios included,
+with `--job Dry` only; numbers are
 never published from shared runners. The README's numbers come from local runs, with the machine and job stated. Before a release the
 comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream behaviors, which measured
 20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision 22, 2026-11-27: tracked

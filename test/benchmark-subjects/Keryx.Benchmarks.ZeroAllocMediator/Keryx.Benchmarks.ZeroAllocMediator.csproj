@@ -9,7 +9,13 @@
             ZAM003 (request is a class, use a readonly record struct): every subject sends the same sealed record class requests, so the
             libraries are compared on one request shape.
         -->
-        <NoWarn>$(NoWarn);CA1068;ZAM003</NoWarn>
+        <!--
+            ZAM008 (handler without a parameterless constructor: the static Mediator path throws unless a factory is registered): the
+            real-world handlers inject services. The static path runs only the data-access handler and the async notification handlers,
+            whose factories ZeroAllocSetup.UseStaticFactories registers; the behavior and scope-per-request scenarios' static path is n/a
+            (open-questions OQ-72).
+        -->
+        <NoWarn>$(NoWarn);CA1068;ZAM003;ZAM008</NoWarn>
     </PropertyGroup>
     <ItemGroup>
         <InternalsVisibleTo Include="Keryx.Benchmarks" />

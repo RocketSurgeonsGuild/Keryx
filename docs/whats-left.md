@@ -2,7 +2,8 @@
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
 owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 28
-(2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64.
+(2026-11-27), and checked against the code by the docs sweep after OQ-59 to OQ-64; updated for owner decision 30 (real-world benchmark
+scenarios, 2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -219,6 +220,16 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - **Benchmarks in CI:** `.github/workflows/benchmarks.yml` builds the suite, runs `--verify` and every benchmark with `--job Dry` on the
   pull request, and the `prototype-disassembly` job runs `--filter *PipelinePrototype*` on Linux with `DisassemblyDiagnoser` and uploads
   the `pipeline-prototype-disassembly` artifact.
+- **Real-world benchmark scenarios** (owner decision 30, 2026-11-27): `RealWorldPing`, `RealWorldPingScopePerRequest`,
+  `RealWorldBehaviors`, `RealWorldBehaviorsScopePerRequest` and `RealWorldSqlite` run a plain handler, a logging and a validation
+  behavior around a handler with a scoped repository, and a SQLite query, from the long-lived scope and with a scope per request; for
+  decision 30d, `RealWorldPublish{1,5}ScopePerRequest`, `RealWorldPublishBehavior{1,5}ScopePerRequest` (the notification logging
+  behavior, Keryx only), `RealWorldPublishAsync{1,5}` (handlers awaiting the SQLite query, sequential) and `RealWorldPublishParallel{1,5}`
+  (each library's parallel strategy) publish a `Pinged` notification to 1 and 5 handlers. 104 benchmarks in all, for every subject that
+  has an API for them. `--verify` checks their `Pong` and counts handler, behavior, validator, repository, query and log calls (238
+  comparison benchmarks pass on net10.0 and net11.0), and the Dry job, which already runs every benchmark, covers them (a Dry run of
+  `*RealWorld*` runs 104). Their per-library setup and n/a cells are OQ-72, open. Not measured yet: the README describes them without
+  numbers until the full local run (decision 32).
 - **Performance contract against the comparison run** (README, Benchmarks; measured with static behaviors on 2026-11-26): Keryx
   allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1
   and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state machine); a
@@ -242,6 +253,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
+- Decide OQ-72 (the real-world scenarios' setup: the baseline that does the behaviors' work inline, the singleton SQLite connection,
+  the separate notification-behavior pair, the Mediator parallel project, the n/a cells) and fold it into the ADR's Benchmarks section.
 - Re-run the comparison benchmarks on the release candidate and update the README's numbers (its tables are from before the follow-up,
   OQ-65 and OQ-70).
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)

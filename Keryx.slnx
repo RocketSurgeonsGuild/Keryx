@@ -78,6 +78,7 @@
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.Common/Keryx.Benchmarks.Common.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.ImmediateHandlers/Keryx.Benchmarks.ImmediateHandlers.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.KeryxHost/Keryx.Benchmarks.KeryxHost.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorParallel/Keryx.Benchmarks.MediatorParallel.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorScoped/Keryx.Benchmarks.MediatorScoped.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorSingleton/Keryx.Benchmarks.MediatorSingleton.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatRHandlers/Keryx.Benchmarks.MediatRHandlers.csproj" />

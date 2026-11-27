@@ -23,6 +23,7 @@
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.Baseline\Keryx.Benchmarks.Baseline.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.KeryxHost\Keryx.Benchmarks.KeryxHost.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorScoped\Keryx.Benchmarks.MediatorScoped.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorParallel\Keryx.Benchmarks.MediatorParallel.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorSingleton\Keryx.Benchmarks.MediatorSingleton.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatRHandlers\Keryx.Benchmarks.MediatRHandlers.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ImmediateHandlers\Keryx.Benchmarks.ImmediateHandlers.csproj" />

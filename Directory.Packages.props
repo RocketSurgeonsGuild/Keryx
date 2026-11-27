@@ -59,6 +59,8 @@
     <PackageVersion Include="ZeroAlloc.Mediator" Version="7.0.1" />
     <!-- ZeroAlloc.Mediator's source generator ships as its own package, at the same version. -->
     <PackageVersion Include="ZeroAlloc.Mediator.Generator" Version="7.0.1" />
+    <!-- The real-world scenarios' data-access handler: a parameterized query against a shared-cache in-memory database. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
   </ItemGroup>
   <!--
       Microsoft.Extensions.DependencyInjection.Abstractions is a dependency of the Keryx package, per target framework (OQ-8): 8.0.x for
@@ -74,7 +76,10 @@
   </ItemGroup>
   <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
-    <!-- The MediatR benchmark host filters MediatR's license log category (ADR 0001, Benchmarks). -->
+    <!--
+        The benchmark subjects' logging behaviors write through Microsoft.Extensions.Logging to an in-memory provider, and the MediatR subject
+        filters MediatR's license log category (ADR 0001, Benchmarks).
+    -->
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.15" />
   </ItemGroup>
   <ItemGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">

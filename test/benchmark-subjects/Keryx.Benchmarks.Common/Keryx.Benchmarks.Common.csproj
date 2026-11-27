@@ -1,3 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-    <!-- What every benchmark subject shares: the verification probe and the stream every stream handler returns. -->
+    <!--
+        What every benchmark subject shares: the verification probe, the stream every stream handler returns, and the real-world scenarios'
+        services (the Pong response, the in-memory logging provider, the validator contract, the scoped repository, the SQLite database and
+        the notification handlers' body).
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.Sqlite" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <PackageReference Include="Microsoft.Extensions.Logging" />
+    </ItemGroup>
 </Project>

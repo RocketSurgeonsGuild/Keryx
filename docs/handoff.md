@@ -483,7 +483,17 @@ public); the incremental test shows downstream steps cached after an unrelated e
 
 The benchmark suite in the ADR's Benchmarks section (baseline, Keryx, Mediator 3.0.2 scoped and singleton, MediatR 15.x without a key,
 Immediate.Handlers 4.4.0, ZeroAlloc.Mediator 7.0.1), each library in its own project under `test/benchmark-subjects`. The Keryx subject
-uses static behavior methods with the message constraint; there is no hook-behavior stream variant (OQ-51). The benchmarks workflow runs
+uses static behavior methods with the message constraint; there is no hook-behavior stream variant (OQ-51). Beside the depth scenarios,
+real-world `Ping` -> `Pong` scenarios (owner decision 30): a plain handler from the long-lived scope and with a scope per request (create
+the scope, resolve the entry point, send, dispose, inside the measured method), a logging behavior (Microsoft.Extensions.Logging to an
+in-memory provider that formats every message, bounded) and a validation behavior (a hand-written `IValidator<TRequest>`) around a handler
+with a scoped repository, from the long-lived scope and per request, and a handler running a parameterized query against an in-memory
+Microsoft.Data.Sqlite database seeded once per process; and (decision 30d) `Pinged` notifications to 1 and 5 handlers (a repository
+lookup and a log message each) published per request scope, again with the logging behavior as a notification behavior (Keryx only: the
+other libraries' behaviors wrap requests only), to handlers that await the SQLite query published sequentially, and with each library's
+parallel strategy (Keryx `PublishStrategy.Parallel`, Mediator and MediatR `TaskWhenAllPublisher`, ZeroAlloc.Mediator
+`[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same bodies
+in every subject, 104 real-world benchmarks that `--verify` counts, the setup in OQ-72. The benchmarks workflow runs
 the suite with `--verify` and `--job Dry`, and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser` (OQ-36), whose
 output is the CI evidence for gate criterion 2.
 

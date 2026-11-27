@@ -6,8 +6,10 @@ namespace Keryx.Benchmarks.Comparison;
 
 /// <summary>
 ///     <c>Keryx.Benchmarks --verify</c>: calls every comparison benchmark twice (cold, then warm) with <see cref="Probe" /> on and checks its
-///     result and the number of handler and behavior calls against the scenario's <see cref="ExpectAttribute" />, so a library that is not
-///     configured to run the scenario's behaviors fails here instead of looking fast in the results.
+///     result (a real-world scenario's <see cref="Pong" />: id and name) and the number of probe hits (handler and behavior calls; in the
+///     real-world scenarios also validator calls, repository lookups, SQLite queries and formatted log messages) against the scenario's
+///     <see cref="ExpectAttribute" />, so a library that is not configured to run the scenario's behaviors fails here instead of looking fast
+///     in the results.
 /// </summary>
 internal static class Verification
 {
@@ -39,11 +41,13 @@ internal static class Verification
                     for (var run = 0; run < 2; run++)
                     {
                         _ = Probe.Take();
-                        var result = await InvokeAsync(benchmark, method);
+                        var (result, name) = await InvokeAsync(benchmark, method);
                         var actualHits = Probe.Take();
-                        if (result != expect.Result || actualHits != hits)
+                        if (result != expect.Result || name != expect.Name || actualHits != hits)
                         {
-                            failures.Add($"{scenario.Name}.{method.Name} (call {run + 1}): result {result}, expected {expect.Result}; calls {actualHits}, expected {hits}");
+                            failures.Add(
+                                $"{scenario.Name}.{method.Name} (call {run + 1}): result {result} {name}, expected {expect.Result} {expect.Name}; hits {actualHits}, expected {hits}"
+                            );
                         }
                     }
 
@@ -65,16 +69,20 @@ internal static class Verification
         return failures.Count == 0 ? 0 : 1;
     }
 
-    private static async ValueTask<int> InvokeAsync(ComparisonBenchmark benchmark, MethodInfo method) =>
+    private static async ValueTask<(int Result, string? Name)> InvokeAsync(ComparisonBenchmark benchmark, MethodInfo method) =>
         method.Invoke(benchmark, null) switch
         {
-            ValueTask<int> value => await value,
-            Task<int> task => await task,
-            ValueTask<Unit> unit => await Done(unit),
-            ValueTask value => await Done(value),
-            Task task => await Done(new ValueTask(task)),
+            ValueTask<int> value => (await value, null),
+            Task<int> task => (await task, null),
+            ValueTask<Pong> pong => Read(await pong),
+            Task<Pong> pong => Read(await pong),
+            ValueTask<Unit> unit => (await Done(unit), null),
+            ValueTask value => (await Done(value), null),
+            Task task => (await Done(new ValueTask(task)), null),
             var other => throw new InvalidOperationException($"{method.Name} returned {other?.GetType().Name ?? "null"}."),
         };
+
+    private static (int Result, string? Name) Read(Pong pong) => (pong.Id, pong.Name);
 
     private static async ValueTask<int> Done(ValueTask task)
     {

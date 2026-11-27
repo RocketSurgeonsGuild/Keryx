@@ -1,14 +1,20 @@
+using Keryx.Benchmarks.Common;
 using Mediator;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Keryx.Benchmarks.MediatorSingleton;
 
-/// <summary>Registers this assembly's generated mediator with the singleton lifetime and the pass-through behaviors.</summary>
+/// <summary>
+///     Registers this assembly's generated mediator with the singleton lifetime, the pass-through behaviors and the real-world
+///     services.
+/// </summary>
 public static class MediatorSingletonSetup
 {
-    // The generator reads these options from this call at compile time.
-    public static IServiceCollection AddMediatorSingletonBenchmarks(this IServiceCollection services) =>
-        services.AddMediator(
+    public static IServiceCollection AddMediatorSingletonBenchmarks(this IServiceCollection services)
+    {
+        services.AddRealWorldServices();
+        // The generator reads these options from this call at compile time.
+        return services.AddMediator(
             static (MediatorOptions options) =>
             {
                 options.Namespace = "Keryx.Benchmarks.MediatorSingleton";
@@ -17,4 +23,5 @@ public static class MediatorSingletonSetup
                 options.StreamPipelineBehaviors = [typeof(StreamPass1<,>), typeof(StreamPass2<,>), typeof(StreamPass3<,>)];
             }
         );
+    }
 }

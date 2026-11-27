@@ -508,7 +508,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 `test/Keryx.Benchmarks` compares Keryx with a hand-written direct call and with the other source-generated and reflection-based
 mediators, each in its own small project under `test/benchmark-subjects`, all running the same requests, handler bodies and
 pass-through behaviors. Every benchmark is one call on a mediator resolved beforehand (scoped ones from a scope that lives for the whole
-run); behaviors complete synchronously. "Typed" is a library's per-request entry point, `IMediator` its generic method; n/a marks a
+run), except the real-world scope-per-request rows; behaviors complete synchronously. "Typed" is a library's per-request entry point, `IMediator` its generic method; n/a marks a
 scenario the library has no API for. How each library is set up is recorded in
 [open-questions.md](docs/adr/open-questions.md) (OQ-51).
 
@@ -586,6 +586,52 @@ the code before it, `IMediator` `Send` with a synchronous handler measured 0.4 t
 behaviors 20 to 60 ns slower (3 to 9%) for a reason not found in its code, which the release candidate's run checks again. The other
 Keryx rows measured within run-to-run noise of the tables, with the same allocations.
 
+### Real-world Ping → Pong
+
+Beside the depth scenarios above, real-world scenarios send a `Ping` that a handler answers with a new `Pong` record, or publish a
+`Pinged` notification, closer to what an application does (owner decision 30). The handler bodies and behaviors are the same in every
+library.
+
+Requests:
+
+- `RealWorldPing`: the handler alone, from the long-lived scope.
+- `RealWorldPingScopePerRequest`: the same with a scope per request: the measured call creates a DI scope, resolves the mediator (or the
+  library's entry point) from it, sends and disposes the scope, the way an ASP.NET Core request does. For Keryx this includes creating the
+  pipeline context, which the long-lived rows hide.
+- `RealWorldBehaviors`: a logging behavior (Microsoft.Extensions.Logging, two messages per request, really formatted by an in-memory
+  provider that keeps the last 1,024) and a validation behavior (a hand-written `IValidator<TRequest>`, scoped) around a handler that
+  injects a scoped repository doing a dictionary lookup, from the long-lived scope.
+- `RealWorldBehaviorsScopePerRequest`: the same with a scope per request, so the repository, the validator and the pipeline are created
+  for each call.
+- `RealWorldSqlite`: a handler that runs a parameterized scalar query against an in-memory SQLite database (Microsoft.Data.Sqlite), seeded
+  once per process, on the container's singleton open connection (opened in setup), from the long-lived scope.
+
+Notifications, each to 1 and to 5 handlers:
+
+- `RealWorldPublish1ScopePerRequest` and `RealWorldPublish5ScopePerRequest`: a publish with a scope per request; each handler looks the
+  pong up in the scoped repository and writes a log message.
+- `RealWorldPublishBehavior1ScopePerRequest` and `RealWorldPublishBehavior5ScopePerRequest`: the same with the logging behavior as a
+  notification behavior (two messages per publish). Only Keryx has notification behaviors; Mediator's, MediatR's and ZeroAlloc.Mediator's
+  behaviors wrap requests only, so they are n/a here, and the scenario is a pair of its own so the rows above compare every library on
+  the same work.
+- `RealWorldPublishAsync1` and `RealWorldPublishAsync5`: handlers that await the SQLite query and then log, published sequentially (each
+  library's default) from the long-lived scope. The await is the query's, not `Task.Yield`'s.
+- `RealWorldPublishParallel1` and `RealWorldPublishParallel5`: the same handlers with each library's parallel strategy: Keryx's
+  `[PublishStrategy(PublishStrategy.Parallel)]`, Mediator's `TaskWhenAllPublisher` (a generator option, so a third Mediator project,
+  singleton, shown in the Mediator singleton rows), MediatR's `TaskWhenAllPublisher` (a second container) and ZeroAlloc.Mediator's
+  `[ParallelNotification]`.
+
+SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
+handlers that return completed tasks, not overlapping work. Here the direct call is a hand-written handler class (or a publisher class
+taking the handler classes) resolved from DI that does the same work, the behaviors' logging and validation included, so the ratio is
+each mediator's cost on top of that work. n/a, besides the entry points a library does not have: Mediator singleton in the two request
+behavior scenarios and the per-request publish (its singleton handlers and behaviors cannot take the scoped repository and validator);
+ZeroAlloc.Mediator's static `Mediator` in the two request behavior scenarios (its static `Send` passes behaviors a `null` state, and the
+library's static-path alternative would need another behavior body that opens a scope inside each call) and in every scope-per-request
+scenario (it has no scope); every library but Keryx in the notification-behavior pair; Immediate.Handlers in every notification scenario
+(it has none). The setup is recorded in [open-questions.md](docs/adr/open-questions.md) (OQ-72). Their numbers come from the next full
+local run; run them on their own with `--filter '*RealWorld*'`.
+
 ### Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only)
 
 The handler of a request with no response returns a non-generic `ValueTask` or `Task`, so Keryx adapts it to `ValueTask<Unit>` through
@@ -623,7 +669,7 @@ its publish strategy is static (open-questions OQ-70): in interleaved reruns aga
 to 0.42 ns for 1 handler and 0.46 to 0.51 ns for 5 (0.65 to 0.67 ns and 0.75 to 0.80 ns before), `IMediator` with 5 handlers 2.74 ns (3.03
 ns before) and with 1 handler within noise, all still 0 B.
 
-Run them yourself (the full set takes about 15 minutes with these settings; `--verify` checks that every library really runs each
+Run them yourself (the full set took about 15 minutes with these settings before the real-world scenarios were added; `--verify` checks that every library really runs each
 scenario's handlers and behaviors):
 
 ```bash
@@ -644,7 +690,7 @@ KeryxDispatchPadding=true dotnet run -c Release -f net10.0 -- --filter '*Compari
 `next` links) against nested direct calls at depths 1, 3 and 8: 0 B at every depth, and 0.66x the nested calls' time at depth 3 on the
 machine above. On macOS, `--prototype-disasm` runs the same pipelines to Tier 1 for a `DOTNET_JitDisasm` listing (see `Program.cs`).
 
-CI builds the suite, runs `--verify`, runs every benchmark once with `--job Dry`, and runs the pipeline prototype on Linux with
+CI builds the suite, runs `--verify`, runs every benchmark (the real-world scenarios included) once with `--job Dry`, and runs the pipeline prototype on Linux with
 BenchmarkDotNet's `DisassemblyDiagnoser`, uploading the disassembly as a build artifact. Numbers from shared runners are never published.
 
 ## Building

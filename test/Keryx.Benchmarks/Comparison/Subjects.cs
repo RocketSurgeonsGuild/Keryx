@@ -1,5 +1,8 @@
+using Keryx.Benchmarks.Baseline;
+using Keryx.Benchmarks.Common;
 using Keryx.Benchmarks.ImmediateHandlers;
 using Keryx.Benchmarks.KeryxHost;
+using Keryx.Benchmarks.MediatorParallel;
 using Keryx.Benchmarks.MediatorScoped;
 using Keryx.Benchmarks.MediatorSingleton;
 using Keryx.Benchmarks.MediatRHandlers;
@@ -11,35 +14,50 @@ namespace Keryx.Benchmarks.Comparison;
 /// <summary>
 ///     One container per library, built the way an application would build it, and the mediators the benchmarks call. Scoped mediators are
 ///     resolved once from one scope that lives as long as the benchmark (as in a request that sends many times); singletons from the root.
-///     ZeroAlloc.Mediator's static <c>Mediator</c> class needs no container.
+///     ZeroAlloc.Mediator's static <c>Mediator</c> class needs no container. The real-world scenarios also read each container's
+///     long-lived scope (<see cref="LongLived" />) and its scope factory (<see cref="Scopes" />), to create a scope per request; the real-world
+///     parallel publish scenario uses two more containers, Mediator with its <c>TaskWhenAllPublisher</c> (its own assembly) and MediatR with
+///     its <c>TaskWhenAllPublisher</c>. Every container's SQLite connection is opened here, before any benchmark call.
 /// </summary>
 internal sealed class Subjects : IDisposable
 {
     private static readonly ServiceProviderOptions Validated = new() { ValidateScopes = true, ValidateOnBuild = true };
     private readonly List<IDisposable> _owned = [];
-    private readonly IServiceScope _immediate;
+    private readonly Dictionary<Library, (IServiceProvider Root, IServiceProvider LongLived)> _containers = [];
 
     public Subjects()
     {
-        var keryx = Scope(new ServiceCollection().AddKeryxBenchmarks());
+        _ = Container(Library.Baseline, new ServiceCollection().AddBaselineBenchmarks());
+
+        var keryx = Container(Library.Keryx, new ServiceCollection().AddKeryxBenchmarks());
         KeryxTyped = keryx.GetRequiredService<KeryxMediator>();
         KeryxGeneric = keryx.GetRequiredService<IMediator>();
 
-        var mediatorScoped = Scope(new ServiceCollection().AddMediatorScopedBenchmarks());
+        var mediatorScoped = Container(Library.MediatorScoped, new ServiceCollection().AddMediatorScopedBenchmarks());
         MediatorScopedTyped = mediatorScoped.GetRequiredService<MediatorScoped.Mediator>();
         MediatorScopedGeneric = mediatorScoped.GetRequiredService<Mediator.IMediator>();
 
-        var mediatorSingleton = Root(new ServiceCollection().AddMediatorSingletonBenchmarks());
+        // Singletons, resolved from the root as an application would; the long-lived scope is for the real-world scenarios.
+        _ = Container(Library.MediatorSingleton, new ServiceCollection().AddMediatorSingletonBenchmarks());
+        var mediatorSingleton = _containers[Library.MediatorSingleton].Root;
         MediatorSingletonTyped = mediatorSingleton.GetRequiredService<MediatorSingleton.Mediator>();
         MediatorSingletonGeneric = mediatorSingleton.GetRequiredService<Mediator.IMediator>();
 
-        MediatR = Scope(new ServiceCollection().AddMediatRBenchmarks()).GetRequiredService<MediatR.IMediator>();
+        MediatR = Container(Library.MediatR, new ServiceCollection().AddMediatRBenchmarks()).GetRequiredService<MediatR.IMediator>();
 
-        var immediate = Root(new ServiceCollection().AddImmediateHandlersBenchmarks()).CreateScope();
-        _owned.Add(immediate);
-        _immediate = immediate;
+        _ = Container(Library.ImmediateHandlers, new ServiceCollection().AddImmediateHandlersBenchmarks());
 
-        ZeroAllocMediator = Scope(new ServiceCollection().AddZeroAllocBenchmarks()).GetRequiredService<ZeroAlloc.Mediator.IMediator>();
+        ZeroAllocMediator = Container(Library.ZeroAlloc, new ServiceCollection().AddZeroAllocBenchmarks())
+           .GetRequiredService<ZeroAlloc.Mediator.IMediator>();
+
+        // The real-world parallel publish scenario's containers: singletons from the root, like Mediator singleton above.
+        _ = Container(Library.MediatorParallel, new ServiceCollection().AddMediatorParallelBenchmarks());
+        var mediatorParallel = _containers[Library.MediatorParallel].Root;
+        MediatorParallelTyped = mediatorParallel.GetRequiredService<MediatorParallel.Mediator>();
+        MediatorParallelGeneric = mediatorParallel.GetRequiredService<Mediator.IMediator>();
+
+        MediatRParallel = Container(Library.MediatRParallel, new ServiceCollection().AddMediatRParallelBenchmarks())
+           .GetRequiredService<MediatR.IMediator>();
     }
 
     public KeryxMediator KeryxTyped { get; }
@@ -50,9 +68,18 @@ internal sealed class Subjects : IDisposable
     public Mediator.IMediator MediatorSingletonGeneric { get; }
     public MediatR.IMediator MediatR { get; }
     public ZeroAlloc.Mediator.IMediator ZeroAllocMediator { get; }
+    public MediatorParallel.Mediator MediatorParallelTyped { get; }
+    public Mediator.IMediator MediatorParallelGeneric { get; }
+    public MediatR.IMediator MediatRParallel { get; }
 
     /// <summary>An Immediate.Handlers generated handler class, from the scope that lives as long as the benchmark.</summary>
-    public T Immediate<T>() where T : notnull => _immediate.ServiceProvider.GetRequiredService<T>();
+    public T Immediate<T>() where T : notnull => LongLived(Library.ImmediateHandlers).GetRequiredService<T>();
+
+    /// <summary>The provider of <paramref name="library" />'s scope that lives as long as the benchmark.</summary>
+    public IServiceProvider LongLived(Library library) => _containers[library].LongLived;
+
+    /// <summary><paramref name="library" />'s scope factory, for the scope-per-request scenarios.</summary>
+    public IServiceScopeFactory Scopes(Library library) => _containers[library].Root.GetRequiredService<IServiceScopeFactory>();
 
     public void Dispose()
     {
@@ -62,19 +89,35 @@ internal sealed class Subjects : IDisposable
         }
 
         _owned.Clear();
+        _containers.Clear();
     }
 
-    private ServiceProvider Root(IServiceCollection services)
+    /// <summary>
+    ///     Builds the container, validated, opens its SQLite connection (creating and seeding the database the first time in the process), and
+    ///     creates its long-lived scope; returns that scope's provider.
+    /// </summary>
+    private IServiceProvider Container(Library library, IServiceCollection services)
     {
-        var provider = services.BuildServiceProvider(Validated);
-        _owned.Add(provider);
-        return provider;
-    }
-
-    private IServiceProvider Scope(IServiceCollection services)
-    {
-        var scope = Root(services).CreateScope();
+        var root = services.BuildServiceProvider(Validated);
+        _owned.Add(root);
+        root.OpenPongDatabase();
+        var scope = root.CreateScope();
         _owned.Add(scope);
+        _containers.Add(library, (root, scope.ServiceProvider));
         return scope.ServiceProvider;
     }
+}
+
+/// <summary>The containers <see cref="Subjects" /> builds, one per library.</summary>
+internal enum Library
+{
+    Baseline,
+    Keryx,
+    MediatorScoped,
+    MediatorSingleton,
+    MediatR,
+    ImmediateHandlers,
+    ZeroAlloc,
+    MediatorParallel,
+    MediatRParallel,
 }
