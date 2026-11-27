@@ -65,8 +65,8 @@ With a request's handler required in the request's own assembly:
 - every assembly checks its own requests (KRX001), so there is nothing for a contracts opt-out to turn off, and a request declared in a
   library is always handled where every host that references the library composes it;
 - a host always finds the handler of a referenced request in that request's assembly, so there is no request handled elsewhere for
-  `ExternallyHandled` to name. What KRX030 still catches (an excluded handler, an internal handler of a referenced host) is a mistake
-  in the host, not a request handled elsewhere.
+  `ExternallyHandled` to name. What KRX030 still catches (an internal handler of a referenced host, or a library built with KRX001
+  suppressed) is a mistake in the host, not a request handled elsewhere.
 
 Contracts assemblies keep a role: they declare notifications, which may be handled in any assembly (`Keryx.Samples.Contracts`).
 
@@ -75,6 +75,7 @@ Contracts assemblies keep a role: they declare notifications, which may be handl
 - A decision on where a request may be handled: KRX023 relaxed for assemblies that reference a contracts assembly, or for hosts.
 - KRX001 turned off again in contracts assemblies, and the "mark as contracts assembly" code-fix action restored.
 - The host's handling of a referenced request handled in a third assembly: the handler generator skips a handler that breaks KRX023, so
-  today no manifest describes such a handler, and the host's cross-assembly KRX005 cannot be reached from generated manifests (OQ-60).
+  today no manifest describes such a handler, and the host no longer checks for a request handled in two assemblies (KRX005 across
+  assemblies was removed, OQ-60); it would need that check back.
 - `ExternallyHandled`'s KRX030 filtering, its KRX036 reasons and its KRX043 entry, as described above, and a public API snapshot with
   both attributes.

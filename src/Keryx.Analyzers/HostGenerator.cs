@@ -128,8 +128,8 @@ public sealed class HostGenerator : IIncrementalGenerator
 
     /// <summary>
     ///     The host diagnostics: KRX030 for the referenced request and stream request types (from the scan, those declared in another host
-    ///     included, OQ-16; the host's own are KRX001's), then KRX031, then the composition's own (KRX005 across assemblies, KRX032, KRX033,
-    ///     KRX034, KRX036 for <c>ExcludeHandler</c>), then KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks
+    ///     included, OQ-16; the host's own are KRX001's), then KRX031, then the composition's own (KRX032, KRX033, KRX034, KRX038, KRX039,
+    ///     KRX036 for <c>ExcludeHandler</c>), then KRX008 for behavior pairs that involve a referenced behavior (the analyzer checks
     ///     in-source pairs), KRX035 for each global behavior, KRX036 for each <c>ExcludeBehavior</c> that removed nothing, and KRX037 for each
     ///     struct notification that handlers typed as an interface receive. A request whose handler candidate breaks a rule counts as handled:
     ///     the analyzers report the handler.

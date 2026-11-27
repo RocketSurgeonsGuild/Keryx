@@ -1,7 +1,7 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 25 and 26
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 and 23 to 26
 (2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
@@ -162,21 +162,31 @@ Each code change is one commit, with build and tests green:
   not before: KRX031); a `net8.0;net10.0` test project referencing it builds, with `AddKeryx()` generated in its `net10.0` build only; a
   `net10.0` app runs; a `net8.0` app with `<KeryxHost>true</KeryxHost>` gets KRX031.
 
+## Done: owner decisions 23 and 24 (2026-11-27)
+
+- **`ExcludeHandler` names only notification handlers (decision 23 for OQ-59):** naming a request or stream request handler, referenced
+  or the host's own, is the new host error KRX039 (the next free ID in the host range; KRX036 is a warning about an exclusion without
+  effect, and this one is an error), reported on the attribute; the handler is not excluded and stays dispatched, and the exclusion is
+  not also KRX036. There is no exception to KRX023 for hosts: a test swaps what a request handler does through the services it injects
+  (ADR, Host control; README, Testing handlers). The tests that excluded request handlers now assert KRX039 (referenced request and
+  stream request handlers, the host's own, a referenced one beside the host's KRX023 replacement, and one the host cannot resolve, which
+  is KRX034 since it is no longer skipped); the exclusion of a notification handler the host cannot resolve keeps its test.
+- **No host KRX005 (decision 24 for OQ-60):** the host's cross-assembly KRX005, the `DuplicateHandlerInHost` descriptor and its
+  hand-written-manifest test are removed; KRX005 is the analyzer's rule within one assembly. Duplicates inside one referenced assembly
+  still leave the request undispatched, with no host diagnostic (the test says so).
+
 ## Decisions for the owner
 
-Four questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-59, OQ-60, OQ-63 and OQ-64 from the second rework.
+Two questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-63 and OQ-64 from the second rework.
 The code follows each one's **Interim** line:
 
-- **OQ-59:** with KRX023 in hosts, a host can exclude a referenced request handler but not provide its own; should a host's handler of a
-  referenced request be allowed when the host excludes that request's referenced handler (test hosts)?
-- **OQ-60:** generated manifests can no longer make two assemblies handle one request, so the host's cross-assembly KRX005 is only a
-  safety net; keep it or remove it?
 - **OQ-63:** a behavior's unkeyed `IServiceProvider` is held in a shared `ServiceN` field of the context; keep that, or give the context a
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
 
-OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-61
+OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
+(decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
 (decision 25) and OQ-62 (decision 26) are decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
 
 ## Gates and checks
@@ -210,7 +220,7 @@ OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), 
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64.
+- Decide OQ-63 and OQ-64.
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

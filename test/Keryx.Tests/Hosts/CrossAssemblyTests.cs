@@ -13,7 +13,7 @@ namespace Keryx.Tests.Hosts;
 /// <summary>
 ///     Cross-assembly discovery (ADR 0001, Cross-assembly discovery; phase 7): a host composes the handlers, global behaviors, request and
 ///     notification types of the assemblies it references, read from their manifests with one scan, and reports the host rules about them
-///     (KRX005 across assemblies, KRX030 for referenced requests, KRX032, KRX033, KRX034, KRX035, KRX036 for <c>ExcludeHandler</c>). A
+///     (KRX030 for referenced requests, KRX032, KRX033, KRX034, KRX035, KRX036 and KRX039 for <c>ExcludeHandler</c>). A
 ///     request's handler lives in the request's own assembly (KRX023), so the request types live in the handler library and the contracts
 ///     assembly holds only notifications.
 /// </summary>
@@ -257,18 +257,23 @@ public class CrossAssemblyTests : HostTest
     }
 
     [Test]
-    public async Task ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler(CancellationToken cancellationToken)
+    public async Task KRX039_ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler(CancellationToken cancellationToken)
     {
-        // The host's replacement is KRX023 (OQ-59 asks whether a host may replace an excluded referenced request handler). It counts as
-        // handling the request, so KRX030 does not add a second error, and nothing dispatches the request.
+        // ExcludeHandler names only notification handlers (OQ-59): naming a referenced request handler is KRX039, on the attribute, and the
+        // handler is not excluded, so the referenced handler is dispatched. The host's replacement is still KRX023, and there is no KRX030.
         var result = await GenerateAsync("[assembly: ExcludeHandler(typeof(Orders.GetNameHandler))]\n" + Host + MyGetName, cancellationToken, withHandlerAnalyzer: true);
 
         await Assert.That(result.AnalyzerResults[typeof(Analyzers.Diagnostics.HandlerAnalyzer)].Diagnostics.Select(static d => d.Id)).IsEquivalentTo(["KRX023"]);
-        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal))).IsEmpty();
+        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal)))
+                    .IsEquivalentTo(
+                         [
+                             "KRX039: [assembly: ExcludeHandler(typeof(GetNameHandler))] names a request handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+                         ]
+                     );
         var mediator = Source(result, HostEmitter.MediatorHintName);
-        await Assert.That(mediator).DoesNotContain("GetNameHandler");
+        await Assert.That(mediator).Contains("global::Orders.GetNameHandler.InvokeAsync(");
+        await Assert.That(mediator).Contains("Send(global::Orders.GetName request");
         await Assert.That(mediator).DoesNotContain("MyGetName");
-        await Assert.That(mediator).DoesNotContain("Send(global::Orders.GetName request");
     }
 
     /// <summary>The host's own handler of the referenced <c>Orders.GetName</c>: KRX023.</summary>
@@ -281,13 +286,86 @@ public class CrossAssemblyTests : HostTest
         """;
 
     [Test]
-    public async Task ExcludeHandler_Without_A_Replacement_Leaves_The_Request_Unhandled(CancellationToken cancellationToken)
+    public async Task KRX039_For_Referenced_Request_And_Stream_Request_Handlers_Which_Stay_In_The_Host(CancellationToken cancellationToken)
     {
-        var result = await GenerateAsync("[assembly: ExcludeHandler(typeof(Orders.GetNameHandler))]\n" + Host, cancellationToken);
+        // Neither handler is excluded (OQ-59): the host is composed as if the attributes were not there, so both requests are dispatched,
+        // there is no KRX030, and the exclusions count as used (no KRX036). KRX039 is an error, reported on each attribute.
+        var libraries = await CompileLibrariesAsync(cancellationToken);
+        var without = await GenerateAsync(Host, libraries, cancellationToken, ownLoadContext: true);
+        var result = await GenerateAsync(
+            "[assembly: ExcludeHandler(typeof(Orders.GetNameHandler))]\n[assembly: ExcludeHandler(typeof(Orders.CountdownHandler))]\n" + Host,
+            libraries,
+            cancellationToken
+        );
 
-        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal)))
-                    .IsEquivalentTo(["KRX030: Request type 'GetName' has no handler in this host"]);
+        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX039: [assembly: ExcludeHandler(typeof(CountdownHandler))] names a stream request handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+                             "KRX039: [assembly: ExcludeHandler(typeof(GetNameHandler))] names a request handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+        var errors = HostDiagnostics(result).Where(static d => d.Id == "KRX039").ToArray();
+        await Assert.That(errors.All(static d => d.Severity == DiagnosticSeverity.Error && d.Location.IsInSource)).IsTrue();
+        await Assert.That(errors.All(static d => d.Descriptor.HelpLinkUri == Analyzers.Diagnostics.Descriptors.HelpLinkBase + "krx039")).IsTrue();
+        await AssertComposedAsWithoutAsync(result, without, cancellationToken);
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("global::Orders.GetNameHandler.InvokeAsync(");
+        await Assert.That(mediator).Contains("Send(global::Orders.GetName request");
+        await Assert.That(mediator).Contains("global::Orders.CountdownHandler.InvokeAsync(");
+        await Assert.That(mediator).Contains("Stream(global::Orders.Countdown request");
     }
+
+    [Test]
+    public async Task KRX039_For_The_Hosts_Own_Request_And_Stream_Request_Handlers(CancellationToken cancellationToken)
+    {
+        // The host's own request handlers cannot be excluded either (OQ-59); they stay dispatched. Its own notification handler is KRX036
+        // (KRX036_For_An_ExcludeHandler_That_Names_No_Referenced_Handler).
+        var libraries = await CompileLibrariesAsync(cancellationToken);
+        var without = await GenerateAsync(Host + OwnRequests, libraries, cancellationToken, ownLoadContext: true);
+        var result = await GenerateAsync(
+            "[assembly: ExcludeHandler(typeof(Sample.PingHandler))]\n[assembly: ExcludeHandler(typeof(Sample.TicksHandler))]\n" + Host + OwnRequests,
+            libraries,
+            cancellationToken
+        );
+
+        await Assert.That(Diagnostics(result).Where(static d => !d.StartsWith("KRX035", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
+                    .IsEquivalentTo(
+                         [
+                             "KRX039: [assembly: ExcludeHandler(typeof(PingHandler))] names a request handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+                             "KRX039: [assembly: ExcludeHandler(typeof(TicksHandler))] names a stream request handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+                         ],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
+        await Assert.That(HostDiagnostics(result).Where(static d => d.Id == "KRX039").All(static d => d.Location.IsInSource)).IsTrue();
+        await AssertComposedAsWithoutAsync(result, without, cancellationToken);
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("Send(global::Sample.Ping request");
+        await Assert.That(mediator).Contains("Stream(global::Sample.Ticks request");
+    }
+
+    /// <summary>The host's own request and stream request with their handlers.</summary>
+    private const string OwnRequests = """
+
+        public sealed record Ping : IRequest<int>;
+
+        public static partial class PingHandler
+        {
+            private static int Handle(Ping request) => 1;
+        }
+
+        public sealed record Ticks : IStreamRequest<int>;
+
+        public static partial class TicksHandler
+        {
+            private static async IAsyncEnumerable<int> Handle(Ticks request)
+            {
+                await Task.Yield();
+                yield return 1;
+            }
+        }
+        """;
 
     [Test]
     public async Task KRX036_For_An_ExcludeHandler_That_Names_No_Referenced_Handler(CancellationToken cancellationToken)
@@ -516,45 +594,10 @@ public class CrossAssemblyTests : HostTest
     }
 
     [Test]
-    public async Task KRX005_For_Two_Referenced_Assemblies_That_Handle_One_Request(CancellationToken cancellationToken)
-    {
-        // The handler generator never writes a manifest entry for a handler of another assembly's request (KRX023), so two manifests that
-        // name one request are written by hand here, as a Keryx from before KRX023 could have written them; the host check stays as a safety
-        // net (OQ-60).
-        var contracts = await CompileLibraryAsync("Contracts", "using Keryx; namespace Contracts; public sealed record GetName(int Id) : IRequest<string>;", cancellationToken);
-        var libA = await CompileLibraryAsync("LibA", HandWrittenManifest("LibA", "NameA"), cancellationToken, references: [contracts], kind: LibraryKind.Plain);
-        var libB = await CompileLibraryAsync("LibB", HandWrittenManifest("LibB", "NameB"), cancellationToken, references: [contracts], kind: LibraryKind.Plain);
-
-        var result = await HostBuilder.AddCompilationReferences(contracts, libA, libB).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
-
-        var duplicates = HostDiagnostics(result).Where(static d => d.Id == "KRX005").ToArray();
-        await Assert.That(duplicates.Select(static d => d.GetMessage(CultureInfo.InvariantCulture)))
-                    .IsEquivalentTo(["Request type 'Contracts.GetName' has more than one handler in this host: 'NameA' (assembly 'LibA'), 'NameB' (assembly 'LibB')"]);
-        // Neither handler is in source, so it is reported without a location (OQ-49), and neither is dispatched.
-        await AssertWithoutLocationAsync(duplicates);
-        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Send(global::Contracts.GetName request");
-    }
-
-    /// <summary>A library whose manifest says its static class handles <c>Contracts.GetName</c>.</summary>
-    private static string HandWrittenManifest(string ns, string handlerClass) =>
-        $$"""
-        using Keryx.Internal;
-
-        [assembly: KeryxManifest(FormatVersion = 1)]
-
-        namespace {{ns}};
-
-        [KeryxHandler(typeof(Contracts.GetName), HandlerKind.Request, StaticInvoker = true)]
-        public static class {{handlerClass}}
-        {
-            public static System.Threading.Tasks.ValueTask<string> InvokeAsync(Contracts.GetName request, System.IServiceProvider services, System.Threading.CancellationToken cancellationToken) => new("");
-        }
-        """;
-
-    [Test]
-    public async Task KRX005_Is_Not_Reported_Again_For_Duplicates_Inside_One_Referenced_Assembly(CancellationToken cancellationToken)
+    public async Task Duplicates_Inside_One_Referenced_Assembly_Are_Its_Own_KRX005(CancellationToken cancellationToken)
     {
         // The library compiles: same-assembly KRX005 is its analyzer's, which the test library does not run, and its generator reports nothing.
+        // The host has no KRX005 of its own (OQ-60): it reports nothing and dispatches neither handler.
         var library = await CompileLibraryAsync(
             "Lib",
             """
@@ -569,7 +612,8 @@ public class CrossAssemblyTests : HostTest
 
         var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
 
-        await Assert.That(HostDiagnostics(result).Where(static d => d.Id == "KRX005")).IsEmpty();
+        await Assert.That(HostDiagnostics(result)).IsEmpty();
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Send(global::Lib.GetName request");
     }
 
     [Test]
@@ -615,21 +659,53 @@ public class CrossAssemblyTests : HostTest
     [Test]
     public async Task ExcludeHandler_Skips_A_Referenced_Handler_The_Host_Cannot_Resolve(CancellationToken cancellationToken)
     {
-        // A test host excludes a handler whose infrastructure it does not reference: the excluded entry is never resolved, so neither KRX034
-        // nor KRX036 is reported. The request is left without a handler (KRX030): the host cannot replace it with its own (KRX023, OQ-59).
+        // A test host excludes a notification handler whose infrastructure it does not reference: the excluded entry is never resolved, so
+        // neither KRX034 nor KRX036 is reported.
         var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface IDb { }", cancellationToken);
         var library = await CompileLibraryAsync("Lib", ExcludedLibrary, cancellationToken, references: [infra]);
 
         var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + ExcludingHost).Build().GenerateAsync(cancellationToken);
 
-        await Assert.That(Diagnostics(result)).IsEquivalentTo(["KRX030: Request type 'Ping' has no handler in this host"]);
-        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Ping");
+        await Assert.That(Diagnostics(result)).IsEmpty();
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("OnSaved");
         // The generated host still compiles: the compiler reports no error (KRX030 is the generator's, not the compiler's), so nothing
         // generated names the excluded handler or the unreferenced Infra assembly.
         await Assert.That(result.FinalCompilation.GetDiagnostics(cancellationToken).Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.ToString()))
                     .IsEmpty();
         await Assert.That(result.Results.Values.SelectMany(static r => r.SyntaxTrees).Select(static t => t.ToString()).Where(static text => text.Contains("Infra", StringComparison.Ordinal)))
                     .IsEmpty();
+    }
+
+    [Test]
+    public async Task KRX039_Does_Not_Skip_A_Referenced_Request_Handler_The_Host_Cannot_Resolve(CancellationToken cancellationToken)
+    {
+        // A request handler is never excluded (OQ-59), so the host resolves it and reports what it cannot resolve (KRX034); its request
+        // counts as handled (no KRX030). A test host references the handler's infrastructure and swaps its services instead.
+        var infra = await CompileLibraryAsync("Infra", "namespace Infra; public interface IDb { }", cancellationToken);
+        var library = await CompileLibraryAsync(
+            "Lib",
+            """
+            namespace Lib;
+
+            public sealed record Ping : Keryx.IRequest<int>;
+
+            public partial class PingHandler
+            {
+                private static int Handle(Ping request, Infra.IDb db) => 1;
+            }
+            """,
+            cancellationToken,
+            references: [infra]
+        );
+
+        var result = await HostBuilder
+                          .AddCompilationReferences(library)
+                          .AddSources(Usings + "[assembly: ExcludeHandler(typeof(Lib.PingHandler))]\n\nnamespace Sample;")
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result).Order(StringComparer.Ordinal)).IsEquivalentTo(["KRX034", "KRX039"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("Send(global::Lib.Ping request");
     }
 
     [Test]
@@ -1327,23 +1403,24 @@ public class CrossAssemblyTests : HostTest
 
     private static Specular.Scanning.EquatableArray<T> Array<T>(params T[] items) => System.Collections.Immutable.ImmutableArray.Create(items);
 
-    /// <summary>A library whose handler needs a type from an assembly (Infra) that a test host does not reference.</summary>
+    /// <summary>A library whose notification handler needs a type from an assembly (Infra) that a test host does not reference.</summary>
     private const string ExcludedLibrary = """
+        using System.Threading.Tasks;
         using Keryx;
 
         namespace Lib;
 
-        public sealed record Ping : IRequest<int>;
+        public sealed record Saved : INotification;
 
-        public partial class PingHandler
+        public partial class OnSaved
         {
-            private static int Handle(Ping request, Infra.IDb db) => 1;
+            private static ValueTask Handle(Saved notification, Infra.IDb db) => default;
         }
         """;
 
-    /// <summary>A host that excludes <c>Lib.PingHandler</c>.</summary>
+    /// <summary>A host that excludes <c>Lib.OnSaved</c>.</summary>
     private const string ExcludingHost = """
-        [assembly: ExcludeHandler(typeof(Lib.PingHandler))]
+        [assembly: ExcludeHandler(typeof(Lib.OnSaved))]
 
         namespace Sample;
         """;
@@ -1356,13 +1433,32 @@ public class CrossAssemblyTests : HostTest
         public sealed record Ping : Keryx.IRequest<int>;
         """;
 
-    private async Task<GeneratorTestResults> GenerateAsync(string host, CancellationToken cancellationToken, bool withHandlerAnalyzer = false)
+    private async Task<GeneratorTestResults> GenerateAsync(string host, CancellationToken cancellationToken, bool withHandlerAnalyzer = false) =>
+        await GenerateAsync(host, await CompileLibrariesAsync(cancellationToken), cancellationToken, withHandlerAnalyzer);
+
+    /// <summary>
+    ///     Runs a host over <paramref name="libraries" />, so two hosts in one test can share one compile (one load) of the libraries. A
+    ///     second host of the same project name needs <paramref name="ownLoadContext" />: it cannot share a load context with the first.
+    /// </summary>
+    private async Task<GeneratorTestResults> GenerateAsync(
+        string host,
+        GeneratorTestResults[] libraries,
+        CancellationToken cancellationToken,
+        bool withHandlerAnalyzer = false,
+        bool ownLoadContext = false
+    )
+    {
+        var builder = ( ownLoadContext ? HostBuilder.WithAssemblyLoadContext(NewLoadContext()) : HostBuilder ).AddCompilationReferences(libraries);
+        builder = withHandlerAnalyzer ? builder.WithAnalyzer<Analyzers.Diagnostics.HandlerAnalyzer>() : builder;
+        return await builder.AddSources(Usings + host).Build().GenerateAsync(cancellationToken);
+    }
+
+    /// <summary>The <see cref="Contracts" /> and <see cref="Orders" /> libraries, compiled.</summary>
+    private async Task<GeneratorTestResults[]> CompileLibrariesAsync(CancellationToken cancellationToken)
     {
         var contracts = await CompileLibraryAsync("Contracts", Contracts, cancellationToken);
         var orders = await CompileLibraryAsync("Orders", Orders, cancellationToken, references: [contracts]);
-        var builder = HostBuilder.AddCompilationReferences(contracts, orders);
-        builder = withHandlerAnalyzer ? builder.WithAnalyzer<Analyzers.Diagnostics.HandlerAnalyzer>() : builder;
-        return await builder.AddSources(Usings + host).Build().GenerateAsync(cancellationToken);
+        return [contracts, orders];
     }
 
     private static IEnumerable<string> Diagnostics(GeneratorTestResults result) =>
@@ -1389,6 +1485,24 @@ public class CrossAssemblyTests : HostTest
         result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id).Distinct().Order(StringComparer.Ordinal);
 
     private static string Source(GeneratorTestResults result, string hintName) => TestSources.HostSource(result, hintName);
+
+    /// <summary>
+    ///     Asserts that <paramref name="result" /> generated exactly the sources <paramref name="without" /> generated (same hint names, same
+    ///     text) and that its generated host compiles: an <c>ExcludeHandler</c> that is KRX039 leaves the host as if it were not there.
+    /// </summary>
+    private static async Task AssertComposedAsWithoutAsync(GeneratorTestResults result, GeneratorTestResults without, CancellationToken cancellationToken)
+    {
+        await Assert.That(GeneratedSources(result)).IsEquivalentTo(GeneratedSources(without), TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(GeneratedSources(result).Any(static s => s.Hint.EndsWith(HostEmitter.MediatorHintName, StringComparison.Ordinal))).IsTrue();
+        await Assert.That(result.FinalCompilation.GetDiagnostics(cancellationToken).Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.ToString()))
+                    .IsEmpty();
+    }
+
+    private static IEnumerable<(string Hint, string Text)> GeneratedSources(GeneratorTestResults result) =>
+        result
+           .Results.Values.SelectMany(static r => r.SyntaxTrees)
+           .Select(static t => (Hint: Path.GetFileName(t.FilePath), Text: t.ToString()))
+           .OrderBy(static s => s.Hint, StringComparer.Ordinal);
 
     private static IEnumerable<string> Entries(object journal) =>
         (IEnumerable<string>)journal.GetType().GetProperty("Entries", BindingFlags.Public | BindingFlags.Instance)!.GetValue(journal)!;

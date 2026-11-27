@@ -107,7 +107,7 @@ internal static class TrackingNames
     /// <summary>The composed host (own and referenced handlers, notifications, behaviors): the input of the host's source output.</summary>
     public const string HostSources = "Keryx.Host.Sources";
 
-    /// <summary>The host diagnostics (KRX005, KRX008, KRX030 to KRX037), computed from <see cref="HostSources" />.</summary>
+    /// <summary>The host diagnostics (KRX008, KRX009, KRX030 to KRX039), computed from <see cref="HostSources" />.</summary>
     public const string HostDiagnostics = "Keryx.Host.Diagnostics";
 
     /// <summary><see cref="HostDiagnostics" /> combined with the compilation, to report them on their syntax trees (fed by the compilation).</summary>

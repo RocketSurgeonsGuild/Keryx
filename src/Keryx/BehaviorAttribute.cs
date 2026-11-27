@@ -95,10 +95,14 @@ public sealed class ExcludeBehaviorAttribute(Type behaviorType) : Attribute
 }
 
 /// <summary>
-///     In a host, ignores a handler class from a referenced assembly, for example to replace it in a test host.
+///     In a host, ignores a notification handler class from a referenced assembly, for example to replace it in a test host.
 /// </summary>
-/// <remarks>A type that is not part of any pipeline is KRX036. Outside a host the attribute has no effect and is KRX043.</remarks>
-/// <param name="handlerType">The handler class to ignore.</param>
+/// <remarks>
+///     Only notification handlers can be excluded: a request or stream request handler is KRX039 and stays in the host (a test swaps what it
+///     does through the services it injects). A type that is not part of any pipeline is KRX036. Outside a host the attribute has no effect
+///     and is KRX043.
+/// </remarks>
+/// <param name="handlerType">The notification handler class to ignore.</param>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class ExcludeHandlerAttribute(Type handlerType) : Attribute
 {

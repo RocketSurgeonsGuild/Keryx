@@ -153,8 +153,8 @@ next to their handlers; whitespace-only pre-commit formatting), 5afb535 (the `Ke
 service) and 1fddbdd (`SyntaxFactory` emitters, switch-statement dispatch, primary-constructor links); the follow-up (2e8e4e1, 6e7465a,
 bd2029b, 38c8f74) sealed the requests, dropped the contexts of pipelines that resolve nothing and built the syntax's whitespace in, and
 the owner's decisions of 2026-11-27 then returned the emitters to text (100bfe1: `CodeWriter`, OQ-71; OQ-69 accepted) and dropped the
-contexts of publish pipelines that resolve nothing (febb1a6, OQ-70), and keep the generic `Stream` depth-0 slowdown on the release list
-(decision 22). The phases below describe the resulting design as what each phase builds.
+contexts of publish pipelines that resolve nothing (febb1a6, OQ-70), keep the generic `Stream` depth-0 slowdown on the release list
+(decision 22), limit `ExcludeHandler` to notification handlers (KRX039, OQ-59) and drop the host's cross-assembly KRX005 (OQ-60). The phases below describe the resulting design as what each phase builds.
 
 ## Phases
 
@@ -182,7 +182,8 @@ every public member. `UnitAdapter.ToUnit` allocates nothing when the source has 
   not inlined, and a delegate bound to a pipeline context is allocated per scope. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and
   `RunsBefore` target classes and methods; `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type
   argument).
-- **Host attributes.** `ExcludeBehavior` and `ExcludeHandler`. There is no `KeryxContracts` or `ExternallyHandled`
+- **Host attributes.** `ExcludeBehavior` and `ExcludeHandler` (notification handlers only; a request or stream request handler is KRX039,
+  owner decision 23, Phase 7). There is no `KeryxContracts` or `ExternallyHandled`
   (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`), and no `KeryxHost` attribute: a host is the `KeryxHost`
   MSBuild property (Phase 3).
 - **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
@@ -424,15 +425,18 @@ targets to the package. One `context.Scan<KeryxReferenceModel>("Keryx", requests
 into the Phase 3 model.
 
 - The scan finds global behavior classes whose `[GlobalBehavior]` is on the class or only on a behavior method; KRX035 lists both.
-- Host rules KRX005 (cross-assembly), KRX030 for referenced request types, including those declared in another host (OQ-16), KRX032,
+- Host rules KRX030 for referenced request types, including those declared in another host (OQ-16), KRX032,
   KRX033, and KRX034, which also covers the injected parameter types of a referenced behavior method (OQ-47), per kind: KRX034 names the
-  behavior method and its kind, and the class stays in the pipelines of the kinds whose methods resolve (OQ-57). `ExcludeHandler` with KRX036 for `ExcludeHandler`.
+  behavior method and its kind, and the class stays in the pipelines of the kinds whose methods resolve (OQ-57). `ExcludeHandler` for referenced notification handlers, with KRX036 for one that removes nothing.
 - A request's handler lives in the request's own assembly (second rework): KRX030 is a safety net for referenced request types (an
-  excluded handler, an internal handler of a referenced host); a host's handler of a referenced request is KRX023, so `ExcludeHandler`
-  cannot replace a referenced request handler (OQ-59, open); the host's cross-assembly KRX005 stays as a safety net (OQ-60, open).
+  internal handler of a referenced host, a library built with KRX001 suppressed); a host's handler of a referenced request is KRX023.
+  `ExcludeHandler` names only notification handlers: naming a request or stream request handler, referenced or the host's own, is the
+  host error KRX039 on the attribute, and the handler stays (owner decision 23, OQ-59); tests swap a request handler's behavior through
+  its injected services. The host has no cross-assembly KRX005 (owner decision 24, OQ-60): KRX005 is the analyzer's rule within one
+  assembly, and two manifests naming handlers of one request (possible only by hand) leave the request undispatched.
   There is no `ExternallyHandled`. Outside a host, `ExcludeHandler` and `ExcludeBehavior` have no effect and the analyzer reports
-  warning KRX043 on each (OQ-54). KRX023 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries, and the
-  `AnalyzerReleases.Unshipped.md` descriptions of KRX034 and KRX036 match the ADR's rows.
+  warning KRX043 on each (OQ-54). KRX023, KRX039 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries,
+  and the `AnalyzerReleases.Unshipped.md` descriptions of KRX005, KRX034 and KRX036 match the ADR's rows.
 - A referenced request or stream request type that is not sealed (its library suppressed KRX024) is the host error KRX038, without a
   location, naming the type and its assembly; the host composes no part of it (no dispatch section, no typed overload; sending it throws
   `KeryxHandlerNotFoundException`), and it counts as handled, so there is no KRX030 on top. The host's own type that is not sealed is its
@@ -449,8 +453,11 @@ into the Phase 3 model.
 **Done when:** the samples build and run end to end; tests cover a host with project and metadata references, a missing reference
 (KRX034), a missing injected parameter type of a referenced behavior method (KRX034; a two-kind class whose other kind still runs and is
 the only kind KRX035 lists, as a global, attached and `[assembly: Behavior]` behavior, reported once), a referenced global behavior that writes `TResponse?` (fits and runs for the same targets as in source), a newer format version (KRX032), a Keryx reference
-without a manifest (KRX033), duplicate handlers (KRX005), exclusion (including KRX036 for `ExcludeHandler`), a referenced global behavior
-marked only on a method, KRX023 for a host's handler of a referenced request (also when the host excludes the referenced handler), KRX030
+without a manifest (KRX033), duplicate handlers inside one referenced assembly (no host diagnostic, not dispatched), exclusion of a
+referenced notification handler (including one whose types the host cannot resolve, and KRX036 for `ExcludeHandler`), KRX039 for a
+referenced or own request and stream request handler named in `ExcludeHandler` (the handler still dispatched; a referenced one the host
+cannot resolve is KRX034), a referenced global behavior marked only on a method, KRX023 for a host's handler of a referenced request
+(also when the host names the referenced handler in `ExcludeHandler`), KRX030
 for a referenced request without a handler, KRX038 for a referenced request and stream request type that is not sealed (not for the
 host's own type, an abstract or closed base, a sealed type or a notification; at run time not dispatched while a sealed sibling is),
 KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host

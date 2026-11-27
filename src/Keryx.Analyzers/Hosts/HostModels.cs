@@ -291,8 +291,9 @@ internal sealed record HostBuildProperties(bool IsHost, string? RootNamespace, s
 /// </summary>
 /// <param name="Settings">The host generator's settings.</param>
 /// <param name="Handlers">
-///     The handlers the host composes: its own, then the referenced ones its <c>ExcludeHandler</c> entries keep, each once. A request type
-///     handled in more than one assembly is KRX005 (in <paramref name="Diagnostics" />) and is dispatched by neither.
+///     The handlers the host composes: its own, then the referenced ones its <c>ExcludeHandler</c> entries keep (they remove only
+///     notification handlers; KRX039), each once. A request type handled in more than one assembly cannot come from generated manifests
+///     (KRX023) and is dispatched by neither (OQ-60).
 /// </param>
 /// <param name="Notifications">
 ///     The concrete notification types declared in the host's source and in its references, with their notification behaviors, ordered by
@@ -309,7 +310,7 @@ internal sealed record HostBuildProperties(bool IsHost, string? RootNamespace, s
 /// <param name="GlobalBehaviors">The global behaviors the host applies (not excluded), own and referenced, for KRX035.</param>
 /// <param name="BehaviorExclusions">The host's <c>ExcludeBehavior</c> entries, for KRX036.</param>
 /// <param name="Diagnostics">
-///     The diagnostics found while composing: KRX005 across assemblies, KRX032, KRX033, KRX034, and KRX036 for <c>ExcludeHandler</c>.
+///     The diagnostics found while composing: KRX032, KRX033, KRX034, KRX038, KRX039, and KRX036 for <c>ExcludeHandler</c>.
 /// </param>
 internal sealed record HostModel(
     HostSettings Settings,

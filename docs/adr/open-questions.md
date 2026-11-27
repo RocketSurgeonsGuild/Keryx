@@ -14,7 +14,7 @@ day added "One notification behavior kind" and "Message constraint on open behav
 OQ-54 (at the end). OQ-55 was raised afterwards, while reviewing that round, and decided the same day (at the end). OQ-56 to OQ-58 were
 raised while implementing the static-behavior rework and decided by the owner the same day (at the end). The owner's decisions for the
 second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
-raised while implementing it and are open, and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and
+raised while implementing it and were decided by the owner on 2026-11-27 (at the end), and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and
 were decided by the owner on 2026-11-27 (at the end).
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
@@ -26,43 +26,9 @@ follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised wh
 the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69, OQ-71 and OQ-70, decided by the owner on 2026-11-27
 (decisions 19, 21 and 20), follow; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
 "Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) follows. OQ-61 and OQ-62, decided by the owner on
-2026-11-27 (decisions 25 and 26), come last.
+2026-11-27 (decisions 25 and 26), follow, and OQ-59 and OQ-60 (decisions 23 and 24, the same day) come last.
 
 ## Open
-
-### OQ-59: A host replacing an excluded referenced request handler
-
-Before the second rework, a host (typically a test host) replaced a referenced handler by excluding it with
-`[assembly: ExcludeHandler(typeof(X))]` and handling the request itself (ADR, Host control; OQ-45). With "Requests are handled in their own
-assembly" (below), a host's handler of a request declared in a referenced assembly is KRX023, hosts included, and the generators skip it
-like any handler error. So a host can still exclude a referenced request handler (the request is then KRX030), but it cannot provide its
-own; a test host that cannot resolve a handler's infrastructure (the case OQ-45 describes) is left with KRX030. Notification handlers
-are unaffected: a host may exclude a referenced notification handler and handle the notification itself.
-
-- **Interim:** KRX023 applies in a host as in any assembly, as decided. The host's handler of a referenced request is reported and
-  skipped; it counts as handling the request, so KRX030 is not added on top, and nothing dispatches the request. The ADR (Host control)
-  and the README say that `ExcludeHandler` can no longer replace a referenced request handler. Tests:
-  `CrossAssemblyTests.ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler` and
-  `ExcludeHandler_Skips_A_Referenced_Handler_The_Host_Cannot_Resolve` (now KRX030).
-- **Proposal:** allow it as the one exception to KRX023: in a host, a handler of a request declared in another assembly is allowed when
-  the host excludes that request's referenced handler with `ExcludeHandler` (KRX023 is still reported otherwise, and KRX036 still covers
-  an exclusion that names nothing). This keeps test hosts able to replace handlers that need infrastructure they do not have.
-  Alternative: keep the interim and document replacing through DI (a handler's injected services) as the way to swap behavior in tests.
-  Needs a decision.
-
-### OQ-60: KRX005 across assemblies once KRX023 exists
-
-The host reports KRX005 when a request or stream request has handlers in more than one assembly of its composed set (OQ-49). With
-KRX023, every request handler lives in its request's assembly: the handler generator skips a handler of another assembly's request, so no
-generated manifest describes one, and the host skips its own such handlers. Two assemblies of the composed set can then no longer handle
-one request, and the host check is reachable only through a manifest that Keryx did not generate (written by hand, or by a Keryx build
-from before KRX023).
-
-- **Interim:** keep the host's cross-assembly KRX005 unchanged as a safety net. Its test
-  (`CrossAssemblyTests.KRX005_For_Two_Referenced_Assemblies_That_Handle_One_Request`) now builds the two libraries with hand-written
-  manifests. The ADR's KRX005 row says the host check is a safety net.
-- **Proposal:** keep it (cheap, and it guards against manifests built with another rule). Alternative: remove the host's KRX005 and the
-  `DuplicateHandlerInHost` descriptor, leaving KRX005 to the analyzer within one assembly. Needs a decision.
 
 ### OQ-63: A behavior's `IServiceProvider` in a pipeline context
 
@@ -1012,7 +978,9 @@ which is part of a pipeline.
 - **Proposal:** confirm, and say "a referenced handler class" in the KRX036 row. Alternative: let `ExcludeHandler` remove the host's own
   handlers too (deleting the handler does the same).
 - **Decision:** Accepted as proposed. Folded into the ADR (Host control, KRX036 row).
-- **Amended (2026-11-26):** with KRX023, a host can no longer provide its own handler for a referenced request it excludes (OQ-59, open).
+- **Amended (2026-11-26):** with KRX023, a host can no longer provide its own handler for a referenced request it excludes (OQ-59).
+- **Amended (2026-11-27):** `ExcludeHandler` names only notification handlers; naming a request or stream request handler is KRX039 and
+  excludes nothing (OQ-59, decided).
 
 ### OQ-46: Where the host composes its pipelines once references take part (2026-11-26)
 
@@ -1085,7 +1053,7 @@ KRX005 in the host names "both handlers and assemblies"; the ADR does not give t
 - **Proposal:** confirm and give the message in the KRX005 row.
 - **Decision:** Accepted as proposed. Folded into the ADR (KRX005 row).
 - **Amended (2026-11-26):** with KRX023, generated manifests can no longer make two assemblies handle one request, and the host skips
-  its own handlers of referenced requests; whether the host check stays is OQ-60 (open).
+  its own handlers of referenced requests; the host check was removed on 2026-11-27 (OQ-60, decided).
 
 ### OQ-50: KRX009 in the host (2026-11-26)
 
@@ -1306,7 +1274,8 @@ OQ-54, which shaped them) are kept in [future-requirements.md](../future-require
   a request without a handler in a host is reported once. Without `ExternallyHandled`, the only relief for KRX030 is its severity in
   `.editorconfig`; a test host that references an app host with internal handlers gets KRX030 for those requests (OQ-16).
 - Consequences raised while implementing it: a host can no longer replace an excluded referenced request handler with its own (OQ-59,
-  open), and the host's cross-assembly KRX005 can no longer be reached from generated manifests (OQ-60, open).
+  decided 2026-11-27: `ExcludeHandler` names only notification handlers, KRX039), and the host's cross-assembly KRX005 can no longer be
+  reached from generated manifests (OQ-60, decided 2026-11-27: removed).
 
 Folded into the ADR (status; Package and assemblies; Handlers; Diagnostics and code fixes: KRX001, KRX005, KRX023, KRX030, KRX031, KRX036,
 KRX043 and the KRX001 code fix; How the host reads it; Host control; Attribute reference; Alternatives considered; Consequences;
@@ -2054,3 +2023,67 @@ project that references Keryx) now fails to build although it never asked to be 
   new message. Folded into the ADR (status; Which projects may target what; Diagnostics and code fixes: KRX031; Opting in; Alternatives
   considered; Consequences), the brief (Summary, Repository layout, Phase 3), CONTEXT.md (host, the owner's edit), the README
   (Requirements, testing, Hosts, KRX031) and whats-left.md.
+
+### OQ-59: A host replacing an excluded referenced request handler (2026-11-27)
+
+Before the second rework, a host (typically a test host) replaced a referenced handler by excluding it with
+`[assembly: ExcludeHandler(typeof(X))]` and handling the request itself (ADR, Host control; OQ-45). With "Requests are handled in their own
+assembly" (below), a host's handler of a request declared in a referenced assembly is KRX023, hosts included, and the generators skip it
+like any handler error. So a host can still exclude a referenced request handler (the request is then KRX030), but it cannot provide its
+own; a test host that cannot resolve a handler's infrastructure (the case OQ-45 describes) is left with KRX030. Notification handlers
+are unaffected: a host may exclude a referenced notification handler and handle the notification itself.
+
+- **Interim:** KRX023 applies in a host as in any assembly, as decided. The host's handler of a referenced request is reported and
+  skipped; it counts as handling the request, so KRX030 is not added on top, and nothing dispatches the request. The ADR (Host control)
+  and the README say that `ExcludeHandler` can no longer replace a referenced request handler. Tests:
+  `CrossAssemblyTests.ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler` and
+  `ExcludeHandler_Skips_A_Referenced_Handler_The_Host_Cannot_Resolve` (now KRX030).
+- **Proposal:** allow it as the one exception to KRX023: in a host, a handler of a request declared in another assembly is allowed when
+  the host excludes that request's referenced handler with `ExcludeHandler` (KRX023 is still reported otherwise, and KRX036 still covers
+  an exclusion that names nothing). This keeps test hosts able to replace handlers that need infrastructure they do not have.
+  Alternative: keep the interim and document replacing through DI (a handler's injected services) as the way to swap behavior in tests.
+  Needs a decision.
+- **Decision:** no exception to KRX023 (owner decision 23, 2026-11-27): a host's handler of a request or stream request declared in
+  another assembly stays KRX023, hosts included, and a test swaps a request handler's behavior through its injected services (DI). As a
+  follow-up the owner limited `ExcludeHandler` to **notification** handlers: naming a request or stream request handler, referenced or
+  the host's own, is an error, and the handler is not excluded. It got a new ID, **KRX039** (Error, the next free ID in the host range),
+  rather than an extension of KRX036: KRX036 is a warning that an exclusion removes nothing, while this is an error about what
+  `ExcludeHandler` may name, and one ID with two severities would read worse than two. Message: "[assembly: ExcludeHandler(typeof(X))]
+  names a request handler, which a host cannot exclude; ExcludeHandler names only notification handlers" ("stream request handler" for
+  a stream handler); reported on the attribute. A referenced handler is recognized by its manifest entry's kind, the host's own by its
+  handler candidate (a request or stream request parameter). The named handler is composed as if the exclusion were not there (so its
+  request is dispatched, and a referenced one the host cannot resolve is KRX034, no longer skipped), and the exclusion counts as used (no
+  KRX036). Excluding a referenced notification handler, and KRX036 for the host's own notification handler or a type that is not a
+  handler, are unchanged. Tests: `CrossAssemblyTests.KRX039_ExcludeHandler_Cannot_Replace_A_Referenced_Request_Handler` (KRX039 beside the
+  host's KRX023 replacement; the referenced handler is dispatched), `KRX039_For_Referenced_Request_And_Stream_Request_Handlers_Which_Stay_In_The_Host`
+  (replaces `ExcludeHandler_Without_A_Replacement_Leaves_The_Request_Unhandled`; severity, location, help link, both dispatched, no
+  KRX030 or KRX036), `KRX039_For_The_Hosts_Own_Request_And_Stream_Request_Handlers`, `KRX039_Does_Not_Skip_A_Referenced_Request_Handler_The_Host_Cannot_Resolve`
+  (KRX039 and KRX034); `ExcludeHandler_Skips_A_Referenced_Handler_The_Host_Cannot_Resolve` now excludes a notification handler whose
+  injected type the host does not reference (no diagnostics, nothing generated names it). Folded into the ADR (status; Diagnostics and
+  code fixes: the host-rule list, KRX030, KRX036 and KRX039 rows; Host control; Attribute reference; Alternatives considered;
+  Consequences), the brief (Summary, Host attributes, Phase 7), the README (Testing handlers, Contracts and handler libraries, KRX005,
+  KRX030, KRX036 and KRX039), `AnalyzerReleases.Unshipped.md` (KRX036, KRX039) and whats-left.md. CONTEXT.md needs no change (no term
+  changed).
+
+### OQ-60: KRX005 across assemblies once KRX023 exists (2026-11-27)
+
+The host reports KRX005 when a request or stream request has handlers in more than one assembly of its composed set (OQ-49). With
+KRX023, every request handler lives in its request's assembly: the handler generator skips a handler of another assembly's request, so no
+generated manifest describes one, and the host skips its own such handlers. Two assemblies of the composed set can then no longer handle
+one request, and the host check is reachable only through a manifest that Keryx did not generate (written by hand, or by a Keryx build
+from before KRX023).
+
+- **Interim:** keep the host's cross-assembly KRX005 unchanged as a safety net. Its test
+  (`CrossAssemblyTests.KRX005_For_Two_Referenced_Assemblies_That_Handle_One_Request`) now builds the two libraries with hand-written
+  manifests. The ADR's KRX005 row says the host check is a safety net.
+- **Proposal:** keep it (cheap, and it guards against manifests built with another rule). Alternative: remove the host's KRX005 and the
+  `DuplicateHandlerInHost` descriptor, leaving KRX005 to the analyzer within one assembly. Needs a decision.
+- **Decision:** remove it (owner decision 24, 2026-11-27): the host's cross-assembly KRX005, the `DuplicateHandlerInHost` descriptor and
+  its hand-written-manifest test (`KRX005_For_Two_Referenced_Assemblies_That_Handle_One_Request`) are gone; KRX005 stays the analyzer's
+  rule within one assembly. Manifests that Keryx did not generate and that name handlers of one request in two assemblies leave the request
+  undispatched (the composition keeps only request types with exactly one handler, as for duplicates in one assembly), with no host
+  diagnostic. `KRX005_Is_Not_Reported_Again_For_Duplicates_Inside_One_Referenced_Assembly` became
+  `Duplicates_Inside_One_Referenced_Assembly_Are_Its_Own_KRX005` (no host diagnostic, the request not dispatched).
+  `AnalyzerReleases.Unshipped.md` only changes KRX005's notes: the rule stays, and nothing has shipped, so there is no "Removed Rules" or
+  "Changed Rules" entry to add. Folded into the ADR (status; the host-rule list and ID ranges; KRX005 row; Host control; Alternatives
+  considered), the brief (Phase 7), the README (KRX005), future-requirements.md and whats-left.md.

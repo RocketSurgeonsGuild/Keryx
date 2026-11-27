@@ -9,7 +9,7 @@ KRX001  | Keryx    | Error    | MissingHandlerAnalyzer, request without a handle
 KRX002  | Keryx    | Error    | HandlerAnalyzer, handler not private static or with a wrong return type
 KRX003  | Keryx    | Error    | HandlerAnalyzer, no single concrete request or notification parameter, including a request parameter typed as an interface or an abstract or closed request type
 KRX004  | Keryx    | Error    | HandlerAnalyzer, handler class or containing type not partial, not public (narrower than internal in a host), file-local, or not a class
-KRX005  | Keryx    | Error    | MissingHandlerAnalyzer and HostGenerator, request with more than one handler in its assembly or across the host's assemblies
+KRX005  | Keryx    | Error    | MissingHandlerAnalyzer, request with more than one handler in its assembly
 KRX006  | Keryx    | Error    | HandlerAnalyzer, class with more than one handler
 KRX007  | Keryx    | Error    | HandlerAnalyzer, handler class constructor or base constructor
 KRX008  | Keryx    | Error    | BehaviorAnalyzer and HostGenerator, behavior ordering cycle or RunsAfter/RunsBefore contradicting phase or order
@@ -33,9 +33,10 @@ KRX032  | Keryx    | Error    | HostGenerator, referenced assembly has a newer m
 KRX033  | Keryx    | Warning  | HostGenerator, referenced assembly uses Keryx but has no manifest
 KRX034  | Keryx    | Error    | HostGenerator, type named in a referenced manifest (or an injected parameter type of a referenced behavior method) cannot be resolved (per behavior method and kind), or a manifest entry does not fit the types the host resolves
 KRX035  | Keryx    | Info     | HostGenerator, global behavior applied in the host, per kind
-KRX036  | Keryx    | Warning  | HostGenerator, exclusion with no effect: ExcludeHandler names no referenced handler class the host would compose, or ExcludeBehavior names a type that is not part of any pipeline
+KRX036  | Keryx    | Warning  | HostGenerator, exclusion with no effect: ExcludeHandler names no referenced notification handler class the host would compose (nor a request handler, KRX039), or ExcludeBehavior names a type that is not part of any pipeline
 KRX037  | Keryx    | Info     | HostGenerator, struct notification boxed for handlers typed as an interface
 KRX038  | Keryx    | Error    | HostGenerator, referenced request or stream request type that is not sealed (not composed)
+KRX039  | Keryx    | Error    | HostGenerator, ExcludeHandler names a request or stream request handler (referenced or the host's own), which is not excluded
 KRX040  | Keryx    | Warning  | HandlerAnalyzer, [HandlerOrder] on a method that is not a notification handler
 KRX041  | Keryx    | Warning  | MessageTypeAnalyzer, [PublishStrategy] on a type that is not a notification
 KRX042  | Keryx    | Warning  | BehaviorAnalyzer, [Behavior] or [GlobalBehavior] where it has no effect, including [Behavior] on a notification handler method

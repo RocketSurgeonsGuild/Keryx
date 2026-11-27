@@ -82,18 +82,6 @@ internal static class Descriptors
         customTags: WellKnownDiagnosticTags.CompilationEnd
     );
 
-    /// <summary>KRX005 as the host reports it: handlers of one request type in more than one assembly of its composed set.</summary>
-    public static readonly DiagnosticDescriptor DuplicateHandlerInHost = new(
-        "KRX005",
-        "Request has more than one handler",
-        "Request type '{0}' has more than one handler in this host: {1}",
-        Category,
-        DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "A request or stream request has exactly one handler in the application. To replace a handler from a referenced assembly, exclude it with [assembly: ExcludeHandler(typeof(...))] and provide your own.",
-        helpLinkUri: HelpLinkBase + "krx005"
-    );
-
     public static readonly DiagnosticDescriptor MultipleHandlersInClass = new(
         "KRX006",
         "Class contains more than one handler",
@@ -308,7 +296,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Every request and stream request type a host references, including those declared in a referenced host, needs exactly one handler in the host's composed set. Each assembly checks its own requests (KRX001), so this is a safety net: it catches a referenced request whose handler the host excluded (ExcludeHandler) or cannot see (an internal handler of a referenced host), or whose assembly was built with KRX001 suppressed. It has no source location, so its severity is set for the whole host: a global AnalyzerConfig file (.globalconfig), NoWarn or WarningsAsErrors.",
+        description: "Every request and stream request type a host references, including those declared in a referenced host, needs exactly one handler in the host's composed set. Each assembly checks its own requests (KRX001), so this is a safety net: it catches a referenced request whose handler the host cannot see (an internal handler of a referenced host), or whose assembly was built with KRX001 suppressed. It has no source location, so its severity is set for the whole host: a global AnalyzerConfig file (.globalconfig), NoWarn or WarningsAsErrors.",
         helpLinkUri: HelpLinkBase + "krx030"
     );
 
@@ -428,6 +416,17 @@ internal static class Descriptors
         isEnabledByDefault: true,
         description: "Generic Send and Stream test each request type with a type pattern, which matches derived types too, so a host composes only sealed request and stream request types. A referenced one that is not sealed (its assembly suppressed KRX024) is left out of the host: it gets no dispatch section and no typed overload, and sending it throws KeryxHandlerNotFoundException. The host's own types are KRX024 in the host and are not reported again. It has no source location, so its severity is set for the whole host: a global AnalyzerConfig file (.globalconfig), NoWarn or WarningsAsErrors.",
         helpLinkUri: HelpLinkBase + "krx038"
+    );
+
+    public static readonly DiagnosticDescriptor ExcludedRequestHandler = new(
+        "KRX039",
+        "ExcludeHandler names a request handler",
+        "[assembly: ExcludeHandler(typeof({0}))] names a {1} handler, which a host cannot exclude; ExcludeHandler names only notification handlers",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A request or stream request has exactly one handler, in the assembly that declares the request (KRX023), and every host composes that handler, so ExcludeHandler names only notification handlers. The named handler is not excluded. To change what a request handler does in a host or a test, register other implementations of the services it injects.",
+        helpLinkUri: HelpLinkBase + "krx039"
     );
 
     public static readonly DiagnosticDescriptor MisplacedHandlerOrder = new(

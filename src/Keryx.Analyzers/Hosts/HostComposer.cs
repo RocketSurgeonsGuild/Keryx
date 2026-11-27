@@ -9,7 +9,8 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Composes a host (ADR 0001, How the host reads it): resolves the references' manifests (<see cref="KeryxReferenceModel" />) in the
-///     compilation, merges the referenced handlers with the host's own (found by its syntax pipeline), applies <c>ExcludeHandler</c>, and
+///     compilation, merges the referenced handlers with the host's own (found by its syntax pipeline), applies <c>ExcludeHandler</c> to
+///     referenced notification handlers (KRX039 for a request or stream request handler, which stays), and
 ///     composes every pipeline from the three behavior scopes, global behaviors of the references included. It reads symbols, so it runs on
 ///     every compilation; its output is an equatable <see cref="HostModel" />, so the steps after it stay cached while nothing changed.
 /// </summary>
@@ -31,9 +32,11 @@ internal static class HostComposer
 
         var context = new Context(symbols);
 
-        // ExcludeHandler: the host ignores a referenced handler class (ADR 0001, Host control). Matched against the manifest's name of the
-        // class before anything else of the entry is resolved, so an excluded handler whose types the host cannot resolve (typically in a
-        // test host without the handler's infrastructure) reports nothing.
+        // ExcludeHandler: the host ignores a referenced notification handler class (ADR 0001, Host control). Matched against the manifest's
+        // name of the class before anything else of the entry is resolved, so an excluded handler whose types the host cannot resolve
+        // (typically in a test host without the handler's infrastructure) reports nothing. A request or stream request handler, referenced
+        // or the host's own, cannot be excluded (KRX039, OQ-59): its request's one handler lives in the request's assembly (KRX023), and a
+        // test swaps its behavior through the services it injects.
         var handlerExclusions = HandlerExclusions(compilation, symbols);
         var usedHandlerExclusions = new HashSet<string>(StringComparer.Ordinal);
         var handled = new SortedSet<string>(ownHandlers.Select(static e => e.HandledType).OfType<string>(), StringComparer.Ordinal);
@@ -118,7 +121,13 @@ internal static class HostComposer
                 if (handlerExclusions.FirstOrDefault(e => e.Class.Equals(handler.HandlerClass)) is { Model: { } excluded })
                 {
                     usedHandlerExclusions.Add(excluded.Operand);
-                    continue;
+                    if (handler.Kind is not ( HandlerKind.Request or HandlerKind.Stream ))
+                    {
+                        continue;
+                    }
+
+                    // KRX039: the handler is composed as if the exclusion were not there.
+                    context.Report(Descriptors.ExcludedRequestHandler, excluded.Location, excluded.Display, handler.Kind == HandlerKind.Request ? "request" : "stream request");
                 }
 
                 if (context.Resolve(handler, assembly.Name, out var target) is { } resolved)
@@ -167,14 +176,34 @@ internal static class HostComposer
         known.AddRange(referencedNotifications);
         catalog.SetKnownNotifications(known);
 
-        // The handlers, own then referenced, each with the assembly it comes from (KRX005 across assemblies).
-        var handlers = new List<(HostHandlerModel Model, string Assembly, string Display, LocationInfo? Location)>();
+        // KRX039 for an ExcludeHandler that names one of the host's own request or stream request handlers (OQ-59). The host's own
+        // notification handler is not a referenced handler, so excluding it has no effect (KRX036, OQ-45).
         foreach (var (entry, method) in ownMethods)
+        {
+            if (method is null || entry.HandledType is null)
+            {
+                continue;
+            }
+
+            foreach (var (exclusion, _, type) in handlerExclusions)
+            {
+                if (SymbolEqualityComparer.Default.Equals(type, method.ContainingType) && usedHandlerExclusions.Add(exclusion.Operand))
+                {
+                    var stream = method.Parameters.Any(p => MessageType.Classify(p.Type, symbols).IsStream);
+                    context.Report(Descriptors.ExcludedRequestHandler, exclusion.Location, exclusion.Display, stream ? "stream request" : "request");
+                }
+            }
+        }
+
+        // The handlers, own then referenced. A request type with handlers in two assemblies cannot come from generated manifests (KRX023);
+        // the host dispatches neither (OQ-60).
+        var handlers = new List<HostHandlerModel>();
+        foreach (var (_, method) in ownMethods)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (method is not null && HostModelFactory.CreateHandler(method, catalog) is { } model)
             {
-                handlers.Add((model, settings.AssemblyName, method.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat), entry.Location));
+                handlers.Add(model);
             }
         }
 
@@ -218,12 +247,10 @@ internal static class HostComposer
                 );
             }
 
-            handlers.Add((model, handler.Assembly, display, null));
+            handlers.Add(model);
         }
 
-        ReportDuplicates(context, handlers);
-
-        foreach (var (exclusion, _) in handlerExclusions)
+        foreach (var (exclusion, _, _) in handlerExclusions)
         {
             if (!usedHandlerExclusions.Contains(exclusion.Operand))
             {
@@ -276,7 +303,7 @@ internal static class HostComposer
 
         return new(
             settings,
-            handlers.Select(static h => h.Model).ToImmutableArray(),
+            handlers.ToImmutableArray(),
             notifications.Values.ToImmutableArray(),
             handled.ToImmutableArray(),
             referencedRequests.Values.ToImmutableArray(),
@@ -284,61 +311,6 @@ internal static class HostComposer
             BehaviorExclusions(catalog),
             context.Diagnostics.ToImmutableArray()
         );
-    }
-
-    /// <summary>
-    ///     KRX005 across assemblies: a request or stream request type with handlers in more than one assembly of the composed set, naming each
-    ///     handler and its assembly. Duplicates within one assembly are the analyzer's (in the host) or broke that assembly's build.
-    /// </summary>
-    private static void ReportDuplicates(Context context, List<(HostHandlerModel Model, string Assembly, string Display, LocationInfo? Location)> handlers)
-    {
-        var byRequest = new SortedDictionary<string, List<(string Assembly, string Display, LocationInfo? Location)>>(StringComparer.Ordinal);
-        foreach (var (model, assembly, display, location) in handlers)
-        {
-            if (model.Kind is not ( HandlerKind.Request or HandlerKind.Stream ))
-            {
-                continue;
-            }
-
-            if (!byRequest.TryGetValue(model.MessageType, out var list))
-            {
-                list = [];
-                byRequest.Add(model.MessageType, list);
-            }
-
-            list.Add((assembly, display, location));
-        }
-
-        var assemblies = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var pair in byRequest)
-        {
-            assemblies.Clear();
-            LocationInfo? location = null;
-            foreach (var handler in pair.Value)
-            {
-                assemblies.Add(handler.Assembly);
-                location ??= handler.Location;
-            }
-
-            if (assemblies.Count < 2)
-            {
-                continue;
-            }
-
-            pair.Value.Sort(static (left, right) =>
-                {
-                    var byAssembly = StringComparer.Ordinal.Compare(left.Assembly, right.Assembly);
-                    return byAssembly != 0 ? byAssembly : StringComparer.Ordinal.Compare(left.Display, right.Display);
-                }
-            );
-            var named = new List<string>(pair.Value.Count);
-            foreach (var handler in pair.Value)
-            {
-                named.Add($"'{handler.Display}' (assembly '{handler.Assembly}')");
-            }
-
-            context.Report(Descriptors.DuplicateHandlerInHost, location, pair.Key.Replace("global::", ""), string.Join(", ", named));
-        }
     }
 
     /// <summary>
@@ -413,10 +385,13 @@ internal static class HostComposer
                     ),
     ];
 
-    /// <summary>The host's <c>[assembly: ExcludeHandler(typeof(X))]</c> entries, each with the type as a manifest names it.</summary>
-    private static ImmutableArray<(ExclusionModel Model, KeryxTypeReference Class)> HandlerExclusions(Compilation compilation, KeryxSymbols symbols)
+    /// <summary>
+    ///     The host's <c>[assembly: ExcludeHandler(typeof(X))]</c> entries, each with the type as a manifest names it and the type itself
+    ///     (for the host's own handlers, KRX039).
+    /// </summary>
+    private static ImmutableArray<(ExclusionModel Model, KeryxTypeReference Class, ITypeSymbol Type)> HandlerExclusions(Compilation compilation, KeryxSymbols symbols)
     {
-        var exclusions = ImmutableArray.CreateBuilder<(ExclusionModel, KeryxTypeReference)>();
+        var exclusions = ImmutableArray.CreateBuilder<(ExclusionModel, KeryxTypeReference, ITypeSymbol)>();
         foreach (var attribute in compilation.Assembly.GetAttributes())
         {
             if (KeryxSymbols.IsAttribute(attribute, symbols.ExcludeHandlerAttribute)
@@ -429,7 +404,8 @@ internal static class HostComposer
                             type.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat),
                             LocationInfo.From(HandlerAnalysis.AttributeLocation(attribute))
                         ),
-                        ReferenceScan.Reference(type)
+                        ReferenceScan.Reference(type),
+                        type
                     )
                 );
             }
