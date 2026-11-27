@@ -53,9 +53,10 @@ internal static partial class HostEmitter
         {
             // Dispatch is by runtime type: a derived notification statically typed as this one goes to its own pipeline.
             statements.Add(
-                IfStatement(
+                If(
+                    StatementDepth,
                     NotEqual(Invoke(Member(Id("notification"), "GetType")), TypeOf(notification.Type)),
-                    Block(Return(Invoke(Generic("Publish", TypeName(notification.Type)), Id("notification"), Id(CancellationTokenName))))
+                    [Return(Invoke(Generic("Publish", TypeName(notification.Type)), Id("notification"), Id(CancellationTokenName)))]
                 )
             );
         }
@@ -67,7 +68,7 @@ internal static partial class HostEmitter
                    "Publish",
                    Params(Param(TypeName(notification.Type), "notification"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                )
-              .Statements(statements)
+              .Statements(MemberDepth, statements)
               .Documented(
                    "<summary>",
                    index < 0
@@ -94,9 +95,10 @@ internal static partial class HostEmitter
         var statements = new List<StatementSyntax>
         {
             // Not ArgumentNullException.ThrowIfNull(object): that would box a struct notification.
-            IfStatement(
-                IsPatternExpression(Id("notification"), ConstantPattern(NullLiteral())),
-                Block(ThrowStatement(New(TypeName("global::System.ArgumentNullException"), Invoke(Id("nameof"), Id("notification")))))
+            If(
+                StatementDepth,
+                Is(Id("notification"), NullPattern()),
+                [Throw(New(TypeName("global::System.ArgumentNullException"), Invoke(Id("nameof"), Id("notification"))))]
             ),
         };
 
@@ -134,13 +136,14 @@ internal static partial class HostEmitter
             if (valueTypeSections.Count > 0)
             {
                 valueTypeSections.Add(DefaultSection(Return(DefaultLiteral())));
-                valueTypeDispatch = SwitchStatement(TypeOf("TNotification"), List(valueTypeSections));
+                valueTypeDispatch = Switch(StatementDepth + 1, TypeOf("TNotification"), valueTypeSections);
             }
 
-            statements.Add(IfStatement(Member(TypeOf("TNotification"), "IsValueType"), Block(valueTypeDispatch)));
+            statements.Add(If(StatementDepth, Member(TypeOf("TNotification"), "IsValueType"), [valueTypeDispatch]));
             statements.Add(Var("notificationType", Invoke(Member(Id("notification"), "GetType"))));
             statements.AddRange(
                 ExactTypeDispatch(
+                    StatementDepth,
                     "notificationType",
                     "__NotificationIndex",
                     active.Select(static n => n.Notification.Type).ToImmutableArray(),
@@ -156,14 +159,9 @@ internal static partial class HostEmitter
                          "Publish",
                          Params(Param(TypeName("TNotification"), "notification"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                      )
-                    .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TNotification"))))
-                    .WithConstraintClauses(
-                         SingletonList(
-                             TypeParameterConstraintClause(Id("TNotification"))
-                                .WithConstraints(SingletonSeparatedList<TypeParameterConstraintSyntax>(TypeConstraint(TypeName(NotificationInterface))))
-                         )
-                     )
-                    .Statements(statements)
+                    .WithTypeParameterList(TypeParameters("TNotification"))
+                    .Where(MemberDepth, "TNotification", TypeName(NotificationInterface))
+                    .Statements(MemberDepth, statements)
                     .Documented("<inheritdoc />");
 
         if (active.Length > DispatchThreshold)
@@ -182,7 +180,7 @@ internal static partial class HostEmitter
     private static ExpressionSyntax PublishArm(NotificationPipeline pipeline, int index)
     {
         var type = pipeline.Notification.Type;
-        var boxed = Cast(PredefinedType(Token(SyntaxKind.ObjectKeyword)), Id("notification"));
+        var boxed = Cast(Object(), Id("notification"));
         ExpressionSyntax argument = pipeline.Notification.IsValueType ? Cast(TypeName(type), boxed) : Invoke(Member(Qualified(Unsafe), Generic("As", TypeName(type))), boxed);
         return Invoke(Id(PublishCoreName(index)), argument, Id(CancellationTokenName));
     }
@@ -206,7 +204,7 @@ internal static partial class HostEmitter
         );
         if (pipeline.Behaviors.IsEmpty)
         {
-            yield return core.WithBody(Block(Var(PipelineName, context), Return(Invoke(Member(Id(PipelineName), "RunHandlers"), Id("notification"), Id(CancellationTokenName)))));
+            yield return core.Statements(MemberDepth, [Var(PipelineName, context), Return(Invoke(Member(Id(PipelineName), "RunHandlers"), Id("notification"), Id(CancellationTokenName)))]);
         }
         else
         {
@@ -246,69 +244,59 @@ internal static partial class HostEmitter
     /// </summary>
     private static MethodDeclarationSyntax WhenAllHandlers()
     {
-        var collected = Block().WithCloseBraceToken(
-            Token(TriviaList(Comment("// Every failure is collected below, in handler order.")), SyntaxKind.CloseBraceToken, TriviaList())
-        );
+        const int depth = StatementDepth;
         return Method(
                    Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword, SyntaxKind.AsyncKeyword),
                    TypeName(ValueTask),
                    "__WhenAllHandlers",
-                   Params(Param(ArrayType(TypeName(TaskType), SingletonList(ArrayRankSpecifier())), "tasks"))
+                   Params(Param(ArrayOf(TypeName(TaskType)), "tasks"))
                )
               .AddAttributeLists(PoolingBuilderAttribute())
               .Statements(
+                   MemberDepth,
                    [
-                       TryStatement(
-                           Block(ExpressionStatement(AwaitExpression(ConfigureAwaitFalse(Invoke(Member(Qualified(TaskType), "WhenAll"), Id("tasks")))))),
-                           SingletonList(CatchClause().WithDeclaration(CatchDeclaration(TypeName(ExceptionType))).WithBlock(collected)),
-                           null
+                       Try(
+                           depth,
+                           [Do(Await(ConfigureAwaitFalse(Invoke(Member(Qualified(TaskType), "WhenAll"), Id("tasks")))))],
+                           Catch(depth, TypeName(ExceptionType), null, [], comment: "// Every failure is collected below, in handler order.")
                        ),
                        Local(NullableType(TypeName(ExceptionList)), "exceptions", NullLiteral()),
-                       ForEachStatement(
-                           Id("var"),
-                           Identifier("task"),
+                       ForEach(
+                           depth,
+                           "task",
                            Id("tasks"),
-                           Block(
-                               IfStatement(
+                           [
+                               If(
+                                   depth + 1,
                                    Member(Id("task"), "IsFaulted"),
-                                   Block(ExpressionStatement(Invoke(Member(Exceptions(), "AddRange"), Member(NotNull(Member(Id("task"), "Exception")), "InnerExceptions")))),
-                                   ElseClause(
-                                       IfStatement(
-                                           Member(Id("task"), "IsCanceled"),
-                                           Block(
-                                               TryStatement(
-                                                   Block(ExpressionStatement(Invoke(Member(Invoke(Member(Id("task"), "GetAwaiter")), "GetResult")))),
-                                                   SingletonList(CollectException()),
-                                                   null
-                                               )
-                                           )
-                                       )
+                                   [Do(Invoke(Member(Exceptions(), "AddRange"), Member(NotNull(Member(Id("task"), "Exception")), "InnerExceptions")))],
+                                   If(
+                                       depth + 1,
+                                       Member(Id("task"), "IsCanceled"),
+                                       [Try(depth + 2, [Do(Invoke(Member(Invoke(Member(Id("task"), "GetAwaiter")), "GetResult")))], CollectException(depth + 2))]
                                    )
-                               )
-                           )
+                               ),
+                           ]
                        ),
-                       ThrowCollected(),
+                       ThrowCollected(depth),
                    ]
                )
               .Documented("<summary>Awaits the pending handlers of a parallel publish and throws every failure, in handler order.</summary>");
     }
 
     /// <summary><c>(exceptions ??= new())</c>, the failures collected so far.</summary>
-    private static ParenthesizedExpressionSyntax Exceptions() =>
-        ParenthesizedExpression(AssignmentExpression(SyntaxKind.CoalesceAssignmentExpression, Id("exceptions"), TargetTypedNew()));
+    private static ParenthesizedExpressionSyntax Exceptions() => CoalesceAssign(Id("exceptions"), TargetTypedNew());
 
-    /// <summary><c>catch (Exception exception) { (exceptions ??= new()).Add(exception); }</c>, then <paramref name="more" />.</summary>
-    private static CatchClauseSyntax CollectException(params StatementSyntax[] more) =>
-        CatchClause()
-           .WithDeclaration(CatchDeclaration(TypeName(ExceptionType), Identifier("exception")))
-           .WithBlock(Block(new StatementSyntax[] { ExpressionStatement(Invoke(Member(Exceptions(), "Add"), Id("exception"))) }.Concat(more)));
+    /// <summary>
+    ///     <c>catch (Exception exception) { (exceptions ??= new()).Add(exception); }</c>, then <paramref name="more" />, for a <c>try</c> at
+    ///     <paramref name="depth" />.
+    /// </summary>
+    private static CatchClauseSyntax CollectException(int depth, params StatementSyntax[] more) =>
+        Catch(depth, TypeName(ExceptionType), "exception", [Do(Invoke(Member(Exceptions(), "Add"), Id("exception"))), .. more]);
 
-    /// <summary><c>if (exceptions is not null) { throw new AggregateException(exceptions); }</c>.</summary>
-    private static IfStatementSyntax ThrowCollected() =>
-        IfStatement(
-            IsPatternExpression(Id("exceptions"), UnaryPattern(Token(SyntaxKind.NotKeyword), ConstantPattern(NullLiteral()))),
-            Block(ThrowStatement(New(TypeName(AggregateExceptionType), Id("exceptions"))))
-        );
+    /// <summary><c>if (exceptions is not null) { throw new AggregateException(exceptions); }</c> at <paramref name="depth" />.</summary>
+    private static IfStatementSyntax ThrowCollected(int depth) =>
+        If(depth, Is(Id("exceptions"), NotNullPattern()), [Throw(New(TypeName(AggregateExceptionType), Id("exceptions")))]);
 
     private static InvocationExpressionSyntax ConfigureAwaitFalse(ExpressionSyntax awaitable) => Invoke(Member(awaitable, "ConfigureAwait"), BooleanLiteral(false));
 
@@ -404,6 +392,7 @@ internal static partial class HostEmitter
     /// </summary>
     private static IEnumerable<MemberDeclarationSyntax> SequentialStrategy(NotificationPipeline pipeline)
     {
+        const int depth = ContextMemberDepth + 1;
         var notification = pipeline.Notification;
         var statements = new List<StatementSyntax>();
         statements.AddRange(Box(pipeline));
@@ -418,23 +407,15 @@ internal static partial class HostEmitter
             }
 
             pending.AddRange([Id("task"), Number(i), Id("exceptions"), Id(CancellationTokenName)]);
-            statements.Add(
-                TryStatement(
-                    Block(Assign(Id("task"), HandlerCall(pipeline, i))),
-                    SingletonList(CollectException(Assign(Id("task"), DefaultLiteral()))),
-                    null
-                )
-            );
-            statements.Add(
-                IfStatement(PrefixUnaryExpression(SyntaxKind.LogicalNotExpression, Member(Id("task"), "IsCompletedSuccessfully")), Block(Return(Invoke(Id("RunHandlersAsync"), [.. pending]))))
-            );
-            statements.Add(ExpressionStatement(Invoke(Member(Invoke(Member(Id("task"), "GetAwaiter")), "GetResult"))));
+            statements.Add(Try(depth, [Assign(Id("task"), HandlerCall(pipeline, i))], CollectException(depth, Assign(Id("task"), DefaultLiteral()))));
+            statements.Add(If(depth, Not(Member(Id("task"), "IsCompletedSuccessfully")), [Return(Invoke(Id("RunHandlersAsync"), [.. pending]))]));
+            statements.Add(Do(Invoke(Member(Invoke(Member(Id("task"), "GetAwaiter")), "GetResult"))));
         }
 
         statements.Add(
             Return(
-                ConditionalExpression(
-                    IsPatternExpression(Id("exceptions"), ConstantPattern(NullLiteral())),
+                Conditional(
+                    Is(Id("exceptions"), NullPattern()),
                     DefaultLiteral(),
                     Invoke(Member(Qualified(ValueTask), "FromException"), New(TypeName(AggregateExceptionType), Id("exceptions")))
                 )
@@ -447,7 +428,7 @@ internal static partial class HostEmitter
                          "RunHandlers",
                          Params(Param(TypeName(notification.Type), "notification"), Param(TypeName(CancellationToken), CancellationTokenName))
                      )
-                    .Statements(statements)
+                    .Statements(ContextMemberDepth, statements)
                     .Documented("<summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>");
 
         var parameters = new List<ParameterSyntax> { Param(TypeName(notification.Type), "notification") };
@@ -459,37 +440,29 @@ internal static partial class HostEmitter
         parameters.AddRange(
             [
                 Param(TypeName(ValueTask), "pending"),
-                Param(PredefinedType(Token(SyntaxKind.IntKeyword)), "position"),
+                Param(Int(), "position"),
                 Param(NullableType(TypeName(ExceptionList)), "exceptions"),
                 Param(TypeName(CancellationToken), CancellationTokenName),
             ]
         );
 
-        var rest = new List<StatementSyntax>
-        {
-            TryStatement(Block(ExpressionStatement(AwaitExpression(ConfigureAwaitFalse(Id("pending"))))), SingletonList(CollectException()), null),
-        };
+        var rest = new List<StatementSyntax> { Try(depth, [Do(Await(ConfigureAwaitFalse(Id("pending"))))], CollectException(depth)) };
         for (var i = 1; i < pipeline.Handlers.Length; i++)
         {
             rest.Add(
-                IfStatement(
-                    BinaryExpression(SyntaxKind.LessThanExpression, Id("position"), Number(i)),
-                    Block(
-                        TryStatement(
-                            Block(ExpressionStatement(AwaitExpression(ConfigureAwaitFalse(HandlerCall(pipeline, i))))),
-                            SingletonList(CollectException()),
-                            null
-                        )
-                    )
+                If(
+                    depth,
+                    LessThan(Id("position"), Number(i)),
+                    [Try(depth + 1, [Do(Await(ConfigureAwaitFalse(HandlerCall(pipeline, i))))], CollectException(depth + 1))]
                 )
             );
         }
 
-        rest.Add(ThrowCollected());
+        rest.Add(ThrowCollected(depth));
 
-        yield return Method(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.AsyncKeyword), TypeName(ValueTask), "RunHandlersAsync", ParameterList(SeparatedList(parameters)))
+        yield return Method(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.AsyncKeyword), TypeName(ValueTask), "RunHandlersAsync", Params([.. parameters]))
                     .AddAttributeLists(PoolingBuilderAttribute())
-                    .Statements(rest)
+                    .Statements(ContextMemberDepth, rest)
                     .Documented("<summary>Awaits the handler at <paramref name=\"position\" />, runs the ones after it in order, then reports every failure.</summary>");
     }
 
@@ -501,6 +474,7 @@ internal static partial class HostEmitter
     /// </summary>
     private static MethodDeclarationSyntax ParallelStrategy(NotificationPipeline pipeline)
     {
+        const int depth = ContextMemberDepth + 1;
         var notification = pipeline.Notification;
         var count = pipeline.Handlers.Length;
         var statements = new List<StatementSyntax>();
@@ -510,14 +484,10 @@ internal static partial class HostEmitter
             var task = "task" + Digits(i);
             statements.Add(Local(TypeName(ValueTask), task));
             statements.Add(
-                TryStatement(
-                    Block(Assign(Id(task), HandlerCall(pipeline, i))),
-                    SingletonList(
-                        CatchClause()
-                           .WithDeclaration(CatchDeclaration(TypeName(ExceptionType), Identifier("exception")))
-                           .WithBlock(Block(Assign(Id(task), Invoke(Member(Qualified(ValueTask), "FromException"), Id("exception")))))
-                    ),
-                    null
+                Try(
+                    depth,
+                    [Assign(Id(task), HandlerCall(pipeline, i))],
+                    Catch(depth, TypeName(ExceptionType), "exception", [Assign(Id(task), Invoke(Member(Qualified(ValueTask), "FromException"), Id("exception")))])
                 )
             );
         }
@@ -526,32 +496,31 @@ internal static partial class HostEmitter
         for (var i = 0; i < count; i++)
         {
             statements.Add(Var("done" + Digits(i), Member(Id("task" + Digits(i)), "IsCompletedSuccessfully")));
-            statements.Add(IfStatement(Id("done" + Digits(i)), Block(ExpressionStatement(Invoke(Member(Invoke(Member(Id("task" + Digits(i)), "GetAwaiter")), "GetResult"))))));
+            statements.Add(If(depth, Id("done" + Digits(i)), [Do(Invoke(Member(Invoke(Member(Id("task" + Digits(i)), "GetAwaiter")), "GetResult")))]));
         }
 
         ExpressionSyntax pending = Pending(0);
         for (var i = 1; i < count; i++)
         {
-            pending = BinaryExpression(SyntaxKind.AddExpression, pending, Pending(i));
+            pending = Add(pending, Pending(i));
         }
 
         statements.Add(Var("pending", pending));
-        statements.Add(IfStatement(Equal(Id("pending"), Number(0)), Block(Return(DefaultLiteral()))));
-        statements.Add(
-            Var("tasks", ArrayCreationExpression(ArrayType(TypeName(TaskType), SingletonList(ArrayRankSpecifier(SingletonSeparatedList<ExpressionSyntax>(Id("pending")))))))
-        );
+        statements.Add(If(depth, Equal(Id("pending"), Number(0)), [Return(DefaultLiteral())]));
+        statements.Add(Var("tasks", NewArray(TypeName(TaskType), Id("pending"))));
         statements.Add(Var("next", Number(0)));
         for (var i = 0; i < count; i++)
         {
             statements.Add(
-                IfStatement(
-                    PrefixUnaryExpression(SyntaxKind.LogicalNotExpression, Id("done" + Digits(i))),
-                    Block(
+                If(
+                    depth,
+                    Not(Id("done" + Digits(i))),
+                    [
                         Assign(
                             ElementAccessExpression(Id("tasks"), BracketedArgumentList(SingletonSeparatedList(Argument(PostfixUnaryExpression(SyntaxKind.PostIncrementExpression, Id("next")))))),
                             Invoke(Member(Id("task" + Digits(i)), "AsTask"))
-                        )
-                    )
+                        ),
+                    ]
                 )
             );
         }
@@ -564,10 +533,10 @@ internal static partial class HostEmitter
                    "RunHandlers",
                    Params(Param(TypeName(notification.Type), "notification"), Param(TypeName(CancellationToken), CancellationTokenName))
                )
-              .Statements(statements)
+              .Statements(ContextMemberDepth, statements)
               .Documented("<summary>Starts every handler in handler order without awaiting it (parallel), then awaits the pending ones together.</summary>");
 
-        static ParenthesizedExpressionSyntax Pending(int i) => ParenthesizedExpression(ConditionalExpression(Id("done" + Digits(i)), Number(0), Number(1)));
+        static ParenthesizedExpressionSyntax Pending(int i) => ParenthesizedExpression(Conditional(Id("done" + Digits(i)), Number(0), Number(1)));
     }
 
     /// <summary>The one box of a struct notification per publish, shared by every handler typed as an interface (OQ-17, KRX037).</summary>

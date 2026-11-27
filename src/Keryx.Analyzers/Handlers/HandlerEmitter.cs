@@ -29,12 +29,7 @@ internal static class HandlerEmitter
     /// <summary><c>[assembly: KeryxManifest(FormatVersion = n)]</c>, which marks an assembly whose handlers the host reads.</summary>
     public static SourceText Manifest()
     {
-        var attribute = AttributeOf(
-                            "global::Keryx.Internal.KeryxManifest",
-                            AttributeArgument(Number(ManifestFormatVersion)).WithNameEquals(NameEquals(IdentifierName("FormatVersion")))
-                        )
-                       .WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.AssemblyKeyword)));
-        return Render(CompilationUnit().AddAttributeLists(attribute), pragma: null);
+        return Render(CompilationUnitOf("global::Keryx.Internal.KeryxManifest", Named("FormatVersion", Number(ManifestFormatVersion))), pragma: null);
     }
 
     /// <summary>
@@ -55,7 +50,10 @@ internal static class HandlerEmitter
         var memberAccess = model.SignatureAccess == AccessLevel.Public ? SyntaxKind.PublicKeyword : SyntaxKind.InternalKeyword;
         var inManifest = model is { ClassAccess: AccessLevel.Public, SignatureAccess: AccessLevel.Public };
 
-        MemberDeclarationSyntax declaration = Declaration(model.Types[^1]).WithMembers(List(Members(model, memberAccess)));
+        // The depth of each declaration of the chain: the outermost one is in the namespace, if any.
+        var outer = model.Namespace is null ? 0 : 1;
+        var innermost = outer + model.Types.Count - 1;
+        MemberDeclarationSyntax declaration = Declaration(model.Types[^1]).WithBody(innermost, Members(model, memberAccess, innermost + 1));
         if (inManifest)
         {
             declaration = WithHandlerAttribute((TypeDeclarationSyntax)declaration, model);
@@ -63,19 +61,18 @@ internal static class HandlerEmitter
 
         for (var i = model.Types.Count - 2; i >= 0; i--)
         {
-            declaration = Declaration(model.Types[i]).AddMembers(declaration);
+            declaration = Declaration(model.Types[i]).WithBody(outer + i, [declaration]);
         }
 
-        var unit = CompilationUnit()
-           .AddMembers(model.Namespace is { } ns ? NamespaceDeclaration(Qualified(ns)).AddMembers(declaration) : declaration);
-        return Render(unit);
+        return Render(CompilationUnitOf(model.Namespace is { } ns ? Namespace(ns, declaration) : declaration));
     }
 
     /// <summary>The partial declaration of one type of the chain, with the modifiers and keyword the user declared it with.</summary>
     private static TypeDeclarationSyntax Declaration(TypeDeclarationModel type)
     {
+        // Each keyword of the text keeps the one space after it; the name has none, so the body's braces go on their own lines.
         var modifiers = type.Modifiers.Length > 0 ? type.Modifiers + " " : "";
-        return (TypeDeclarationSyntax)ParseMemberDeclaration($"{modifiers}partial {type.Keyword} {type.Name} {{ }}")!;
+        return (TypeDeclarationSyntax)ParseMemberDeclaration($"{modifiers}partial {type.Keyword} {type.Name}{{}}")!;
     }
 
     /// <summary>
@@ -93,40 +90,25 @@ internal static class HandlerEmitter
         };
         if (model.Behaviors.Count > 0)
         {
-            arguments.Add(
-                AttributeArgument(
-                        ArrayCreationExpression(
-                            ArrayType(TypeName("global::System.Type"), SingletonList(ArrayRankSpecifier(SingletonSeparatedList<ExpressionSyntax>(OmittedArraySizeExpression())))),
-                            InitializerExpression(SyntaxKind.ArrayInitializerExpression, SeparatedList<ExpressionSyntax>(model.Behaviors.Select(static b => TypeOf(b))))
-                        )
-                    )
-                   .WithNameEquals(NameEquals(IdentifierName("Behaviors")))
-            );
+            arguments.Add(Named("Behaviors", NewArray(TypeName("global::System.Type"), model.Behaviors.Select(static b => (ExpressionSyntax)TypeOf(b)))));
         }
 
         if (model.Order != 0)
         {
-            arguments.Add(AttributeArgument(Integer(model.Order)).WithNameEquals(NameEquals(IdentifierName("Order"))));
+            arguments.Add(Named("Order", Integer(model.Order)));
         }
 
         if (model.StaticInvoker)
         {
-            arguments.Add(AttributeArgument(BooleanLiteral(true)).WithNameEquals(NameEquals(IdentifierName("StaticInvoker"))));
+            arguments.Add(Named("StaticInvoker", BooleanLiteral(true)));
         }
 
         var attributed = declaration.AddAttributeLists(AttributeOf("global::Keryx.Internal.KeryxHandler", [.. arguments]));
-        if (model.Behaviors.Count == 0)
-        {
-            return attributed;
-        }
-
-        // Not "restore" after the attribute: that returns to the project default, which is disabled for generated code.
-        var afterAttributes = attributed.AttributeLists[^1].GetLastToken().GetNextToken();
-        attributed = attributed.ReplaceToken(afterAttributes, afterAttributes.WithLeadingTrivia(afterAttributes.LeadingTrivia.Insert(0, NullableContext(enable: true))));
-        return attributed.WithLeadingTrivia(attributed.GetLeadingTrivia().Insert(0, NullableContext(enable: false)));
+        return model.Behaviors.Count == 0 ? attributed : attributed.WithNullableObliviousAttributes();
     }
 
-    private static IEnumerable<MemberDeclarationSyntax> Members(HandlerModel model, SyntaxKind memberAccess)
+    /// <summary>The members of the handler class's generated half, at <paramref name="depth" />.</summary>
+    private static IEnumerable<MemberDeclarationSyntax> Members(HandlerModel model, SyntaxKind memberAccess, int depth)
     {
         var className = model.Types[^1].Name;
         var injected = model.Parameters.Where(static p => p.Role == ParameterRole.Injected).ToArray();
@@ -139,10 +121,13 @@ internal static class HandlerEmitter
 
         if (injected.Length > 0)
         {
-            yield return ConstructorDeclaration(Identifier(className))
-                        .WithModifiers(Modifiers(memberAccess))
-                        .WithParameterList(Params([.. injected.Select(ConstructorParameter)]))
-                        .WithBody(Block(injected.Select(static p => Assign(Id(FieldName(p)), Id(CSharpText.Identifier(p.Name))))))
+            yield return Constructor(
+                             depth,
+                             Modifiers(memberAccess),
+                             className,
+                             [.. injected.Select(ConstructorParameter)],
+                             injected.Select(static p => Assign(Id(FieldName(p)), Id(CSharpText.Identifier(p.Name))))
+                         )
                         .AddAttributeLists(GeneratedCodeAttribute())
                         .Documented("<summary>Creates the handler with the services its handler method injects.</summary>");
         }
@@ -174,18 +159,20 @@ internal static class HandlerEmitter
         invoker = model.ReturnShape switch
         {
             ReturnShape.Void => invoker.Statements(
+                depth,
                 [
-                    ExpressionStatement(call),
+                    Do(call),
                     Return(New(TypeName($"{ValueTask}<{Unit}>"), Member(Qualified(Unit), "Value"))),
                 ]
             ),
-            ReturnShape.ValueTaskOfT or ReturnShape.AsyncEnumerable => invoker.Expression(result),
-            ReturnShape.TaskOfT or ReturnShape.Synchronous => invoker.Expression(New(TypeName($"{ValueTask}<{model.ResponseType}>"), result)),
+            ReturnShape.ValueTaskOfT or ReturnShape.AsyncEnumerable => invoker.Expression(depth, result),
+            ReturnShape.TaskOfT or ReturnShape.Synchronous => invoker.Expression(depth, New(TypeName($"{ValueTask}<{model.ResponseType}>"), result)),
             ReturnShape.ValueTask or ReturnShape.Task when model.Kind == HandlerKind.Request => invoker.Expression(
+                depth,
                 Invoke(Member(Qualified("global::Keryx.Internal.UnitAdapter"), "ToUnit"), call)
             ),
-            ReturnShape.ValueTask => invoker.Expression(call),
-            _ => invoker.Expression(New(TypeName(ValueTask), call)),
+            ReturnShape.ValueTask => invoker.Expression(depth, call),
+            _ => invoker.Expression(depth, New(TypeName(ValueTask), call)),
         };
 
         yield return invoker.Documented("<summary>Runs the handler only. No behaviors run.</summary>");
@@ -210,7 +197,7 @@ internal static class HandlerEmitter
             parameter.DefaultValue is { } defaultValue ? Code(defaultValue) : null
         );
         return parameter.ServiceKey is { } key
-            ? syntax.AddAttributeLists(AttributeOf("global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute", AttributeArgument(Code(key))))
+            ? syntax.WithAttribute(AttributeOf("global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute", AttributeArgument(Code(key))))
             : syntax;
     }
 

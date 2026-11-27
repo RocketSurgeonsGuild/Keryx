@@ -53,6 +53,21 @@ internal static partial class HostEmitter
 
     private const string CancellationTokenName = "cancellationToken";
 
+    /// <summary>
+    ///     The depth of the members of <c>KeryxMediator</c> and <c>KeryxServiceCollectionExtensions</c> (in the namespace, in the class), and of
+    ///     the pipeline contexts and link classes nested in the mediator: the statements of their bodies are one level deeper.
+    /// </summary>
+    private const int MemberDepth = 2;
+
+    /// <summary>The depth of the statements of a mediator method.</summary>
+    private const int StatementDepth = MemberDepth + 1;
+
+    /// <summary>The depth of the members of a pipeline context or link class, and of the links nested in it.</summary>
+    private const int ContextMemberDepth = MemberDepth + 1;
+
+    /// <summary>The depth of a link's <c>InvokeAsync</c>.</summary>
+    private const int LinkMemberDepth = ContextMemberDepth + 1;
+
     public static SourceText Mediator(HostSettings settings, HostComposition composition)
     {
         var requests = composition.Requests;
@@ -88,10 +103,13 @@ internal static partial class HostEmitter
         }
 
         members.Add(
-            ConstructorDeclaration(Identifier("KeryxMediator"))
-               .WithModifiers(Modifiers(SyntaxKind.PublicKeyword))
-               .WithParameterList(Params(Param(TypeName(ServiceProvider), ServiceProviderName)))
-               .WithBody(Block(Call(Qualified(ThrowIfNull), Id(ServiceProviderName)), Assign(Id("__serviceProvider"), Id(ServiceProviderName))))
+            Constructor(
+                    MemberDepth,
+                    Modifiers(SyntaxKind.PublicKeyword),
+                    "KeryxMediator",
+                    [Param(TypeName(ServiceProvider), ServiceProviderName)],
+                    [Call(Qualified(ThrowIfNull), Id(ServiceProviderName)), Assign(Id("__serviceProvider"), Id(ServiceProviderName))]
+                )
                .Documented(
                     "<summary>Creates the mediator of one scope.</summary>",
                     $"<param name=\"{ServiceProviderName}\">The scope's service provider. Pipeline contexts resolve handlers from it.</param>"
@@ -141,7 +159,7 @@ internal static partial class HostEmitter
                     Params(Param(TypeName("global::System.Type"), "requestType"))
                 )
                .AddAttributeLists(NoInliningAttribute())
-               .Expression(TargetTypedNew(Id("requestType")))
+               .Expression(MemberDepth, TargetTypedNew(Id("requestType")))
         );
 
         for (var i = 0; i < requests.Length; i++)
@@ -165,10 +183,8 @@ internal static partial class HostEmitter
             members.Add(NotificationContext(notifications[i], i));
         }
 
-        var mediator = ClassDeclaration("KeryxMediator")
-                      .WithModifiers(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.SealedKeyword, SyntaxKind.PartialKeyword))
-                      .WithBaseList(BaseList(SingletonSeparatedList<BaseTypeSyntax>(SimpleBaseType(TypeName("global::Keryx.IMediator")))))
-                      .WithMembers(List(members))
+        var mediator = Class(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.SealedKeyword, SyntaxKind.PartialKeyword), "KeryxMediator", "global::Keryx.IMediator")
+                      .WithBody(MemberDepth - 1, members)
                       .AddAttributeLists(GeneratedCodeAttribute())
                       .Documented(
                            "<summary>",
@@ -212,7 +228,7 @@ internal static partial class HostEmitter
         statements.Add(Return(Id("services")));
 
         var addKeryx = Method(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.StaticKeyword), TypeName(ServiceCollection), "AddKeryx", Params(Param(TypeName(ServiceCollection), "services").WithModifiers(Modifiers(SyntaxKind.ThisKeyword))))
-                      .Statements(statements)
+                      .Statements(MemberDepth, statements)
                       .Documented(
                            "<summary>",
                            "    Registers the scoped <see cref=\"KeryxMediator\" />, as itself and as <see cref=\"global::Keryx.IMediator\" />,",
@@ -224,20 +240,17 @@ internal static partial class HostEmitter
                            "<returns>The same service collection.</returns>"
                        );
 
-        var extensions = ClassDeclaration("KeryxServiceCollectionExtensions")
-                        .WithModifiers(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.StaticKeyword))
-                        .AddMembers(addKeryx)
+        var extensions = Class(Modifiers(SyntaxKind.InternalKeyword, SyntaxKind.StaticKeyword), "KeryxServiceCollectionExtensions")
+                        .WithBody(MemberDepth - 1, [addKeryx])
                         .AddAttributeLists(GeneratedCodeAttribute())
                         .Documented("<summary>Registers this host's Keryx mediator and handlers.</summary>");
         return Render(InNamespace(settings, extensions));
     }
 
-    private static CompilationUnitSyntax InNamespace(HostSettings settings, MemberDeclarationSyntax type) =>
-        CompilationUnit().AddMembers(NamespaceDeclaration(Qualified(settings.Namespace)).AddMembers(type));
+    private static CompilationUnitSyntax InNamespace(HostSettings settings, MemberDeclarationSyntax type) => CompilationUnitOf(Namespace(settings.Namespace, type));
 
     /// <summary>A scoped registration's factory: <c>static serviceProvider =&gt; body</c>.</summary>
-    private static SimpleLambdaExpressionSyntax Factory(ExpressionSyntax body) =>
-        SimpleLambdaExpression(Parameter(Identifier(ServiceProviderName))).WithModifiers(Modifiers(SyntaxKind.StaticKeyword)).WithExpressionBody(body);
+    private static SimpleLambdaExpressionSyntax Factory(ExpressionSyntax body) => StaticLambda(ServiceProviderName, body);
 
     private static MethodDeclarationSyntax TypedSend(HostHandlerModel request, int index)
     {
@@ -254,7 +267,7 @@ internal static partial class HostEmitter
                    "Send",
                    Params(Param(TypeName(request.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                )
-              .Statements(statements)
+              .Statements(MemberDepth, statements)
               .Documented(
                    "<summary>",
                    $"    Sends a <c>{Display(request.MessageType)}</c> through its pipeline to its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
@@ -273,8 +286,9 @@ internal static partial class HostEmitter
                          "Send",
                          Params(Param(TypeName("global::Keryx.IRequest<TResponse>"), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                      )
-                    .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TResponse"))))
+                    .WithTypeParameterList(TypeParameters("TResponse"))
                     .Statements(
+                         MemberDepth,
                          [
                              Call(Qualified(ThrowIfNull), Id("request")),
                              .. RequestDispatch(
@@ -329,7 +343,7 @@ internal static partial class HostEmitter
     {
         if (requests.IsEmpty)
         {
-            return [ThrowStatement(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))];
+            return [Throw(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))];
         }
 
         var sections = new List<SwitchSectionSyntax>(requests.Length + 1);
@@ -342,8 +356,8 @@ internal static partial class HostEmitter
                 sections.Add(ConstantSection(i, Return(arm(request, i, exact))));
             }
 
-            sections.Add(DefaultSection(ThrowStatement(Invoke(Id("__HandlerNotFound"), Id("requestType")))));
-            return [Var("requestType", Invoke(Member(Id("request"), "GetType"))), SwitchStatement(Invoke(Id(lookup), Id("requestType")), List(sections))];
+            sections.Add(DefaultSection(Throw(Invoke(Id("__HandlerNotFound"), Id("requestType")))));
+            return [Var("requestType", Invoke(Member(Id("request"), "GetType"))), Switch(StatementDepth, Invoke(Id(lookup), Id("requestType")), sections)];
         }
 
         for (var i = 0; i < requests.Length; i++)
@@ -356,8 +370,8 @@ internal static partial class HostEmitter
             );
         }
 
-        sections.Add(DefaultSection(ThrowStatement(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))));
-        return [SwitchStatement(Id("request"), List(sections))];
+        sections.Add(DefaultSection(Throw(Invoke(Id("__HandlerNotFound"), Invoke(Member(Id("request"), "GetType"))))));
+        return [Switch(StatementDepth, Id("request"), sections)];
     }
 
     /// <summary>
@@ -367,12 +381,14 @@ internal static partial class HostEmitter
     ///     types the sections keep exact-type guards, <c>switch (type) { case var _ when type == typeof(X): return ...; default: ... }</c>;
     ///     above it, <c>switch (Index(type)) { case 0: return ...; default: ... }</c>, which compiles to a jump table.
     /// </summary>
+    /// <param name="depth">The depth of the statements.</param>
     /// <param name="typeVariable">The local that holds the runtime type.</param>
     /// <param name="lookup">The index method above the threshold.</param>
     /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
     /// <param name="arm">The result of the section of type <c>i</c>.</param>
     /// <param name="fallback">The statement of the <c>default</c> section.</param>
     private static StatementSyntax[] ExactTypeDispatch(
+        int depth,
         string typeVariable,
         string lookup,
         ImmutableArray<string> types,
@@ -394,7 +410,7 @@ internal static partial class HostEmitter
             }
 
             sections.Add(DefaultSection(fallback));
-            return [SwitchStatement(Invoke(Id(lookup), Id(typeVariable)), List(sections))];
+            return [Switch(depth, Invoke(Id(lookup), Id(typeVariable)), sections)];
         }
 
         for (var i = 0; i < types.Length; i++)
@@ -403,7 +419,7 @@ internal static partial class HostEmitter
         }
 
         sections.Add(DefaultSection(fallback));
-        return [SwitchStatement(Id(typeVariable), List(sections))];
+        return [Switch(depth, Id(typeVariable), sections)];
     }
 
     /// <summary>
@@ -416,13 +432,7 @@ internal static partial class HostEmitter
     private static IEnumerable<MemberDeclarationSyntax> TypeTable(string kind, string table, string lookup, ImmutableArray<string> types)
     {
         const string pair = "global::System.Collections.Generic.KeyValuePair<global::System.Type, int>";
-        var entries = ArrayCreationExpression(
-            ArrayType(TypeName(pair), SingletonList(ArrayRankSpecifier(SingletonSeparatedList<ExpressionSyntax>(OmittedArraySizeExpression())))),
-            InitializerExpression(
-                SyntaxKind.ArrayInitializerExpression,
-                SeparatedList<ExpressionSyntax>(types.Select(static (type, i) => TargetTypedNew(TypeOf(type), Number(i))))
-            )
-        );
+        var entries = NewArray(TypeName(pair), types.Select(static (type, i) => (ExpressionSyntax)TargetTypedNew(TypeOf(type), Number(i))));
         yield return Field(
                          Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword, SyntaxKind.ReadOnlyKeyword),
                          TypeName("global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int>"),
@@ -431,13 +441,14 @@ internal static partial class HostEmitter
                      )
                     .Documented($"<summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
 
-        yield return Method(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword), PredefinedType(Token(SyntaxKind.IntKeyword)), lookup, Params(Param(TypeName("global::System.Type"), "requestType")))
+        yield return Method(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword), Int(), lookup, Params(Param(TypeName("global::System.Type"), "requestType")))
                     .AddAttributeLists(NoInliningAttribute())
                     .Expression(
-                         ConditionalExpression(
+                         MemberDepth,
+                         Conditional(
                              Invoke(Member(Id(table), "TryGetValue"), [Argument(Id("requestType")), OutVarArgument("requestIndex")]),
                              Id("requestIndex"),
-                             PrefixUnaryExpression(SyntaxKind.UnaryMinusExpression, Number(1))
+                             Integer(-1)
                          )
                      )
                     .Documented($"<summary>The position of a {kind} type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
@@ -465,9 +476,10 @@ internal static partial class HostEmitter
                     Param(TypeName(CancellationToken), CancellationTokenName)
                 )
             )
-           .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TResponse"))))
+           .WithTypeParameterList(TypeParameters("TResponse"))
            .AddAttributeLists(NoInliningAttribute())
            .Statements(
+                MemberDepth,
                 [
                     Var(
                         "response",
@@ -489,7 +501,7 @@ internal static partial class HostEmitter
     /// <summary>A message typed as an interface, as its exact type: a class reinterpreted with <c>Unsafe.As</c>, a struct unboxed.</summary>
     private static ExpressionSyntax Exact(string type, bool isValueType, ExpressionSyntax message) =>
         isValueType
-            ? Cast(TypeName(type), Cast(PredefinedType(Token(SyntaxKind.ObjectKeyword)), message))
+            ? Cast(TypeName(type), Cast(Object(), message))
             : Invoke(Member(Qualified(Unsafe), Generic("As", TypeName(type))), message);
 
     /// <summary>
@@ -531,7 +543,7 @@ internal static partial class HostEmitter
         if (pipeline.Behaviors.IsEmpty)
         {
             ExpressionSyntax target = hasContext ? Member(ParenthesizedExpression(context), "Handler") : Qualified(request.HandlerClass);
-            yield return core.Expression(Invoke(Member(target, HandlerAnalysis.InvokerName), Id("request"), Id(CancellationTokenName)));
+            yield return core.Expression(MemberDepth, Invoke(Member(target, HandlerAnalysis.InvokerName), Id("request"), Id(CancellationTokenName)));
         }
         else
         {
@@ -557,7 +569,7 @@ internal static partial class HostEmitter
     ///     that call reads the context or passes it on.
     /// </summary>
     private static BlockSyntax Entry(StatementSyntax call, Captures captures, ExpressionSyntax context, bool obliviousFit) =>
-        Island(( captures & Captures.Pipeline ) != 0 ? Block(Var(PipelineName, context), call) : Block(call), obliviousFit);
+        Body(MemberDepth, ( captures & Captures.Pipeline ) != 0 ? [Var(PipelineName, context), call] : [call], nullableIsland: obliviousFit);
 
     /// <summary>
     ///     What a link or a behavior method call needs from where it is written (ADR 0001, Generated pipeline shape): the pipeline context, the
@@ -623,6 +635,7 @@ internal static partial class HostEmitter
         Method(Modifiers(SyntaxKind.PrivateKeyword), Id(contextName), createName, Params())
            .AddAttributeLists(NoInliningAttribute())
            .Expression(
+                MemberDepth,
                 Coalesce(
                     Invoke(
                         Member(Qualified("global::System.Threading.Interlocked"), "CompareExchange"),
@@ -712,23 +725,14 @@ internal static partial class HostEmitter
 
     /// <summary>A pipeline context class: sealed, created once per scope.</summary>
     private static ClassDeclarationSyntax ContextClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
-        ClassDeclaration(name)
-           .WithModifiers(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.SealedKeyword))
-           .WithMembers(List(members))
-           .Documented(summary);
+        Class(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.SealedKeyword), name).WithBody(MemberDepth, members).Documented(summary);
 
     /// <summary>The static class that holds the links of a pipeline without a context: nothing is created or resolved for it.</summary>
     private static ClassDeclarationSyntax LinksClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
-        ClassDeclaration(name)
-           .WithModifiers(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword))
-           .WithMembers(List(members))
-           .Documented(summary);
+        Class(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword), name).WithBody(MemberDepth, members).Documented(summary);
 
     private static ConstructorDeclarationSyntax ContextConstructor(string contextName, IEnumerable<StatementSyntax> resolution) =>
-        ConstructorDeclaration(Identifier(contextName))
-           .WithModifiers(Modifiers(SyntaxKind.PublicKeyword))
-           .WithParameterList(Params(Param(TypeName(ServiceProvider), ServiceProviderName)))
-           .WithBody(Block(resolution));
+        Constructor(ContextMemberDepth, Modifiers(SyntaxKind.PublicKeyword), contextName, [Param(TypeName(ServiceProvider), ServiceProviderName)], resolution);
 
     /// <summary>
     ///     One link (ADR 0001, Generated pipeline shape): a <c>readonly struct</c> with a primary constructor over what its <c>InvokeAsync</c>
@@ -750,11 +754,6 @@ internal static partial class HostEmitter
         string summary
     )
     {
-        if (obliviousFit)
-        {
-            body = body.WithLeadingTrivia(NullableWarnings(disable: true));
-        }
-
         var parameters = new List<ParameterSyntax>(2);
         if (( captures & Captures.Pipeline ) != 0)
         {
@@ -766,19 +765,11 @@ internal static partial class HostEmitter
             parameters.Add(Param(TypeName(messageType), messageName));
         }
 
-        var invoke = Method(Modifiers(SyntaxKind.PublicKeyword), TypeName(returnType), "InvokeAsync", Params(Param(TypeName(CancellationToken), CancellationTokenName)))
-           .Expression(body);
-        var link = StructDeclaration(name)
-                  .WithModifiers(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword))
-                  .WithParameterList(parameters.Count == 0 ? null : Params([.. parameters]))
-                  .WithBaseList(BaseList(SingletonSeparatedList<BaseTypeSyntax>(SimpleBaseType(TypeName(nextInterface)))));
-
-        if (obliviousFit)
-        {
-            link = link.WithCloseBraceToken(Token(TriviaList(NullableWarnings(disable: false)), SyntaxKind.CloseBraceToken, TriviaList()));
-        }
-
-        return link.AddMembers(invoke).Documented(summary);
+        var invoke = Method(Modifiers(SyntaxKind.PublicKeyword), TypeName(returnType), "InvokeAsync", Params(Param(TypeName(CancellationToken), CancellationTokenName)));
+        invoke = obliviousFit ? invoke.NullableObliviousExpression(LinkMemberDepth, body) : invoke.Expression(LinkMemberDepth, body);
+        return Struct(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), name, parameters.Count == 0 ? null : Params([.. parameters]), nextInterface)
+              .WithBody(ContextMemberDepth, [invoke], restoreNullableWarnings: obliviousFit)
+              .Documented(summary);
     }
 
     /// <summary>The one-line summary of link <paramref name="position" />: whose <c>next</c> it is, and where it goes.</summary>
@@ -786,23 +777,6 @@ internal static partial class HostEmitter
         position == behaviors.Length - 1
             ? $"<summary>The <c>next</c> of <c>{Display(behaviors[position].Identity)}</c>: {end}.</summary>"
             : $"<summary>The <c>next</c> of <c>{Display(behaviors[position].Identity)}</c>: <c>{Display(behaviors[position + 1].Identity)}</c>.</summary>";
-
-    /// <summary>
-    ///     A block whose last statement (the call of a behavior method that fits only through a nullable-oblivious type, OQ-58) is written with
-    ///     nullable warnings disabled.
-    /// </summary>
-    private static BlockSyntax Island(BlockSyntax block, bool obliviousFit)
-    {
-        if (!obliviousFit)
-        {
-            return block;
-        }
-
-        var last = block.Statements[^1];
-        return block
-              .ReplaceNode(last, last.WithLeadingTrivia(last.GetLeadingTrivia().Insert(0, NullableWarnings(disable: true))))
-              .WithCloseBraceToken(Token(TriviaList(NullableWarnings(disable: false)), SyntaxKind.CloseBraceToken, TriviaList()));
-    }
 
     /// <summary>
     ///     The direct call of a behavior method (ADR 0001, Behavior methods): the class's static method with explicit type arguments
@@ -928,11 +902,8 @@ internal static partial class HostEmitter
 
         var variable = "__value" + Digits(slot);
         var nullable = service.NullableUnderlyingType is null ? service.ServiceType + "?" : service.ServiceType;
-        return ConditionalExpression(
-            IsPatternExpression(
-                ServiceLookup(service.ServiceType, service.ServiceKey),
-                DeclarationPattern(TypeName(service.NullableUnderlyingType ?? service.ServiceType), SingleVariableDesignation(Identifier(variable)))
-            ),
+        return Conditional(
+            Is(ServiceLookup(service.ServiceType, service.ServiceKey), Declaration(TypeName(service.NullableUnderlyingType ?? service.ServiceType), variable)),
             Cast(TypeName(nullable), Id(variable)),
             NullLiteral()
         );
@@ -947,7 +918,7 @@ internal static partial class HostEmitter
         key is null
             ? Invoke(Member(Id(ServiceProviderName), "GetService"), TypeOf(type))
             : ConditionalAccessExpression(
-                ParenthesizedExpression(BinaryExpression(SyntaxKind.AsExpression, Id(ServiceProviderName), TypeName(KeyedServiceProvider))),
+                ParenthesizedExpression(As(Id(ServiceProviderName), TypeName(KeyedServiceProvider))),
                 Invoke(MemberBindingExpression(Id("GetKeyedService")), TypeOf(type), Code(key))
             );
 
@@ -988,16 +959,12 @@ internal static partial class HostEmitter
 
         var variable = "__value" + Digits(index);
         return parameter.NullableUnderlyingType is { } underlying
-            ? ConditionalExpression(
-                IsPatternExpression(ServiceLookup(parameter.Type, parameter.ServiceKey), DeclarationPattern(TypeName(underlying), SingleVariableDesignation(Identifier(variable)))),
+            ? Conditional(
+                Is(ServiceLookup(parameter.Type, parameter.ServiceKey), Declaration(TypeName(underlying), variable)),
                 Cast(TypeName(parameter.Type), Id(variable)),
                 Code(defaultValue)
             )
-            : ConditionalExpression(
-                IsPatternExpression(ServiceLookup(parameter.Type, parameter.ServiceKey), DeclarationPattern(TypeName(parameter.Type), SingleVariableDesignation(Identifier(variable)))),
-                Id(variable),
-                Code(defaultValue)
-            );
+            : Conditional(Is(ServiceLookup(parameter.Type, parameter.ServiceKey), Declaration(TypeName(parameter.Type), variable)), Id(variable), Code(defaultValue));
     }
 
     /// <summary>

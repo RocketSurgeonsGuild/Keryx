@@ -18,10 +18,11 @@ raised while implementing it and are open, and OQ-61 and OQ-62 were raised while
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
 are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
-(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them, and OQ-66 is open. "`next` stays a struct link
+(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, OQ-69 is open, and OQ-68, decided by the owner (decision 18),
-follows. OQ-65, decided by the owner (decision 16), comes last; OQ-70 was raised while implementing it and is open.
+follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised while implementing it and is open. OQ-66, decided by
+the owner (decision 16), comes last; OQ-71 was raised while implementing it and is open.
 
 ## Open
 
@@ -124,22 +125,6 @@ text and the order of the model's `ContextServices`.
   pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
   stability clause from the decision. Needs a decision.
 
-### OQ-66: Generator time of the SyntaxFactory emitters on large hosts
-
-Owner decision 5 ("Generated code is built with SyntaxFactory", at the end) prescribes one `NormalizeWhitespace` per compilation unit. On a
-host of 300 requests, each with five behaviors (two of them injecting a service), plus 30 stream requests and 30 notifications, the host
-generator's time in a Release build (`ReportAnalyzer`, median of ten warm compiler-server builds) went from 66 ms with the text emitters to
-384 ms, and the handler generator's (330 handler files) from 35 ms to 102 ms. Skipping `GeneratedSyntax.Render`'s layout pass changed
-nothing measurable (368 ms), nor did caching parsed type names (402 ms): the time is `NormalizeWhitespace` over the one large
-`KeryxMediator` compilation unit (re-measured after the generated shape returned to switch statements and every pipeline context: 366 ms and
-101 ms). The source output runs only when the composition model changes (an edit that changes no handler, behavior or notification leaves it
-cached), so the cost is paid on a full build and on edits to the pipelines.
-
-- **Interim:** as decided: one `NormalizeWhitespace` per compilation unit.
-- **Proposal:** accept the cost. Alternatives, if it matters for very large hosts: normalize each top-level member of the mediator on its
-  own and assemble the unit (bounded work per member, against the decision's one call per unit), or build the syntax with its trivia and
-  skip normalization (Dovetail's pattern without `NormalizeWhitespace`). Needs a decision.
-
 ### OQ-69: A closed request base from a referenced assembly
 
 Owner decision 14 ("Requests are sealed", at the end) says to detect closed types without new Roslyn APIs: the `closed` modifier's text on
@@ -174,6 +159,24 @@ changes the publish code (every `PublishTo` comparison benchmark is such a pipel
   __NotificationN`, the entry (or the last link) calls `__NotificationN.RunHandlers(notification, cancellationToken)`, and the mediator has
   no `__notificationN` field and no `__CreateNotificationN`; measure `PublishTo1` and `PublishTo5` (typed and generic) before and after.
   Alternative: keep the interim (one empty context per scope and type, a `Volatile.Read` per publish). Needs a decision.
+
+### OQ-71: Generator time after OQ-66
+
+Owner decision 16 decided OQ-66: build the syntax with its whitespace, with generator time "back near the 66 ms / 35 ms baseline" on the
+large host (300 requests with five behaviors each, 30 stream requests, 30 notifications) as the target. With the whitespace built in, no
+normalization and each type name parsed once per file, the output is byte for byte what it was for every snapshot (two shapes no snapshot covers now read `int[,]` and `Dictionary<,>`
+where normalization wrote `int[, ]` and `Dictionary<, >`; OQ-66) and the generators measured 109 ms (host)
+and 48 ms (handler) once the compiler server had JIT-compiled the analyzer, against 372 ms and 93 ms before (OQ-66, at the end). In
+process, about 60 ms of the host generator is outside the emitters (handler models, composition, the reference scan, adding the 29,000-line
+mediator to the compilation) and unchanged by OQ-66; building the mediator's tree takes about 37 ms and writing it 13 ms. The 66 ms
+baseline was measured with the text emitters at an earlier commit, so how much of the difference is `SyntaxFactory` itself (one node and
+its red wrapper per construct, where the text emitters appended strings) and how much is code added since is not separated.
+
+- **Interim:** as implemented: the whitespace built in, type names parsed once per file, constant attribute lists built once.
+- **Proposal:** accept the time: the emitters are now under half of the host generator's time, the source output runs only when the
+  composition changes, and a host of this size is far above the samples. Alternatives: build repeated subtrees once per file (the
+  parameter lists and link shapes every pipeline repeats) for perhaps a further 10 to 20 ms, or measure the text emitters' commit again on
+  this machine to separate the costs before deciding. Needs a decision.
 
 ## Decided
 
@@ -1578,7 +1581,8 @@ the models' `global::` strings (`TypeName`, `Qualified`; the models' default val
 `Code`), small builders (members, invocations, `ref`/`out var` arguments, target-typed `new`, switch-expression arms), the
 `[GeneratedCode("Keryx", version)]`, `[MethodImpl(NoInlining)]` and pooling builder attributes, documentation lines (comment trivia, so
 normalization leaves the XML as written), the nullable directives, and `Render`. Syntax is built only inside `RegisterSourceOutput` (the
-emitters are called from the source outputs; the models still carry strings). `Render` normalizes each compilation unit once
+emitters are called from the source outputs; the models still carry strings). Until OQ-66 was decided (at the end: the syntax is now
+built with its whitespace and nothing normalizes it, writing the same bytes for every snapshot), `Render` normalized each compilation unit once
 (`NormalizeWhitespace`, four spaces, `\n`), runs a layout pass where normalization alone is hard to read or wrong (blank lines between
 members except plain fields; a break after `=>` with the body indented; the closing brace of a switch expression on its own line, which
 normalization writes as `throw x};`; the space before `is` after `)`, which it drops; a constructor's parameters one per line; a comment in
@@ -1590,8 +1594,9 @@ unchanged. `GeneratedSyntaxTests` pins each layout rule.
 
 Every handler-generator snapshot changed in whitespace only (token-for-token equal), and so did the host snapshots apart from the shapes
 of decisions 7 and 11 (below). Runtime, allocation, IL-switch and jump-table tests pass unchanged. Generator time on a large host is
-OQ-66 (open): 66 to 384 ms for the host generator, 35 to 102 ms for the handler generator. Folded into the ADR (Incremental generation
-rules, Alternatives considered), the brief (Engineering rules).
+OQ-66 (decided at the end): 66 to 384 ms for the host generator, 35 to 102 ms for the handler generator; 109 ms and 48 ms once the
+whitespace was built in (warm compiler server). Folded into the ADR (Incremental generation rules, Alternatives considered), the brief
+(Engineering rules).
 
 ### Generic dispatch is a switch expression (2026-11-26)
 
@@ -1853,3 +1858,62 @@ constructors, such a parameter is warning CS9113, an error under warnings-as-err
   1 code as before (112, 144 and 224 bytes; 6, 12 and 27 inlinees). Folded into the ADR (Generated pipeline shape, Streaming, Mediator,
   Incremental generation rules, Alternatives considered), the brief (Engineering rules, Phase 4), CONTEXT.md (link, pipeline context)
   and the README (Hosts, Benchmarks).
+
+### OQ-66: Generator time of the SyntaxFactory emitters on large hosts (2026-11-26)
+
+Owner decision 5 ("Generated code is built with SyntaxFactory", at the end) prescribes one `NormalizeWhitespace` per compilation unit. On a
+host of 300 requests, each with five behaviors (two of them injecting a service), plus 30 stream requests and 30 notifications, the host
+generator's time in a Release build (`ReportAnalyzer`, median of ten warm compiler-server builds) went from 66 ms with the text emitters to
+384 ms, and the handler generator's (330 handler files) from 35 ms to 102 ms. Skipping `GeneratedSyntax.Render`'s layout pass changed
+nothing measurable (368 ms), nor did caching parsed type names (402 ms): the time is `NormalizeWhitespace` over the one large
+`KeryxMediator` compilation unit (re-measured after the generated shape returned to switch statements and every pipeline context: 366 ms and
+101 ms). The source output runs only when the composition model changes (an edit that changes no handler, behavior or notification leaves it
+cached), so the cost is paid on a full build and on edits to the pipelines.
+
+- **Interim:** as decided: one `NormalizeWhitespace` per compilation unit.
+- **Proposal:** accept the cost. Alternatives, if it matters for very large hosts: normalize each top-level member of the mediator on its
+  own and assemble the unit (bounded work per member, against the decision's one call per unit), or build the syntax with its trivia and
+  skip normalization (Dovetail's pattern without `NormalizeWhitespace`). Needs a decision.
+- **Decision:** build the syntax with its whitespace and skip normalization (owner decision 16, 2026-11-26): no `NormalizeWhitespace`
+  and no layout fix-up pass, with generator time back near the 66 ms / 35 ms baseline as the target and the snapshots unchanged.
+  `GeneratedSyntax.Render` now writes the header and the tree as built. Within a line, every helper creates its tokens with the spaces
+  they need (`Modifiers`, `Param`, `Assign`, `Return`, `Throw`, the binary operators, `Conditional`, `Is`, `New`, `NewArray`,
+  `StaticLambda`, `Named`; the emitters' remaining direct `SyntaxFactory` statements and operators moved to helpers). Lines are laid out
+  by the containers from a depth: `WithBody` for a type (members one level deeper, a blank line between two members unless both are
+  fields without attributes, documentation lines and attribute lists at the member's depth), `Body` for a block (a blank line after a
+  statement that ends with a block; the nullable island of an oblivious fit, OQ-58), `Switch`, `If`, `Try`/`Catch`, `ForEach`,
+  `Expression` (the break after `=>`), `Where`, `Constructor` (one parameter per line from two), `Namespace` and `CompilationUnitOf`; a
+  container gives each line it starts a line feed and indentation as the leading trivia of its first token, set through the typed `With`
+  methods of the nodes the helpers build, never by rewriting a tree. The emitters pass each construct's depth (`KeryxMediator`'s members at
+  2, a pipeline context's at 3, a link's `InvokeAsync` at 4; a handler's from its namespace and containing types). The link body written
+  with nullable warnings disabled keeps the layout the fix-up pass gave it, a blank line after `=>` and the body at the member's depth after
+  `#nullable disable warnings` (`NullableObliviousExpression`), so that its bytes do not change either. The switch-expression helpers
+  (`SwitchOn` and its arms), unused since OQ-67, are removed. Without normalization, the time left was mostly the parser: the emitters
+  parse type names from the models' strings (`TypeName`, `Qualified`), 28,606 times for the large host; each text is now parsed once per
+  file (a per-thread cache that `Render` empties), and the constant attribute lists are built once.
+  Output: every Verify snapshot is unchanged byte for byte, and no snapshot was re-accepted. While the change was made, a temporary check
+  (not committed) rendered every generated file both ways from the same tree, normalized with the old layout pass and as built, and failed
+  on any difference: none in the 7,040 files the test suite generates, the 393 of the large host or the 39 of the solution's own builds;
+  the large host's generated sources also equal the baseline's (`diff -r`). Byte for byte for every snapshot is not byte for byte for
+  every input: a review built hosts with shapes no snapshot covers and found two differences, both improvements that compile to the same
+  thing. (a) Normalization wrote a multi-dimensional rank with a space, `ValueTask<int[, ]>` for a handler returning `int[,]` or
+  `int[][,]` (in the handler's `InvokeAsync`, the typed `Send`, `Unsafe.As`, `__SendN`, the behavior call's type arguments and the link's
+  `INext<...>`); the type name is now written as parsed, `int[,]`. (b) Normalization wrote an unbound generic `typeof` in a service key,
+  `[FromKeyedServices(typeof(Dictionary<,>))]`, as `typeof(global::System.Collections.Generic.Dictionary<, >)` (in the handler
+  constructor's attribute and in `AddKeryx`'s `GetRequiredKeyedService`); it is now `Dictionary<,>`. Every other shape tried was
+  byte-identical (keyword namespaces and identifiers, `record struct` and `readonly record struct` nesting, 13-deep nesting, the global
+  namespace, oblivious fits, struct notifications, keyed and default-valued services, `string?[]` and `int?[]?`), and so was the large host.
+  `GeneratedSyntaxTests` are rewritten against the helpers (20 cases): the spacing of nullable types and arrays of them (`string?[]`,
+  `int?[]?`), multi-dimensional ranks and unbound generic service keys as written (`int[,]`, `int[][,]`, `Dictionary<,>`), switch sections (type patterns, `when` guards,
+  constants, `default`), the blank line after `if`/`else if`, `try`/`catch` (with a comment in an empty block) and `foreach`, blank lines
+  between members but not plain fields, the break after `=>`, constraint clauses, constructor parameters one per line, documentation and
+  attribute lines, the nullable islands, the assembly attribute and the header.
+  Measured on the large host above (`ReportAnalyzer`, Release, median of ten builds; Apple M4 Max, macOS 27.2, .NET SDK 11.0.100,
+  2026-11-27; `time_gen.sh` with `gen_bighost.py`, kept with the results in the session scratchpad under `followup-trivia/`). Step 5's
+  method (one warm-up build, then runs 2 to 11): host generator 384 to 207 ms, handler generator 102 to 78 ms. The "after" runs were still
+  getting faster (287 ms at run 2, 107 ms at run 11) while the compiler server JIT-compiled the new analyzer, so the same was measured after
+  ten more warm-up builds: host 372 to 109 ms, handler 93 to 48 ms. In process (the same generators on the same host, run 40 times, median
+  of the last 20), the host generator spends 50 ms in `HostEmitter.Mediator` (13 ms of it writing the text) instead of 350 to 420 ms, and
+  about 60 ms outside the emitters, the same before and after (handler models, composition, the reference scan, the generated source added
+  to the compilation). So the target of about 66 ms and 35 ms is not reached: OQ-71 (open). Folded into the ADR (status, Incremental
+  generation rules, Alternatives considered), the brief (Engineering rules) and the README (Hosts).

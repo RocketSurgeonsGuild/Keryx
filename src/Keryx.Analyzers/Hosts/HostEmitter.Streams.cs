@@ -30,7 +30,7 @@ internal static partial class HostEmitter
                    "Stream",
                    Params(Param(TypeName(request.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                )
-              .Statements(statements)
+              .Statements(MemberDepth, statements)
               .Documented(
                    "<summary>",
                    $"    Streams a <c>{Display(request.MessageType)}</c> through its pipeline from its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
@@ -56,8 +56,9 @@ internal static partial class HostEmitter
                          "Stream",
                          Params(Param(TypeName("global::Keryx.IStreamRequest<TItem>"), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
                      )
-                    .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TItem"))))
+                    .WithTypeParameterList(TypeParameters("TItem"))
                     .Statements(
+                         MemberDepth,
                          [
                              Call(Qualified(ThrowIfNull), Id("request")),
                              .. RequestDispatch(streams, "__StreamRequestIndex", static (stream, i, request) => StreamArm(stream, i, request)),

@@ -48,7 +48,8 @@ One commit per step, each with build and tests green:
   key) its behavior methods inject, computed in the model; a transient shared by several behavior methods of a pipeline is one instance
   per scope and pipeline.
 - **1fddbdd, generated code with `SyntaxFactory`:** `HandlerEmitter` and `HostEmitter` build their output with Roslyn's `SyntaxFactory`
-  through `GeneratedSyntax` (one `NormalizeWhitespace` per compilation unit, then a layout pass and the header); links are one
+  through `GeneratedSyntax` (then one `NormalizeWhitespace` per compilation unit, a layout pass and the header; since OQ-66 the whitespace
+  is built in, below); links are one
   `readonly struct` per position with a primary constructor and target-typed `new(pipeline, request)`. Generic dispatch is written as
   `switch` statements with exact-type `when` guards, not the switch expressions decision 7 named (the commit title still says
   "switch-expression"): the expressions lost the arms' tail calls and measured slower (OQ-67).
@@ -66,6 +67,11 @@ One commit per step, each with build and tests green:
   OQ-68 (decision 18): a request or stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is
   the new host error KRX038. OQ-69 (a closed base from a referenced assembly) is open. The code fix _Make sealed_ is not offered for a
   type that declares its own `virtual` or `protected` members.
+- **Generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` builds every token with its spaces and every line
+  from the depth its container gives it, so `Render` writes the tree as built: no `NormalizeWhitespace` and no layout pass. Type names are
+  parsed once per file. Every snapshot is byte for byte unchanged (a temporary two-way render of 7,472 generated files found no
+  difference); two shapes no snapshot covers now read `int[,]` and `Dictionary<,>` where normalization wrote `int[, ]` and
+  `Dictionary<, >`, and `GeneratedSyntaxTests` pins each layout rule against the helpers.
 - **Pipelines that resolve nothing get no context (decision 16 for OQ-65):** a request or stream pipeline whose handler's invoker is
   static and whose behaviors inject nothing, and a publish pipeline without handlers whose behaviors inject nothing, have no pipeline
   context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
@@ -85,7 +91,8 @@ Measured in the second rework (Apple M4 Max, macOS 27.2, BenchmarkDotNet 0.15.8;
   every tail call, the linear generic `Stream<int>` shrinks from 352 to 308 bytes, and the sync `Send` rows measured within noise or
   slightly faster; the gate prototype's code is unchanged;
 - generator time on a host of 300 requests: 66 to 384 ms for the host generator and 35 to 102 ms for the handler generator with the
-  `SyntaxFactory` emitters, dominated by `NormalizeWhitespace` (OQ-66).
+  `SyntaxFactory` emitters, dominated by `NormalizeWhitespace`; with the whitespace built in, 109 ms and 48 ms on a warm compiler server
+  (372 ms and 93 ms before, the same way), still above the text emitters' 66 ms and 35 ms (OQ-66, decided; OQ-71, open).
 
 ## Decisions for the owner
 
@@ -107,16 +114,15 @@ each one's **Interim** line:
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
-- **OQ-66:** the one `NormalizeWhitespace` per compilation unit makes the host generator about six times slower on a large host; accept
-  it, or build the syntax with its trivia and skip normalization?
 - **OQ-69:** Roslyn does not return `IsClosedTypeAttribute` for a metadata type, so a referenced closed request base is treated (and named
   in KRX003) as abstract; accept that?
 - **OQ-70:** a publish pipeline whose handlers all have static invokers and whose behaviors inject nothing resolves nothing but keeps
   its context, because the publish strategy is an instance method of it; make the strategy static and drop that context too?
+- **OQ-71:** with the whitespace built in (OQ-66), the generators take 109 ms and 48 ms on the large host, not the text emitters' 66 ms
+  and 35 ms the decision aimed for; most of the host generator's remaining time is outside the emitters. Accept it, or build repeated
+  subtrees once per file (or re-measure the text emitters' commit first)?
 
-Next in the plan: the owner has answered OQ-66 (decision 16: no `NormalizeWhitespace`). It is scheduled for the next step; until it
-records it under **Decided** and folds it into the ADR, the entry stays open and the code follows its interim. OQ-65 and OQ-67 are
-decided and applied.
+OQ-65, OQ-66 and OQ-67 (decision 16) are decided and applied.
 
 ## Gates and checks
 
@@ -145,7 +151,7 @@ decided and applied.
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64, OQ-69 and OQ-70, and apply the scheduled answer to OQ-66 (above).
+- Decide OQ-59 to OQ-64 and OQ-69 to OQ-71.
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`
