@@ -53,6 +53,10 @@ public class NotificationAllocationTests : HostTest
         [PublishStrategy(PublishStrategy.Parallel)]
         public sealed record Fanout : INotification;
 
+        /// <summary>No handlers, and its behavior injects nothing: a publish pipeline without a context.</summary>
+        [Behavior(typeof(Around))]
+        public sealed record Unwatched : INotification;
+
         [PublishStrategy(PublishStrategy.Parallel)]
         [Behavior(typeof(Pass))]
         public readonly record struct FanoutTick(int Value) : INotification;
@@ -91,6 +95,7 @@ public class NotificationAllocationTests : HostTest
                 var wrapped = new Wrapped();
                 var fanout = new Fanout();
                 var fanoutTick = new FanoutTick(1);
+                var unwatched = new Unwatched();
 
                 return new()
                 {
@@ -104,6 +109,8 @@ public class NotificationAllocationTests : HostTest
                     ["parallel, generic class"] = Region(() => publisher.Publish(fanout)),
                     ["parallel, typed struct, behavior"] = Region(() => mediator.Publish(fanoutTick)),
                     ["parallel, generic struct, behavior"] = Region(() => publisher.Publish(fanoutTick)),
+                    ["no handlers, typed, behavior without a context"] = Region(() => mediator.Publish(unwatched)),
+                    ["no handlers, generic, behavior without a context"] = Region(() => publisher.Publish(unwatched)),
                     ["boxed, typed struct"] = Region(() => mediator.Publish(tock)),
                     ["boxed, generic struct"] = Region(() => publisher.Publish(tock)),
                     ["one box"] = Region(() =>
@@ -154,7 +161,7 @@ public class NotificationAllocationTests : HostTest
 
         var allocated = Call<Dictionary<string, long>>(host, "Sample.Probe", "Measure", scope.ServiceProvider);
 
-        await Assert.That(allocated.Count).IsEqualTo(13);
+        await Assert.That(allocated.Count).IsEqualTo(15);
         var oneBox = allocated["one box"];
         await Assert.That(oneBox).IsGreaterThan(0L);
         foreach (var (scenario, bytes) in allocated)

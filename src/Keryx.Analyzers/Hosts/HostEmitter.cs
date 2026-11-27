@@ -15,8 +15,9 @@ namespace Keryx.Analyzers.Hosts;
 /// <summary>
 ///     Writes the host's generated types (ADR 0001, Generated host), built with <see cref="SyntaxFactory" /> (<see cref="GeneratedSyntax" />):
 ///     the scoped <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request
-///     and stream request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts and
-///     flat link structs (ADR 0001, Generated pipeline shape), and
+///     and stream request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for
+///     the pipelines that resolve something and flat link structs that take only what they read or pass on (ADR 0001, Generated pipeline
+///     shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
 ///     their behavior methods directly, and the pipeline contexts resolve their injected services.
 /// </summary>
@@ -80,7 +81,10 @@ internal static partial class HostEmitter
 
         for (var i = 0; i < notifications.Length; i++)
         {
-            members.Add(Field(Modifiers(SyntaxKind.PrivateKeyword), NullableType(Id(NotificationContextName(i))), NotificationContextField(i)));
+            if (HasContext(notifications[i]))
+            {
+                members.Add(Field(Modifiers(SyntaxKind.PrivateKeyword), NullableType(Id(NotificationContextName(i))), NotificationContextField(i)));
+            }
         }
 
         members.Add(
@@ -142,7 +146,7 @@ internal static partial class HostEmitter
 
         for (var i = 0; i < requests.Length; i++)
         {
-            if (HasContext(requests[i]))
+            if (HasContext(requests[i]) || !requests[i].Behaviors.IsEmpty)
             {
                 members.Add(Context(requests[i], i));
             }
@@ -150,7 +154,7 @@ internal static partial class HostEmitter
 
         for (var i = 0; i < streams.Length; i++)
         {
-            if (HasContext(streams[i]))
+            if (HasContext(streams[i]) || !streams[i].Behaviors.IsEmpty)
             {
                 members.Add(StreamContext(streams[i], i));
             }
@@ -173,7 +177,7 @@ internal static partial class HostEmitter
                            "    nothing is resolved or allocated per call after that. Registered by <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
                            "</summary>"
                        );
-        return Render(InNamespace(settings, mediator), MediatorPragma);
+        return Render(InNamespace(settings, mediator));
     }
 
     public static SourceText ServiceCollectionExtensions(HostSettings settings, HostComposition composition)
@@ -509,7 +513,8 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     The pipeline method of a request or stream request: the handler's invoker without behaviors, else the outermost behavior method
-    ///     with the first link, and, when the pipeline has a context, the non-inlined method that creates it.
+    ///     with the first link, and, when the pipeline has a context, the non-inlined method that creates it. A pipeline without a context
+    ///     (<see cref="HasContext(HostPipeline)" />) reads no field: the method calls the outermost behavior method with <c>new(request)</c>.
     /// </summary>
     private static IEnumerable<MemberDeclarationSyntax> PipelineCore(
         HostPipeline pipeline,
@@ -530,14 +535,84 @@ internal static partial class HostEmitter
         }
         else
         {
-            var call = Return(BehaviorCall(pipeline.Behaviors[0], request.ContextServices, TypeName(contextName + "." + firstLink), "request"));
-            yield return core.WithBody(Island(Block(Var(PipelineName, context), call), pipeline.Behaviors[0].ObliviousFit));
+            var links = LinkCaptures(pipeline.Behaviors, End(pipeline));
+            yield return core.WithBody(
+                Entry(
+                    Return(BehaviorCall(pipeline.Behaviors[0], request.ContextServices, TypeName(contextName + "." + firstLink), links[0], "request")),
+                    CallCaptures(pipeline.Behaviors[0], links[0]),
+                    context,
+                    pipeline.Behaviors[0].ObliviousFit
+                )
+            );
         }
 
         if (hasContext)
         {
             yield return CreateContext(contextName, contextField, createName);
         }
+    }
+
+    /// <summary>
+    ///     The body of a pipeline method with behaviors: the call of the outermost behavior method, after <c>var pipeline = ...;</c> when
+    ///     that call reads the context or passes it on.
+    /// </summary>
+    private static BlockSyntax Entry(StatementSyntax call, Captures captures, ExpressionSyntax context, bool obliviousFit) =>
+        Island(( captures & Captures.Pipeline ) != 0 ? Block(Var(PipelineName, context), call) : Block(call), obliviousFit);
+
+    /// <summary>
+    ///     What a link or a behavior method call needs from where it is written (ADR 0001, Generated pipeline shape): the pipeline context, the
+    ///     message, both or neither. A link takes exactly the parameters it reads or passes on, so it captures nothing it does not use and has
+    ///     no unread primary constructor parameter (CS9113).
+    /// </summary>
+    [Flags]
+    private enum Captures
+    {
+        None = 0,
+        Pipeline = 1,
+        Message = 2,
+    }
+
+    /// <summary>
+    ///     What the end of a request or stream pipeline reads: the request, and the context when the handler is resolved into it (the
+    ///     invoker is not static).
+    /// </summary>
+    private static Captures End(HostPipeline pipeline) => Captures.Message | ( pipeline.Handler.StaticInvoker ? Captures.None : Captures.Pipeline );
+
+    /// <summary>
+    ///     What each link reads or passes on, outermost first: the last link what the end of the pipeline reads (<paramref name="end" />),
+    ///     every other link what its call of the next behavior method needs (<see cref="CallCaptures" />).
+    /// </summary>
+    private static Captures[] LinkCaptures(ImmutableArray<PipelineBehaviorModel> behaviors, Captures end)
+    {
+        var links = new Captures[behaviors.Length];
+        links[^1] = end;
+        for (var k = behaviors.Length - 2; k >= 0; k--)
+        {
+            links[k] = CallCaptures(behaviors[k + 1], links[k + 1]);
+        }
+
+        return links;
+    }
+
+    /// <summary>
+    ///     What a call of <paramref name="behavior" />'s method needs: the message when the method takes it, the context when it injects a
+    ///     service (read from the context's fields), and what its link <paramref name="next" /> takes, which the call constructs.
+    /// </summary>
+    private static Captures CallCaptures(PipelineBehaviorModel behavior, Captures next)
+    {
+        var captures = Captures.None;
+        foreach (var role in behavior.Parameters)
+        {
+            captures |= role switch
+            {
+                BehaviorParameterRole.Message => Captures.Message,
+                BehaviorParameterRole.Service => Captures.Pipeline,
+                BehaviorParameterRole.Next => next,
+                _ => Captures.None,
+            };
+        }
+
+        return captures;
     }
 
     /// <summary>
@@ -561,13 +636,16 @@ internal static partial class HostEmitter
     ///     The pipeline context of one request: its handler (unless the invoker is static) and the injected services of its behavior methods,
     ///     resolved once per scope, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
     ///     <c>next</c> of behavior <c>k</c>: it calls behavior <c>k + 1</c>'s method with <c>Link{k + 1}</c>, and the last link calls the
-    ///     handler's invoker. A pipeline with behaviors always has a context, even when it holds nothing but its links (a static invoker and
-    ///     no injected services); whether such a pipeline should have none is OQ-65.
+    ///     handler's invoker. A pipeline with nothing to resolve (a static invoker and no injected services) has no context: its links are
+    ///     nested in a static class of the same name and take only the request.
     /// </summary>
     private static ClassDeclarationSyntax Context(HostPipeline pipeline, int index) =>
         PipelineContext(pipeline, ContextName(index), "pipeline", LinkName, $"global::Keryx.INext<{pipeline.Handler.ResponseType}>", $"{ValueTask}<{pipeline.Handler.ResponseType}>");
 
-    /// <summary>The pipeline context class of a request or stream request, with its links.</summary>
+    /// <summary>
+    ///     The pipeline context class of a request or stream request, with its links; for a pipeline without a context, the static class
+    ///     that holds its links.
+    /// </summary>
     private static ClassDeclarationSyntax PipelineContext(
         HostPipeline pipeline,
         string contextName,
@@ -578,25 +656,30 @@ internal static partial class HostEmitter
     )
     {
         var request = pipeline.Handler;
+        var hasContext = HasContext(pipeline);
         var members = new List<MemberDeclarationSyntax>();
-        var resolution = new List<StatementSyntax>();
-        if (!request.StaticInvoker)
+        if (hasContext)
         {
-            members.Add(Field(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(request.HandlerClass), "Handler"));
-            resolution.Add(
-                Assign(Id("Handler"), Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(request.HandlerClass))), Id(ServiceProviderName)))
-            );
+            var resolution = new List<StatementSyntax>();
+            if (!request.StaticInvoker)
+            {
+                members.Add(Field(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(request.HandlerClass), "Handler"));
+                resolution.Add(
+                    Assign(Id("Handler"), Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(request.HandlerClass))), Id(ServiceProviderName)))
+                );
+            }
+
+            members.AddRange(ServiceFields(request.ContextServices));
+            resolution.AddRange(ServiceResolution(request.ContextServices));
+            members.Add(ContextConstructor(contextName, resolution));
         }
 
-        members.AddRange(ServiceFields(request.ContextServices));
-        resolution.AddRange(ServiceResolution(request.ContextServices));
-        members.Add(ContextConstructor(contextName, resolution));
-
+        var links = pipeline.Behaviors.IsEmpty ? [] : LinkCaptures(pipeline.Behaviors, End(pipeline));
         for (var k = 0; k < pipeline.Behaviors.Length; k++)
         {
             var isLast = k == pipeline.Behaviors.Length - 1;
             ExpressionSyntax body = !isLast
-                ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, Id(linkName(k + 1)), "request")
+                ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, Id(linkName(k + 1)), links[k + 1], "request")
                 : Invoke(
                     Member(request.StaticInvoker ? Qualified(request.HandlerClass) : Member(Id(PipelineName), "Handler"), HandlerAnalysis.InvokerName),
                     Id("request"),
@@ -606,6 +689,7 @@ internal static partial class HostEmitter
                 Link(
                     linkName(k),
                     contextName,
+                    links[k],
                     request.MessageType,
                     "request",
                     nextInterface,
@@ -617,13 +701,26 @@ internal static partial class HostEmitter
             );
         }
 
-        return ContextClass(contextName, members, $"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
+        return hasContext
+            ? ContextClass(contextName, members, $"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>")
+            : LinksClass(
+                contextName,
+                members,
+                $"<summary>The links of the {description} of <c>{Display(request.MessageType)}</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>"
+            );
     }
 
     /// <summary>A pipeline context class: sealed, created once per scope.</summary>
     private static ClassDeclarationSyntax ContextClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
         ClassDeclaration(name)
            .WithModifiers(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.SealedKeyword))
+           .WithMembers(List(members))
+           .Documented(summary);
+
+    /// <summary>The static class that holds the links of a pipeline without a context: nothing is created or resolved for it.</summary>
+    private static ClassDeclarationSyntax LinksClass(string name, List<MemberDeclarationSyntax> members, string summary) =>
+        ClassDeclaration(name)
+           .WithModifiers(Modifiers(SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword))
            .WithMembers(List(members))
            .Documented(summary);
 
@@ -634,17 +731,16 @@ internal static partial class HostEmitter
            .WithBody(Block(resolution));
 
     /// <summary>
-    ///     One link (ADR 0001, Generated pipeline shape): a <c>readonly struct</c> with a primary constructor over the pipeline context and the
-    ///     message, and an expression-bodied <c>InvokeAsync</c> that calls the next behavior method (or the handler, or the publish strategy).
-    ///     A parameter that <c>InvokeAsync</c> does not read (the context in the last link of a pipeline whose handler's invoker is static;
-    ///     both in the last link of a notification type without handlers) is not captured, so the link holds what the links before this
-    ///     rework held; the mediator's header suppresses its CS9113 (<see cref="GeneratedSyntax.MediatorPragma" />). A call through a
-    ///     nullable-oblivious fit (OQ-58) is written with nullable warnings disabled: generated code names that type without an annotation, so
-    ///     the call would warn where the oblivious declaration does not.
+    ///     One link (ADR 0001, Generated pipeline shape): a <c>readonly struct</c> with a primary constructor over what its <c>InvokeAsync</c>
+    ///     reads or passes on (<paramref name="captures" />: the pipeline context, the message, both, or neither, then without a parameter
+    ///     list), and an expression-bodied <c>InvokeAsync</c> that calls the next behavior method (or the handler, or the publish strategy).
+    ///     A call through a nullable-oblivious fit (OQ-58) is written with nullable warnings disabled: generated code names that type without
+    ///     an annotation, so the call would warn where the oblivious declaration does not.
     /// </summary>
     private static StructDeclarationSyntax Link(
         string name,
         string contextName,
+        Captures captures,
         string messageType,
         string messageName,
         string nextInterface,
@@ -659,11 +755,22 @@ internal static partial class HostEmitter
             body = body.WithLeadingTrivia(NullableWarnings(disable: true));
         }
 
+        var parameters = new List<ParameterSyntax>(2);
+        if (( captures & Captures.Pipeline ) != 0)
+        {
+            parameters.Add(Param(Id(contextName), PipelineName));
+        }
+
+        if (( captures & Captures.Message ) != 0)
+        {
+            parameters.Add(Param(TypeName(messageType), messageName));
+        }
+
         var invoke = Method(Modifiers(SyntaxKind.PublicKeyword), TypeName(returnType), "InvokeAsync", Params(Param(TypeName(CancellationToken), CancellationTokenName)))
            .Expression(body);
         var link = StructDeclaration(name)
                   .WithModifiers(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword))
-                  .WithParameterList(Params(Param(Id(contextName), PipelineName), Param(TypeName(messageType), messageName)))
+                  .WithParameterList(parameters.Count == 0 ? null : Params([.. parameters]))
                   .WithBaseList(BaseList(SingletonSeparatedList<BaseTypeSyntax>(SimpleBaseType(TypeName(nextInterface)))));
 
         if (obliviousFit)
@@ -700,19 +807,33 @@ internal static partial class HostEmitter
     /// <summary>
     ///     The direct call of a behavior method (ADR 0001, Behavior methods): the class's static method with explicit type arguments
     ///     (<paramref name="link" /> in place of <c>TNext</c>) and the arguments in declared order: the message, the link as a target-typed
-    ///     <c>new(pipeline, message)</c>, the call's token, and its injected services read from the context's shared fields.
+    ///     <c>new(...)</c> over what it takes (<c>new(pipeline, message)</c>, <c>new(message)</c>, <c>new(pipeline)</c> or <c>new()</c>), the
+    ///     call's token, and its injected services read from the context's shared fields.
     /// </summary>
     /// <param name="behavior">The behavior.</param>
     /// <param name="services">The pipeline context's services, which the behavior's <see cref="PipelineBehaviorModel.ServiceSlots" /> index.</param>
     /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
+    /// <param name="linkCaptures">What that link takes (<see cref="LinkCaptures" />).</param>
     /// <param name="message">The name of the request or notification.</param>
     private static InvocationExpressionSyntax BehaviorCall(
         PipelineBehaviorModel behavior,
         EquatableArray<ContextServiceModel> services,
         TypeSyntax link,
+        Captures linkCaptures,
         string message
     )
     {
+        var linkArguments = new List<ExpressionSyntax>(2);
+        if (( linkCaptures & Captures.Pipeline ) != 0)
+        {
+            linkArguments.Add(Id(PipelineName));
+        }
+
+        if (( linkCaptures & Captures.Message ) != 0)
+        {
+            linkArguments.Add(Id(message));
+        }
+
         var typeArguments = behavior.TypeArguments.Select(t => t.Length == 0 ? link : TypeName(t)).ToArray();
         var arguments = new List<ExpressionSyntax>(behavior.Parameters.Count);
         var service = 0;
@@ -730,7 +851,7 @@ internal static partial class HostEmitter
                 role switch
                 {
                     BehaviorParameterRole.Message => Id(message),
-                    BehaviorParameterRole.Next => TargetTypedNew(Id(PipelineName), Id(message)),
+                    BehaviorParameterRole.Next => TargetTypedNew([.. linkArguments]),
                     BehaviorParameterRole.CancellationToken => Id(CancellationTokenName),
                     _ => DefaultLiteral(),
                 }
@@ -759,15 +880,11 @@ internal static partial class HostEmitter
             : Coalesce(field, Code(defaultValue));
     }
 
-    /// <summary>What a pipeline context holds, for its documentation.</summary>
+    /// <summary>What a pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
     private static string Holds(HostHandlerModel handler) =>
-        (handler.StaticInvoker, handler.ContextServices.Count > 0) switch
-        {
-            (false, true) => "its handler and the injected services of its behaviors",
-            (false, false) => "its handler",
-            (true, true) => "the injected services of its behaviors",
-            (true, false) => "nothing but its links",
-        };
+        handler.StaticInvoker ? "the injected services of its behaviors"
+        : handler.ContextServices.Count > 0 ? "its handler and the injected services of its behaviors"
+        : "its handler";
 
     /// <summary>
     ///     One field per service the pipeline context shares (ADR 0001, Injected parameters), in order of first use: the service type for a
@@ -884,11 +1001,12 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     Whether a request or stream pipeline has a context (created once per scope): its handler is resolved from the scope, or it has
-    ///     behaviors (the context nests their links). A pipeline without behaviors whose handler's invoker is static calls the invoker
-    ///     directly.
+    ///     Whether a request or stream pipeline has a context (created once per scope): it resolves something, its handler (the invoker is
+    ///     not static) or an injected service of its behaviors (ADR 0001, Generated pipeline shape). A pipeline with nothing to resolve has
+    ///     none: without behaviors it calls the static invoker directly, with behaviors it calls the outermost behavior method directly and
+    ///     its links, nested in a static class, take only the request.
     /// </summary>
-    private static bool HasContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || !pipeline.Behaviors.IsEmpty;
+    private static bool HasContext(HostPipeline pipeline) => !pipeline.Handler.StaticInvoker || pipeline.Handler.ContextServices.Count > 0;
 
     /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
     private static string ServiceField(int slot) => "Service" + Digits(slot);

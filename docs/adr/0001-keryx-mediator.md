@@ -31,7 +31,8 @@ generic dispatch is written as `switch` statements, not switch expressions, so t
 decided); request and stream request types are sealed, or abstract or closed bases of sealed ones (KRX024, with a code fix), a handler
 of an abstract or closed request type is KRX003, a host composes only sealed request types (a referenced one that is not sealed is
 KRX038, open-questions OQ-68, decided), and generic `Send` and `Stream` test each sealed request type with a type pattern
-(`Publish` keeps exact-type guards, because notification types need not be sealed); links are written with primary constructors and target-typed `new(pipeline, request)`; and `next` stays a struct
+(`Publish` keeps exact-type guards, because notification types need not be sealed); links are written with primary constructors and target-typed `new(...)`, a pipeline that resolves nothing has no pipeline context, and
+each link takes only what it reads or passes on (open-questions OQ-65, decided); and `next` stays a struct
 implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>` (typed next delegates rejected).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
@@ -715,10 +716,13 @@ For each pipeline the host emits:
 - a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
   the notification type's handlers, and the publish strategy that runs them) and each distinct service the pipeline's behavior methods
   inject, once (one `ServiceN` field per service type and key, shared by every behavior method that injects it; see Injected
-  parameters), resolved in its constructor. Every pipeline with behaviors has one, even when it holds nothing but its links (a static
-  invoker and no injected services, or a notification type without handlers whose behaviors inject nothing); a request or stream
-  pipeline without behaviors whose handler's invoker is static has none and calls the invoker directly. Dropping the contexts that hold
-  nothing is proposed (open-questions OQ-65, open);
+  parameters), resolved in its constructor. Only a pipeline that resolves something has one (decided 2026-11-26, OQ-65): a request or
+  stream pipeline whose handler's invoker is static and whose behaviors inject nothing has no context, nor does a publish pipeline without
+  handlers whose behaviors inject nothing. Such a pipeline has no `__pipelineN` field and no `__CreatePipelineN`: without behaviors it
+  calls the static invoker directly, with behaviors its entry calls the outermost behavior method directly and its links are nested in a
+  `private static class` of the same name (`__PipelineN`, `__StreamPipelineN`, `__NotificationN`). A publish pipeline with handlers keeps
+  its context even when every handler's invoker is static and nothing is injected, because the publish strategy is a method of the
+  context (open-questions OQ-70, open);
 - one small **link** struct per position, a `readonly struct` with a primary constructor and an expression-bodied `InvokeAsync`, with a
   one-line summary that names where its `next` goes (decided 2026-11-26):
 
@@ -731,20 +735,38 @@ For each pipeline the host emits:
     }
     ```
 
-    Its `InvokeAsync(ct)` calls the behavior method at position k+1 with a target-typed `new(pipeline, request)`, the next link, as
-    `next` (the link type stays the explicit type argument for `TNext`) and that method's injected services read from the context; the last
-    link calls the handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the publish strategy). The entry of the
-    pipeline calls the outermost behavior method the same way. Every link takes the context and the message (`notification` in a publish
-    pipeline). A primary constructor parameter that `InvokeAsync` does not read is not captured, so a link holds what it held before the
-    primary constructors: the last link of a pipeline whose handler's invoker is static holds the request alone, and the last link of a
-    publish pipeline without handlers holds nothing. Such a parameter is warning CS9113, which the mediator's header suppresses
-    (`#pragma warning disable CS0612, CS0618, CS9113`). Taking only what a link reads or passes on is proposed with OQ-65 (open). Types are
-    `global::`-qualified; there are no `using` aliases.
+    Its `InvokeAsync(ct)` calls the behavior method at position k+1 with a target-typed `new(...)`, the next link, as `next` (the link type
+    stays the explicit type argument for `TNext`) and that method's injected services read from the context; the last link calls the
+    handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the publish strategy). The entry of the pipeline calls the
+    outermost behavior method the same way, after reading the context only when that call reads or passes it on. A link takes exactly the
+    parameters it reads or passes on (decided 2026-11-26, OQ-65): the context when its call injects a service, when the handler is resolved
+    into the context (its last link) or when the publish strategy runs from it, or when a later link takes the context; the message
+    (`notification` in a publish pipeline) whenever anything after it runs, which is always except in the last link of a publish pipeline
+    without handlers. So a link is `LinkK(__PipelineN pipeline, TRequest request)`, `LinkK(TRequest request)` (`new(request)`) or, as the
+    last link of a publish pipeline without handlers, `LinkK` without a parameter list (`new()`); a behavior method always takes the
+    message, so no link takes the context alone. No link has an unread primary constructor parameter, so the generated mediator raises no
+    CS9113 and its header pragma is the obsolete-type one alone (`#pragma warning disable CS0612, CS0618`). Types are `global::`-qualified;
+    there are no `using` aliases.
+
+    ```csharp
+    /// <summary>The links of the pipeline of <c>Sample.Count</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>
+    private static class __Pipeline0
+    {
+        /// <summary>The <c>next</c> of <c>Sample.Step1</c>: the handler.</summary>
+        public readonly struct Link1(global::Sample.Count request) : global::Keryx.INext<int>
+        {
+            public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
+                global::Sample.CountHandler.InvokeAsync(request, cancellationToken);
+        }
+    }
+    ```
 
 Links are **flat**: each one holds at most two fields regardless of pipeline depth, so struct copying does not grow with depth. A behavior
 may call `next` more than once (retry). The `CancellationToken` is passed as the `InvokeAsync` argument, never stored in a link. The
-spelling does not change the machine code: the Phase 4 gate prototype, written the same way, still allocates nothing and inlines every
-link and behavior method (open-questions, "Links with primary constructors").
+spelling does not change the machine code of a pipeline with a context whose links all read or pass it on: the Phase 4 gate prototype,
+written that way, still allocates nothing and inlines every link and behavior method (open-questions, "Links with primary
+constructors"). A pipeline without a context reads no field at its entry and its links hold the message alone: three stream behaviors
+allocate 648 B instead of 680 B per `Stream`, and the JIT code of an inlined pipeline shrinks (OQ-65).
 
 Stream pipelines use the same shape with `IStreamNext<TItem>` links (see Streaming), and the publish pipeline of a notification type
 with `INext` links (see Notifications).
@@ -839,9 +861,13 @@ public static class SkipNulls
 
 **Links.** As for requests, the host emits one flat `readonly struct StreamLinkK(__StreamPipelineN pipeline, TRequest request) : IStreamNext<TItem>`
 per position, with an expression-bodied `InvokeAsync(ct)` that returns the result of the stream behavior method at position k+1, called
-with a target-typed `new(pipeline, request)` as `next` and its injected services from the pipeline context, or the handler's
-`InvokeAsync` at the end. Every link takes the context and the request; the last link of a pipeline whose handler's invoker is static
-does not read the context, which is then not captured (see Generated pipeline shape). The token is an argument, never stored in a link.
+with a target-typed `new(...)` as `next` and its injected services from the pipeline context, or the handler's `InvokeAsync` at the end.
+A link takes only what it reads or passes on (decided 2026-11-26, OQ-65; see Generated pipeline shape): the request always, the context
+only when it or a later link reads it, so the last link of a pipeline whose handler's invoker is static is `StreamLinkK(TRequest
+request)`. A stream pipeline whose handler's invoker is static and whose stream behaviors inject nothing has no context: `Stream()` calls
+the outermost stream behavior method with `new(request)`, and the links, each `StreamLinkK(TRequest request)`, are nested in a
+`private static class __StreamPipelineN`. A stream behavior written as an iterator captures its `next` in its iterator, so a smaller link
+makes that iterator smaller (680 B to 648 B per `Stream` for three behaviors, OQ-65). The token is an argument, never stored in a link.
 
 **Cancellation.** The outermost element of the pipeline receives the `Stream(request, ct)` token as its argument and the consumer's
 `WithCancellation` token through `GetAsyncEnumerator`; every inner element receives one token, as its argument, and is enumerated
@@ -994,8 +1020,9 @@ internal sealed partial class KeryxMediator : IMediator
 }
 ```
 
-- **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline. After the first call in a scope, nothing is
-  resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
+- **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline that resolves something (its handler or the
+  injected services of its behaviors) and per notification type with handlers (open-questions OQ-70, open); any other pipeline has no
+  context and no field in the mediator (Generated pipeline shape, OQ-65). After the first call in a scope, nothing is resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
   handler's transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because
   its injected services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the
   pipeline that injects the service).
@@ -1255,8 +1282,8 @@ generator reads attributes through Roslyn, which ignores `Inherited`, so it has 
   syntax. Each file's compilation unit is normalized once (`NormalizeWhitespace`, four spaces, `\n` line endings), then a layout pass fixes
   what normalization alone gets wrong or hard to read (`GeneratedSyntax.Render`: blank lines between members, a break after `=>`, the
   closing brace of a switch expression on its own line, `is` after `)`, no space after the `?` of a nullable type unless a name follows:
-  `typeof(int?)`, `string?[]`), and the header (`// <auto-generated/>`, `#nullable enable`, the `#pragma` for obsolete types, and in the
-  mediator for CS9113, the unread link parameters) is added last. No type declaration carries a stray `;`, and a nullable type renders `T?`.
+  `typeof(int?)`, `string?[]`), and the header (`// <auto-generated/>`, `#nullable enable`, the `#pragma` for obsolete types) is added
+  last. No warning other than the obsolete-type ones is suppressed: no link has an unread primary constructor parameter (OQ-65). No type declaration carries a stray `;`, and a nullable type renders `T?`.
   On a very large host the one normalization dominates the generator's time (open-questions OQ-66, open).
 - Generated code is deterministic (ordinal sorting everywhere, no timestamps or GUIDs), starts with `// <auto-generated/>`, enables
   nullable and uses `global::`-qualified names. `[GeneratedCode("Keryx", version)]` goes on each generated member of a user's partial type,
@@ -1487,6 +1514,12 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   recursive and is not inlined. One non-generic link struct per position, as before, written with a primary constructor and
   target-typed `new(pipeline, request)` (Generated pipeline shape). The earlier spelling, with explicit `_pipeline`/`_request` fields, a
   constructor and `new LinkK(...)`, compiled to the same machine code and was dropped as noise.
+- **A pipeline context for every pipeline with behaviors, and links that take both the context and the message** (OQ-65's interim,
+  2026-11-26, until owner decision 16): a pipeline that resolved nothing still had a context, created once per scope, that held nothing
+  but its links, and the links' unread parameters were warning CS9113, suppressed in the mediator's header. Dropping such contexts and
+  taking only what each link reads or passes on removes the per-scope context, the `Volatile.Read` at the entry and the suppression, and
+  made three stream behaviors' iterators smaller (648 B instead of 680 B per `Stream`) and the inlined pipelines' code shorter
+  (Generated pipeline shape).
 - **`[assembly: KeryxHost]`**, an assembly attribute that made the assembly a host: the design until the owner's second rework on
   2026-11-26, replaced by the `KeryxHost` MSBuild property (Opting in), the pattern Dovetail uses. The property needs no source edit in the
   common case (an executable or test project is a host by default), a project opts out without touching code, and the build decides

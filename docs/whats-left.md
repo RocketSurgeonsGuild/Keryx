@@ -66,6 +66,11 @@ One commit per step, each with build and tests green:
   OQ-68 (decision 18): a request or stream request type that is not sealed (KRX024 suppressed) is never composed, and a referenced one is
   the new host error KRX038. OQ-69 (a closed base from a referenced assembly) is open. The code fix _Make sealed_ is not offered for a
   type that declares its own `virtual` or `protected` members.
+- **Pipelines that resolve nothing get no context (decision 16 for OQ-65):** a request or stream pipeline whose handler's invoker is
+  static and whose behaviors inject nothing, and a publish pipeline without handlers whose behaviors inject nothing, have no pipeline
+  context: the entry calls the outermost behavior method directly and the links sit in a `private static class`. Every link takes only
+  what it reads or passes on (`(pipeline, request)`, `(request)`, or nothing), so the mediator no longer suppresses CS9113. A publish
+  pipeline with handlers keeps its context even when it resolves nothing (OQ-70, open).
 
 Measured in the second rework (Apple M4 Max, macOS 27.2, BenchmarkDotNet 0.15.8; details in the open-questions entries):
 
@@ -76,6 +81,9 @@ Measured in the second rework (Apple M4 Max, macOS 27.2, BenchmarkDotNet 0.15.8;
   patterns on sealed requests keep every tail call (10, 43, 2 and 35 for linear and above-threshold `Send` and `Publish`), load the
   method table once and compare it with each type, and shrink the linear `Send<int>` from 784 to 512 bytes; generic `Send` with a synchronous handler measured 0.4 to 0.7 ns faster, and
   generic `Stream` at depth 0 20 to 60 ns slower (3 to 9%) for a reason not found in its code ("Requests are sealed");
+- pipelines without a context (OQ-65): `StreamDepth3` allocates 648 B instead of 680 B; generic `Send`, `Stream` and `Publish` keep
+  every tail call, the linear generic `Stream<int>` shrinks from 352 to 308 bytes, and the sync `Send` rows measured within noise or
+  slightly faster; the gate prototype's code is unchanged;
 - generator time on a host of 300 requests: 66 to 384 ms for the host generator and 35 to 102 ms for the handler generator with the
   `SyntaxFactory` emitters, dominated by `NormalizeWhitespace` (OQ-66).
 
@@ -99,16 +107,16 @@ each one's **Interim** line:
   fixed provider field?
 - **OQ-64:** shared service fields are numbered by first use, so an edit that keeps the set but changes the order of first uses renumbers
   them; number by a stable sort of (type, key) instead?
-- **OQ-65:** every pipeline with behaviors keeps a context, even one that resolves nothing, and every link takes both primary constructor
-  parameters (CS9113 suppressed); drop such contexts and unread link parameters?
 - **OQ-66:** the one `NormalizeWhitespace` per compilation unit makes the host generator about six times slower on a large host; accept
   it, or build the syntax with its trivia and skip normalization?
 - **OQ-69:** Roslyn does not return `IsClosedTypeAttribute` for a metadata type, so a referenced closed request base is treated (and named
   in KRX003) as abstract; accept that?
+- **OQ-70:** a publish pipeline whose handlers all have static invokers and whose behaviors inject nothing resolves nothing but keeps
+  its context, because the publish strategy is an instance method of it; make the strategy static and drop that context too?
 
-Next in the plan: the owner has answered OQ-65 and OQ-66 (decision 16: pipelines that resolve nothing get no context and links take only
-what they read; no `NormalizeWhitespace`). They are scheduled for the next step; until it records them under **Decided** and folds them
-into the ADR, those two entries stay open and the code follows their interim. OQ-67 is decided and applied.
+Next in the plan: the owner has answered OQ-66 (decision 16: no `NormalizeWhitespace`). It is scheduled for the next step; until it
+records it under **Decided** and folds it into the ADR, the entry stays open and the code follows its interim. OQ-65 and OQ-67 are
+decided and applied.
 
 ## Gates and checks
 
@@ -137,7 +145,7 @@ into the ADR, those two entries stay open and the code follows their interim. OQ
 
 ## Before a first release
 
-- Decide OQ-59 to OQ-64 and OQ-69, and apply the scheduled answers to OQ-65 and OQ-66 (above).
+- Decide OQ-59 to OQ-64, OQ-69 and OQ-70, and apply the scheduled answer to OQ-66 (above).
 - Add the `DisassemblyDiagnoser` findings from the `prototype-disassembly` job to OQ-36.
 - Mark pull request #1 ready for review after Phase 8 (the handoff's last step, left to the owner).
 - Publish to nuget.org: the build workflow pushes packages on a `v*` tag through trusted publishing (`NUGET_USER` secret, `nuget`

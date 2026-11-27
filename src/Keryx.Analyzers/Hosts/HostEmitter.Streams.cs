@@ -8,8 +8,8 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Stream dispatch and stream pipelines (ADR 0001, Streaming): typed <c>Stream</c> overloads, generic <c>Stream&lt;TItem&gt;</c> with
-///     type-pattern dispatch on the sealed stream request types, and per stream request a pipeline context holding the handler and the injected services of its stream behaviors,
-///     and one flat <c>IStreamNext&lt;TItem&gt;</c> link struct per stream behavior.
+///     type-pattern dispatch on the sealed stream request types, and per stream request a pipeline context holding the handler and the injected services of its stream behaviors
+///     (none when it would hold nothing), and one flat <c>IStreamNext&lt;TItem&gt;</c> link struct per stream behavior.
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -107,7 +107,8 @@ internal static partial class HostEmitter
     /// <summary>
     ///     The pipeline context of one stream request: its handler (unless the invoker is static) and the injected services of its stream
     ///     behaviors, resolved once per scope, and one flat link struct per stream behavior (<c>StreamLink{k}</c>, the <c>next</c> of behavior
-    ///     <c>k</c>).
+    ///     <c>k</c>). A stream pipeline with nothing to resolve has no context: its links are nested in a static class and take only the
+    ///     request.
     /// </summary>
     private static ClassDeclarationSyntax StreamContext(HostPipeline pipeline, int index) =>
         PipelineContext(

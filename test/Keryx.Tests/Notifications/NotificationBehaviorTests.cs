@@ -153,7 +153,7 @@ public class NotificationBehaviorTests : HostTest
         public sealed record Reviewed2 : IReviewed;
         public sealed record Quiet : IAudited;
         public sealed record Silent : INotification;
-        /// <summary>No handlers, and its only behavior injects nothing: a pipeline context that holds nothing but its links.</summary>
+        /// <summary>No handlers, and its only behavior injects nothing: a publish pipeline without a context, whose last link takes nothing.</summary>
         [Behavior(typeof(TypePublish))]
         public sealed record Unattended : INotification;
         [Behavior(typeof(Skip))]

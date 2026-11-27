@@ -11,7 +11,7 @@ namespace Keryx.Tests.Behaviors;
 /// <summary>
 ///     Snapshots of generated request pipelines (ADR 0001, Generated pipeline shape): depths 0 to 8, each with its pipeline context holding
 ///     the injected services of the behavior methods, one flat link struct per behavior, direct static calls with explicit type arguments,
-///     and no behavior registrations in <c>AddKeryx()</c>.
+///     and no behavior registrations in <c>AddKeryx()</c>; and pipelines that resolve nothing, which have no context (OQ-65).
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class PipelineGeneratorTests : HostTest
@@ -241,6 +241,128 @@ public class PipelineGeneratorTests : HostTest
 
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        await VerifyHost(result);
+    }
+
+    /// <summary>
+    ///     OQ-65 (ADR 0001, Generated pipeline shape): a pipeline that resolves nothing has no context, and every link takes only what it
+    ///     reads or passes on, so no link has an unread primary constructor parameter (CS9113, which the mediator no longer suppresses).
+    ///     Covers a request and a stream request with static handlers whose behaviors inject nothing (no context, links in a static class,
+    ///     <c>new(request)</c>), a static-handler request whose middle behavior injects a service (a context: the links up to that behavior
+    ///     take <c>(pipeline, request)</c>, the rest only the request), and notification types without handlers whose behaviors inject
+    ///     nothing (no context, last link <c>new()</c>) or a service (a context, last link <c>new()</c>).
+    /// </summary>
+    [Test]
+    public async Task Should_Give_No_Context_To_A_Pipeline_That_Resolves_Nothing(CancellationToken cancellationToken)
+    {
+        var result = await HostBuilder.AddSources(
+                                           Usings
+                                         + """
+                                           namespace Sample;
+
+                                           public interface IClock { }
+
+                                           [RequestBehavior]
+                                           [BehaviorOrder(Phase.Default, Order = 1)]
+                                           public static class Outer
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [RequestBehavior]
+                                           [BehaviorOrder(Phase.Default, Order = 2)]
+                                           public static class Clocked
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, IClock clock, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [RequestBehavior]
+                                           [BehaviorOrder(Phase.Default, Order = 3)]
+                                           public static class Inner
+                                           {
+                                               public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IRequest<TResponse>
+                                                   where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [StreamBehavior]
+                                           public static class Relay
+                                           {
+                                               public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                                                   where TRequest : IStreamRequest<TItem>
+                                                   where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [NotificationBehavior]
+                                           public static class Counted
+                                           {
+                                               public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                                                   where TNotification : INotification
+                                                   where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           [NotificationBehavior]
+                                           public static class Timed
+                                           {
+                                               public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, IClock clock, CancellationToken cancellationToken)
+                                                   where TNotification : INotification
+                                                   where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+                                           }
+
+                                           public sealed record Bare(int Value) : IRequest<int>;
+                                           public static partial class BareHandler
+                                           {
+                                               [Behavior(typeof(Outer))]
+                                               [Behavior(typeof(Inner))]
+                                               private static int Handle(Bare request) => request.Value;
+                                           }
+
+                                           public sealed record Middle(int Value) : IRequest<int>;
+                                           public static partial class MiddleHandler
+                                           {
+                                               [Behavior(typeof(Outer))]
+                                               [Behavior(typeof(Clocked))]
+                                               [Behavior(typeof(Inner))]
+                                               private static int Handle(Middle request) => request.Value;
+                                           }
+
+                                           public sealed record Numbers(int Count) : IStreamRequest<int>;
+                                           public static partial class NumbersHandler
+                                           {
+                                               [Behavior(typeof(Relay))]
+                                               private static async IAsyncEnumerable<int> Handle(Numbers request)
+                                               {
+                                                   await Task.Yield();
+                                                   yield return request.Count;
+                                               }
+                                           }
+
+                                           [Behavior(typeof(Counted))]
+                                           public sealed record Unheard : INotification;
+
+                                           [Behavior(typeof(Counted))]
+                                           [Behavior(typeof(Timed))]
+                                           public sealed record Ticked : INotification;
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning)).IsEmpty();
+        var mediator = Source(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).DoesNotContain("CS9113");
+        await Assert.That(mediator).Contains("private static class __Pipeline0");
+        await Assert.That(mediator).DoesNotContain("__pipeline0");
+        await Assert.That(mediator).Contains("private sealed class __Pipeline1");
+        await Assert.That(mediator).Contains("private static class __StreamPipeline0");
+        await Assert.That(mediator).Contains("private sealed class __Notification0");
+        await Assert.That(mediator).Contains("private static class __Notification1");
+        await Assert.That(mediator).DoesNotContain("__notification1");
         await VerifyHost(result);
     }
 

@@ -23,14 +23,6 @@ internal static class GeneratedSyntax
     /// </summary>
     public const string ObsoletePragma = "#pragma warning disable CS0612, CS0618";
 
-    /// <summary>
-    ///     The header pragma of the mediator: <see cref="ObsoletePragma" /> and CS9113. Every link takes the pipeline context and the message
-    ///     (ADR 0001, Generated pipeline shape), and the last link does not read the context when the handler's invoker is static, nor either
-    ///     of them when a notification type has no handlers. An unread primary constructor parameter is not captured, so the link holds only
-    ///     what it reads, but it is warning CS9113, an error under warnings-as-errors in the user's project.
-    /// </summary>
-    public const string MediatorPragma = "#pragma warning disable CS0612, CS0618, CS9113";
-
     private const string LineFeed = "\n";
 
     /// <summary>The version in <c>[GeneratedCode("Keryx", version)]</c>.</summary>

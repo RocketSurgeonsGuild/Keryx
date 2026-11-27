@@ -11,7 +11,8 @@ namespace Keryx.Analyzers.Hosts;
 ///     Notification dispatch and publish pipelines (ADR 0001, Notifications): typed <c>Publish</c> overloads, generic
 ///     <c>Publish&lt;TNotification&gt;</c> that never boxes a struct notification, and per notification type a pipeline context holding its
 ///     handlers and the injected services of its notification behaviors, one flat <c>INext</c> link struct per notification behavior, and the
-///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly.
+///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly. A type with
+///     behaviors that inject nothing and no handlers has no context.
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -199,23 +200,45 @@ internal static partial class HostEmitter
             PublishCoreName(index),
             Params(Param(TypeName(pipeline.Notification.Type), "notification"), Param(TypeName(CancellationToken), CancellationTokenName))
         );
-        var call = Return(
-            pipeline.Behaviors.IsEmpty
-                ? Invoke(Member(Id(PipelineName), "RunHandlers"), Id("notification"), Id(CancellationTokenName))
-                : BehaviorCall(
-                    pipeline.Behaviors[0],
-                    pipeline.Notification.ContextServices,
-                    TypeName(NotificationContextName(index) + "." + LinkName(0)),
-                    "notification"
-                )
-        );
         var context = Coalesce(
             Invoke(Member(Qualified("global::System.Threading.Volatile"), "Read"), [RefArgument(Id(NotificationContextField(index)))]),
             Invoke(Id(CreateNotificationContextName(index)))
         );
-        yield return core.WithBody(Block(Var(PipelineName, context), call));
-        yield return CreateContext(NotificationContextName(index), NotificationContextField(index), CreateNotificationContextName(index));
+        if (pipeline.Behaviors.IsEmpty)
+        {
+            yield return core.WithBody(Block(Var(PipelineName, context), Return(Invoke(Member(Id(PipelineName), "RunHandlers"), Id("notification"), Id(CancellationTokenName)))));
+        }
+        else
+        {
+            var links = LinkCaptures(pipeline.Behaviors, End(pipeline));
+            var call = BehaviorCall(
+                pipeline.Behaviors[0],
+                pipeline.Notification.ContextServices,
+                TypeName(NotificationContextName(index) + "." + LinkName(0)),
+                links[0],
+                "notification"
+            );
+            yield return core.WithBody(Entry(Return(call), CallCaptures(pipeline.Behaviors[0], links[0]), context, obliviousFit: false));
+        }
+
+        if (HasContext(pipeline))
+        {
+            yield return CreateContext(NotificationContextName(index), NotificationContextField(index), CreateNotificationContextName(index));
+        }
     }
+
+    /// <summary>
+    ///     Whether a publish pipeline has a context (created once per scope): it has handlers (the context holds the ones with injected
+    ///     parameters and the publish strategy that calls them) or its behaviors inject a service (ADR 0001, Generated pipeline shape). A
+    ///     notification type with behaviors that inject nothing and no handlers has none: its links are nested in a static class.
+    /// </summary>
+    private static bool HasContext(NotificationPipeline pipeline) => !pipeline.Handlers.IsEmpty || pipeline.Notification.ContextServices.Count > 0;
+
+    /// <summary>
+    ///     What the end of a publish pipeline reads: the context and the notification, for its publish strategy; nothing without handlers
+    ///     (the last link completes at once).
+    /// </summary>
+    private static Captures End(NotificationPipeline pipeline) => pipeline.Handlers.IsEmpty ? Captures.None : Captures.Pipeline | Captures.Message;
 
     /// <summary>
     ///     The parallel strategy's slow path (ADR 0001, Publish strategy): awaits the handlers that had not completed successfully when they
@@ -292,30 +315,34 @@ internal static partial class HostEmitter
     /// <summary>
     ///     The pipeline context of one notification type: its handlers that have injected parameters and the injected services of its
     ///     notification behaviors, resolved once per scope; the publish strategy, which calls the handlers directly; and one flat link struct
-    ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy). A type with notification behaviors but no handlers
-    ///     still has a context, which then holds only its links and any injected services; whether it should have none is OQ-65.
+    ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy). A type with notification behaviors that inject
+    ///     nothing and no handlers has no context: its links are nested in a static class of the same name, and the last one takes nothing.
     /// </summary>
     private static ClassDeclarationSyntax NotificationContext(NotificationPipeline pipeline, int index)
     {
         var notification = pipeline.Notification;
         var context = NotificationContextName(index);
+        var hasContext = HasContext(pipeline);
         var members = new List<MemberDeclarationSyntax>();
-        var resolution = new List<StatementSyntax>();
-        for (var i = 0; i < pipeline.Handlers.Length; i++)
+        if (hasContext)
         {
-            var handler = pipeline.Handlers[i].Handler;
-            if (!handler.StaticInvoker)
+            var resolution = new List<StatementSyntax>();
+            for (var i = 0; i < pipeline.Handlers.Length; i++)
             {
-                members.Add(Field(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(handler.HandlerClass), HandlerField(i)));
-                resolution.Add(
-                    Assign(Id(HandlerField(i)), Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(handler.HandlerClass))), Id(ServiceProviderName)))
-                );
+                var handler = pipeline.Handlers[i].Handler;
+                if (!handler.StaticInvoker)
+                {
+                    members.Add(Field(Modifiers(SyntaxKind.PublicKeyword, SyntaxKind.ReadOnlyKeyword), TypeName(handler.HandlerClass), HandlerField(i)));
+                    resolution.Add(
+                        Assign(Id(HandlerField(i)), Invoke(Member(Qualified(ServiceProviderExtensions), Generic("GetRequiredService", TypeName(handler.HandlerClass))), Id(ServiceProviderName)))
+                    );
+                }
             }
-        }
 
-        members.AddRange(ServiceFields(notification.ContextServices));
-        resolution.AddRange(ServiceResolution(notification.ContextServices));
-        members.Add(ContextConstructor(context, resolution));
+            members.AddRange(ServiceFields(notification.ContextServices));
+            resolution.AddRange(ServiceResolution(notification.ContextServices));
+            members.Add(ContextConstructor(context, resolution));
+        }
 
         if (!pipeline.Handlers.IsEmpty)
         {
@@ -329,11 +356,12 @@ internal static partial class HostEmitter
             }
         }
 
+        var links = pipeline.Behaviors.IsEmpty ? [] : LinkCaptures(pipeline.Behaviors, End(pipeline));
         for (var k = 0; k < pipeline.Behaviors.Length; k++)
         {
             var isLast = k == pipeline.Behaviors.Length - 1;
             ExpressionSyntax body = !isLast
-                ? BehaviorCall(pipeline.Behaviors[k + 1], notification.ContextServices, Id(LinkName(k + 1)), "notification")
+                ? BehaviorCall(pipeline.Behaviors[k + 1], notification.ContextServices, Id(LinkName(k + 1)), links[k + 1], "notification")
                 : pipeline.Handlers.IsEmpty
                 ? DefaultLiteral()
                 : Invoke(Member(Id(PipelineName), "RunHandlers"), Id("notification"), Id(CancellationTokenName));
@@ -341,6 +369,7 @@ internal static partial class HostEmitter
                 Link(
                     LinkName(k),
                     context,
+                    links[k],
                     notification.Type,
                     "notification",
                     "global::Keryx.INext",
@@ -352,11 +381,19 @@ internal static partial class HostEmitter
             );
         }
 
-        return ContextClass(
-            context,
-            members,
-            $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>"
-        );
+        return hasContext
+            ? ContextClass(
+                context,
+                members,
+                pipeline.Handlers.IsEmpty
+                    ? $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: the injected services of its behaviors, resolved once per scope (it has no handlers).</summary>"
+                    : $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>"
+            )
+            : LinksClass(
+                context,
+                members,
+                $"<summary>The links of the publish pipeline of <c>{Display(notification.Type)}</c>, which has no context: it has no handlers and its behaviors inject nothing.</summary>"
+            );
     }
 
     /// <summary>

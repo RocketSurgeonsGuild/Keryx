@@ -402,7 +402,10 @@ namespace:
   `TryAdd`. It registers no behavior types: behaviors are static.
 
 The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
-services its behavior methods inject; it never creates a behavior instance. From then on a `Send` allocates nothing. Singletons and hosted
+services its behavior methods inject; it never creates a behavior instance. A request or stream pipeline with a static handler whose
+behaviors inject nothing, and a notification type without handlers whose behaviors inject nothing, have no context at all (a
+notification type with handlers keeps one even when it resolves nothing; open-questions OQ-70, open): such a pipeline's entry
+calls the outermost behavior method directly, and each `next` link holds only the request or notification. From then on a `Send` allocates nothing. Singletons and hosted
 services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
 as long as the scope, and the behaviors of one pipeline that inject the same transient share one instance.
 
@@ -558,6 +561,10 @@ How to read them:
 | Immediate.Handlers 4.4.0, `Handler` class | 638 ns · 120 B | 2,850 ns · 672 B |
 | ZeroAlloc.Mediator 7.0.1, static `Mediator` | 660 ns · 120 B | n/a |
 | ZeroAlloc.Mediator 7.0.1, `IMediator` | 674 ns · 144 B | n/a |
+
+Since that run, a pipeline that resolves nothing has no pipeline context and its `next` links hold only the request (open-questions
+OQ-65), so with 3 stream behaviors Keryx allocates 648 B per `Stream` (typed and `IMediator`) instead of the 680 B above; its other rows
+measured within run-to-run noise of the table.
 
 ### Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only)
 

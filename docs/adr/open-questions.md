@@ -18,10 +18,10 @@ raised while implementing it and are open, and OQ-61 and OQ-62 were raised while
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
 "A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
 are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
-(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them, and OQ-65 and OQ-66 are open. "`next` stays a struct link
+(decisions 5, 7 and 11) follow; OQ-65 to OQ-67 were raised while implementing them, and OQ-66 is open. "`next` stays a struct link
 interface" (decision 4, which keeps the design as it was) follows. OQ-67, decided by the owner (decision 16), and "Requests are sealed"
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, OQ-69 is open, and OQ-68, decided by the owner (decision 18),
-comes last.
+follows. OQ-65, decided by the owner (decision 16), comes last; OQ-70 was raised while implementing it and is open.
 
 ## Open
 
@@ -124,30 +124,6 @@ text and the order of the model's `ContextServices`.
   pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
   stability clause from the decision. Needs a decision.
 
-### OQ-65: Which pipelines have no context, and which link parameters are dropped
-
-Owner decision 11 ("Links with primary constructors", at the end) sets every link's signature as
-`LinkK(__PipelineN pipeline, TRequest request)` (`notification` in a publish pipeline), says "pipelines without a context drop the
-`pipeline` parameter", and says the machine code must stay identical. Before the decision every pipeline with behaviors had a context,
-created once per scope, even when it held nothing (a static invoker and no injected services: "nothing but its links"; or a notification
-type with behaviors but no handlers whose behaviors inject nothing), so no pipeline with links was without one. Two things are not decided:
-whether those pipelines should lose their context, and whether a link should drop a parameter its `InvokeAsync` never reads (with primary
-constructors, such a parameter is warning CS9113, an error under warnings-as-errors in the user's project).
-
-- **Interim:** every pipeline context that existed before stays, and every link takes `(pipeline, request)` (`(pipeline, notification)` in a
-  publish pipeline). A primary constructor parameter that `InvokeAsync` does not read is not captured, so each link holds exactly the fields
-  it held before (the context only where it reads or passes it on; nothing in the last link of a notification type without handlers), and
-  the field layout and machine code are unchanged. The mediator's header pragma is `#pragma warning disable CS0612, CS0618, CS9113`.
-  Checked: all 117 links of the host snapshots hold the same fields as before the rework.
-- **Proposal:** take only what a link reads or passes on (the last link of a pipeline whose handler's invoker is static takes the request
-  alone, the last link of a publish pipeline without handlers takes nothing, `new()`), which removes the CS9113 suppression; and give no
-  context to a pipeline with nothing to resolve (a request or stream pipeline whose handler's invoker is static and whose behaviors inject
-  nothing, or a publish pipeline without handlers whose behaviors inject nothing): no `__pipelineN` field, no `__CreatePipelineN`, the entry
-  calls the outermost behavior method directly, and the links are nested in a `private static class __PipelineN`. That changes machine
-  code: measured with it (2026-11-26, the comparison host, whose pipelines are all of that kind), `SendSyncDepth0` generic went from 3.41 to
-  3.01 ns and `StreamDepth3` allocated 648 B instead of 680 B (smaller links captured by the stream behaviors' iterators). Alternative: keep
-  the interim. Needs a decision.
-
 ### OQ-66: Generator time of the SyntaxFactory emitters on large hosts
 
 Owner decision 5 ("Generated code is built with SyntaxFactory", at the end) prescribes one `NormalizeWhitespace` per compilation unit. On a
@@ -180,6 +156,24 @@ assemblies needs `System.Runtime.CompilerServices.IsClosedTypeAttribute` defined
   `HandlerAnalyzerTests.KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly` pins that.
 - **Proposal:** accept: the behavior is right and only a message differs. Alternatives: read Roslyn's own closed-type API through
   reflection when the running compiler has it, or raise the analyzers' Roslyn floor to a version that exposes it. Needs a decision.
+
+### OQ-70: A publish pipeline whose handlers resolve nothing
+
+Owner decision 16 decided OQ-65 by adopting its proposal: a pipeline that resolves nothing gets no context. The proposal named the
+pipelines that have nothing to resolve as "a request or stream pipeline whose handler's invoker is static and whose behaviors inject
+nothing, or a publish pipeline without handlers whose behaviors inject nothing", and that is what was measured. A publish pipeline whose
+handlers all have static invokers and whose behaviors inject nothing (with or without behaviors) also resolves nothing, but it was not in
+that list: its context holds no field, only the publish strategy (`RunHandlers`, and for the sequential strategy `RunHandlersAsync`), which
+is an instance method of the context. Giving it no context means making the strategy static in a static class of the same name, which
+changes the publish code (every `PublishTo` comparison benchmark is such a pipeline) and was neither proposed nor measured.
+
+- **Interim:** such a publish pipeline keeps its context: `__NotificationN` is created once per scope with an empty constructor, its
+  strategy runs on it, and its links take `(pipeline, notification)` because the last one calls `pipeline.RunHandlers`. Every link still
+  takes only what it reads or passes on, so nothing raises CS9113. The ADR (Generated pipeline shape) says so.
+- **Proposal:** give it no context too: `RunHandlers` and `RunHandlersAsync` become `static` members of `private static class
+  __NotificationN`, the entry (or the last link) calls `__NotificationN.RunHandlers(notification, cancellationToken)`, and the mediator has
+  no `__notificationN` field and no `__CreateNotificationN`; measure `PublishTo1` and `PublishTo5` (typed and generic) before and after.
+  Alternative: keep the interim (one empty context per scope and type, a `Volatile.Read` per publish). Needs a decision.
 
 ## Decided
 
@@ -1637,7 +1631,8 @@ before (112, 144 and 224 bytes; 6, 12 and 27 inlinees; the only call the context
 `--filter '*PipelinePrototype*' --job short` allocates nothing at any depth, with depth 3 at 0.67x the nested calls. The allocation tests
 pass unchanged. Rejected shapes (stage-generic links, a runtime-provided generic link, composed chain types, a single index link) are in
 the ADR's Alternatives considered. Folded into the ADR (Generated pipeline shape, Streaming, Behavior methods, Injected parameters,
-Alternatives considered), the brief (Phase 4) and CONTEXT.md (link).
+Alternatives considered), the brief (Phase 4) and CONTEXT.md (link). Owner decision 16 later decided OQ-65 (at the end): pipelines that
+resolve nothing have no context, and each link takes only what it reads or passes on, so the CS9113 suppression is gone.
 
 ### `next` stays a struct link interface (2026-11-26)
 
@@ -1803,3 +1798,58 @@ dispatch silently.
   none changed for this. Folded into the ADR (status; Requests and notifications; Diagnostics and code fixes: KRX038; HostGenerator's
   host rules; Mediator; Generic entry points), `AnalyzerReleases.Unshipped.md`, the README (Requests and handlers, Diagnostics) and the
   brief (Phases 3 and 7).
+
+### OQ-65: Which pipelines have no context, and which link parameters are dropped (2026-11-26)
+
+Owner decision 11 ("Links with primary constructors", at the end) sets every link's signature as
+`LinkK(__PipelineN pipeline, TRequest request)` (`notification` in a publish pipeline), says "pipelines without a context drop the
+`pipeline` parameter", and says the machine code must stay identical. Before the decision every pipeline with behaviors had a context,
+created once per scope, even when it held nothing (a static invoker and no injected services: "nothing but its links"; or a notification
+type with behaviors but no handlers whose behaviors inject nothing), so no pipeline with links was without one. Two things are not decided:
+whether those pipelines should lose their context, and whether a link should drop a parameter its `InvokeAsync` never reads (with primary
+constructors, such a parameter is warning CS9113, an error under warnings-as-errors in the user's project).
+
+- **Interim:** every pipeline context that existed before stays, and every link takes `(pipeline, request)` (`(pipeline, notification)` in a
+  publish pipeline). A primary constructor parameter that `InvokeAsync` does not read is not captured, so each link holds exactly the fields
+  it held before (the context only where it reads or passes it on; nothing in the last link of a notification type without handlers), and
+  the field layout and machine code are unchanged. The mediator's header pragma is `#pragma warning disable CS0612, CS0618, CS9113`.
+  Checked: all 117 links of the host snapshots hold the same fields as before the rework.
+- **Proposal:** take only what a link reads or passes on (the last link of a pipeline whose handler's invoker is static takes the request
+  alone, the last link of a publish pipeline without handlers takes nothing, `new()`), which removes the CS9113 suppression; and give no
+  context to a pipeline with nothing to resolve (a request or stream pipeline whose handler's invoker is static and whose behaviors inject
+  nothing, or a publish pipeline without handlers whose behaviors inject nothing): no `__pipelineN` field, no `__CreatePipelineN`, the entry
+  calls the outermost behavior method directly, and the links are nested in a `private static class __PipelineN`. That changes machine
+  code: measured with it (2026-11-26, the comparison host, whose pipelines are all of that kind), `SendSyncDepth0` generic went from 3.41 to
+  3.01 ns and `StreamDepth3` allocated 648 B instead of 680 B (smaller links captured by the stream behaviors' iterators). Alternative: keep
+  the interim. Needs a decision.
+- **Decision:** adopt the proposal (owner decision 16, 2026-11-26: "keep it"): pipelines that resolve nothing get no context, their links
+  are in a private static class and take only the message, and every link takes only the parameters it reads or passes on. Implemented in
+  `HostEmitter` for requests, streams and notifications. A request or stream pipeline has a context when its handler's invoker is not
+  static or its behaviors inject a service; a publish pipeline when it has handlers or its behaviors inject a service. Without one there
+  is no `__pipelineN` field and no `__CreatePipelineN`, the entry calls the outermost behavior method directly (no `Volatile.Read`), and
+  the links sit in `private static class __PipelineN` (`__StreamPipelineN`, `__NotificationN`). Each link's parameters are computed from
+  the end of the pipeline backwards: the end reads the request and, when the handler is resolved into the context, the context (a publish
+  end reads both when there are handlers, nothing otherwise); a call of a behavior method needs the message, the context when it injects a
+  service, and whatever the link it constructs takes. So a link is `(pipeline, request)`, `(request)` or, as the last link of a publish
+  pipeline without handlers, has no parameter list (`new()`); the entry declares `var pipeline = ...` only when its call needs it. No link
+  has an unread parameter, so `GeneratedSyntax.MediatorPragma` is removed and the mediator's header is the obsolete-type pragma alone
+  (`#pragma warning disable CS0612, CS0618`). A publish pipeline with handlers that resolves nothing (static invokers, nothing injected)
+  keeps its context, because the publish strategy is an instance method of it and the proposal did not list it: OQ-70 (open).
+  Snapshots: every host snapshot's header loses CS9113 (35 files); the pipelines without a context (`AnnotatedResponseTests`, the
+  `Unattended` notification of `NotificationGeneratorTests.Should_Generate_Publish_Pipelines`) become static link classes, and the last
+  links of static handlers lose `pipeline` (`PipelineGeneratorTests.Should_Generate_Pipelines_For_Static_Handlers_Struct_Requests_And_IRequest`,
+  the `SharedServiceTests`, `StreamGeneratorTests`); new `PipelineGeneratorTests.Should_Give_No_Context_To_A_Pipeline_That_Resolves_Nothing`
+  covers every shape and asserts the host compiles without warnings and without a CS9113 suppression. `NotificationAllocationTests` adds
+  a publish without a context (typed and generic, 0 B); the request (`Echo`) and stream allocation tests already covered such pipelines.
+  Measured (BenchmarkDotNet 0.15.8 default job, net10.0, Apple M4 Max, macOS 27.2, 2026-11-27; the comparison host, whose request and
+  stream pipelines all resolve nothing): `StreamDepth3` allocates 648 B instead of 680 B (typed and generic, every run); generic
+  `SendSyncDepth0` 2.44 ns in both interleaved runs against 2.47 and 2.95 ns at HEAD (the full run against the earlier "Requests are
+  sealed" run, 3.77 to 2.46 ns, is mostly that run's noise); typed `SendSyncDepth8` 0.45 and 0.47 ns against 0.61 and 0.49 ns; every
+  other Keryx row within noise, 0 B wherever it was 0 B. Generic JIT code (`DOTNET_TieredCompilation=0`): `Send<int>` keeps its 10 (linear)
+  and 43 (above the threshold) tail calls and `Publish<__Canon>` its 2 and 35; the inlined stream pipelines no longer read a context, so
+  `Stream<int>` shrinks from 352 to 308 bytes (1260 to 1208 above the threshold); `Publish<__Canon>` above the threshold shrinks from 2884
+  to 2856 bytes because the mediator's remaining fields moved within reach of an immediate offset. The Phase 4 gate prototype holds a
+  handler and services, so every link reads or passes the context on and its shape is unchanged: `--prototype-disasm` gives the same Tier
+  1 code as before (112, 144 and 224 bytes; 6, 12 and 27 inlinees). Folded into the ADR (Generated pipeline shape, Streaming, Mediator,
+  Incremental generation rules, Alternatives considered), the brief (Engineering rules, Phase 4), CONTEXT.md (link, pipeline context)
+  and the README (Hosts, Benchmarks).

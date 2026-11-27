@@ -9,7 +9,9 @@ namespace Keryx.Tests.Behaviors;
 ///     The Performance contract with behaviors (ADR 0001, Performance contract; the Phase 4 brief): after one warm-up call in the same scope,
 ///     a synchronous <c>Send</c> allocates 0 bytes at depths 1, 3 and 8, on the typed overload and the generic entry point, for value-type and
 ///     reference-type responses, with static behaviors that take an injected service and pass <c>next</c>'s task on and with <c>async</c>
-///     behaviors that complete synchronously (compiled with optimizations, as a Release build ships them).
+///     behaviors that complete synchronously (compiled with optimizations, as a Release build ships them). It also covers pipelines without a
+///     context (OQ-65): a static handler whose behaviors inject nothing, with <c>async</c> behaviors and with synchronous pass-through ones,
+///     on both entry points.
 /// </summary>
 /// <remarks>Measured like <see cref="HostAllocationTests" />: inside the compiled host, smallest of several regions, not in parallel.</remarks>
 [Timeout(ModuleInitializer.TestTimeout)]
@@ -29,7 +31,7 @@ public class PipelineAllocationTests : HostTest
 
         var allocated = Call<Dictionary<string, long>>(host, "Sample.Probe", "Measure", scope.ServiceProvider);
 
-        await Assert.That(allocated.Count).IsEqualTo(7);
+        await Assert.That(allocated.Count).IsEqualTo(10);
         foreach (var (scenario, bytes) in allocated)
         {
             await Assert.That(bytes).IsEqualTo(0L).Because($"depth {depth}: {scenario}");
@@ -39,7 +41,8 @@ public class PipelineAllocationTests : HostTest
     /// <summary>
     ///     A host with <paramref name="depth" /> behaviors on each request: pass-through behaviors that inject a service for <c>Ping</c>
     ///     (reference response, injected handler), <c>Add</c> (value response, static handler) and the struct <c>Tick</c>; <c>async</c> behaviors that complete synchronously
-    ///     for <c>Echo</c>; and <c>Touch</c> (<c>IRequest</c>, void handler).
+    ///     for <c>Echo</c>; pass-through behaviors that inject nothing for <c>Hop</c> (static handler: with <c>Echo</c>, a pipeline without a
+    ///     context); and <c>Touch</c> (<c>IRequest</c>, void handler).
     /// </summary>
     private static string Source(int depth)
     {
@@ -60,6 +63,16 @@ public class PipelineAllocationTests : HostTest
                           GC.KeepAlive(service);
                           return next.InvokeAsync(cancellationToken);
                       }
+                  }
+
+                  [RequestBehavior]
+                  [BehaviorOrder(Phase.Default, Order = {{k}})]
+                  public static class Bare{{k}}
+                  {
+                      public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken)
+                          where TRequest : IRequest<TResponse>
+                          where TNext : struct, INext<TResponse>
+                          => next.InvokeAsync(cancellationToken);
                   }
 
                   [RequestBehavior]
@@ -117,6 +130,12 @@ public class PipelineAllocationTests : HostTest
               {{Attributes("Await")}}    private static ValueTask<string> Handle(Echo request) => new(request.Text);
               }
 
+              public sealed record Hop(int Value) : IRequest<int>;
+              public static partial class HopHandler
+              {
+              {{Attributes("Bare")}}    private static int Handle(Hop request) => request.Value;
+              }
+
               public sealed record Touch : IRequest;
               public static partial class TouchHandler
               {
@@ -133,6 +152,7 @@ public class PipelineAllocationTests : HostTest
                       var add = new Add(1, 2);
                       var tick = new Tick(1);
                       var echo = new Echo("echo");
+                      var hop = new Hop(1);
                       var touch = new Touch();
 
                       return new()
@@ -141,9 +161,12 @@ public class PipelineAllocationTests : HostTest
                           ["typed class, value response, static handler"] = Region(() => mediator.Send(add)),
                           ["typed struct, value response"] = Region(() => mediator.Send(tick)),
                           ["typed class, async behaviors completing synchronously"] = Region(() => mediator.Send(echo)),
+                          ["typed class, pass-through behaviors that inject nothing (no context)"] = Region(() => mediator.Send(hop)),
                           ["typed IRequest, void handler"] = Region(() => mediator.Send(touch)),
                           ["generic class, reference response"] = Region(() => sender.Send(ping)),
                           ["generic class, value response"] = Region(() => sender.Send(add)),
+                          ["generic class, async behaviors completing synchronously (no context)"] = Region(() => sender.Send(echo)),
+                          ["generic class, pass-through behaviors that inject nothing (no context)"] = Region(() => sender.Send(hop)),
                       };
                   }
 
