@@ -16,8 +16,9 @@ raised while implementing the static-behavior rework and decided by the owner th
 second rework (2026-11-26) follow OQ-58 at the end, starting with "Requests are handled in their own assembly"; OQ-59 and OQ-60 were
 raised while implementing it and are open, and OQ-61 and OQ-62 were raised while implementing "A host is an MSBuild property" and are open.
 "Test compilations go through the testing library" and "Jump-table dispatch has tests" (decisions 6, 8, 10 and 13) follow, and
-"A pipeline context resolves each shared service once" (decision 9) comes last; OQ-63 and OQ-64 were raised while implementing it and
-are open.
+"A pipeline context resolves each shared service once" (decision 9) follows; OQ-63 and OQ-64 were raised while implementing it and
+are open. "Generated code is built with SyntaxFactory", "Generic dispatch is a switch expression" and "Links with primary constructors"
+(decisions 5, 7 and 11) come last; OQ-65 to OQ-67 were raised while implementing them and are open.
 
 ## Open
 
@@ -119,6 +120,81 @@ text and the order of the model's `ContextServices`.
   keeps every name (the incremental test would then assert unchanged `ContextServices`). Cost: the numbering no longer follows the
   pipeline, so `Service0` is not necessarily the outermost behavior's first service. Alternative: keep first-use order and drop the
   stability clause from the decision. Needs a decision.
+
+### OQ-65: Which pipelines have no context, and which link parameters are dropped
+
+Owner decision 11 ("Links with primary constructors", at the end) sets every link's signature as
+`LinkK(__PipelineN pipeline, TRequest request)` (`notification` in a publish pipeline), says "pipelines without a context drop the
+`pipeline` parameter", and says the machine code must stay identical. Before the decision every pipeline with behaviors had a context,
+created once per scope, even when it held nothing (a static invoker and no injected services: "nothing but its links"; or a notification
+type with behaviors but no handlers whose behaviors inject nothing), so no pipeline with links was without one. Two things are not decided:
+whether those pipelines should lose their context, and whether a link should drop a parameter its `InvokeAsync` never reads (with primary
+constructors, such a parameter is warning CS9113, an error under warnings-as-errors in the user's project).
+
+- **Interim:** every pipeline context that existed before stays, and every link takes `(pipeline, request)` (`(pipeline, notification)` in a
+  publish pipeline). A primary constructor parameter that `InvokeAsync` does not read is not captured, so each link holds exactly the fields
+  it held before (the context only where it reads or passes it on; nothing in the last link of a notification type without handlers), and
+  the field layout and machine code are unchanged. The mediator's header pragma is `#pragma warning disable CS0612, CS0618, CS9113`.
+  Checked: all 117 links of the host snapshots hold the same fields as before the rework.
+- **Proposal:** take only what a link reads or passes on (the last link of a pipeline whose handler's invoker is static takes the request
+  alone, the last link of a publish pipeline without handlers takes nothing, `new()`), which removes the CS9113 suppression; and give no
+  context to a pipeline with nothing to resolve (a request or stream pipeline whose handler's invoker is static and whose behaviors inject
+  nothing, or a publish pipeline without handlers whose behaviors inject nothing): no `__pipelineN` field, no `__CreatePipelineN`, the entry
+  calls the outermost behavior method directly, and the links are nested in a `private static class __PipelineN`. That changes machine
+  code: measured with it (2026-11-26, the comparison host, whose pipelines are all of that kind), `SendSyncDepth0` generic went from 3.41 to
+  3.01 ns and `StreamDepth3` allocated 648 B instead of 680 B (smaller links captured by the stream behaviors' iterators). Alternative: keep
+  the interim. Needs a decision.
+
+### OQ-66: Generator time of the SyntaxFactory emitters on large hosts
+
+Owner decision 5 ("Generated code is built with SyntaxFactory", at the end) prescribes one `NormalizeWhitespace` per compilation unit. On a
+host of 300 requests, each with five behaviors (two of them injecting a service), plus 30 stream requests and 30 notifications, the host
+generator's time in a Release build (`ReportAnalyzer`, median of ten warm compiler-server builds) went from 66 ms with the text emitters to
+384 ms, and the handler generator's (330 handler files) from 35 ms to 102 ms. Skipping `GeneratedSyntax.Render`'s layout pass changed
+nothing measurable (368 ms), nor did caching parsed type names (402 ms): the time is `NormalizeWhitespace` over the one large
+`KeryxMediator` compilation unit (re-measured after the generated shape returned to switch statements and every pipeline context: 366 ms and
+101 ms). The source output runs only when the composition model changes (an edit that changes no handler, behavior or notification leaves it
+cached), so the cost is paid on a full build and on edits to the pipelines.
+
+- **Interim:** as decided: one `NormalizeWhitespace` per compilation unit.
+- **Proposal:** accept the cost. Alternatives, if it matters for very large hosts: normalize each top-level member of the mediator on its
+  own and assemble the unit (bounded work per member, against the decision's one call per unit), or build the syntax with its trivia and
+  skip normalization (Dovetail's pattern without `NormalizeWhitespace`). Needs a decision.
+
+### OQ-67: Switch-expression dispatch loses the arms' tail calls
+
+Owner decision 7 ("Generic dispatch is a switch expression", at the end) asks for switch expressions in generic `Send`, `Stream` and
+`Publish<TNotification>` and says the change must not regress. C# lowers a switch expression to one result local that every arm stores
+and a single return, and the JIT does not turn that back into tail calls. Measured on the comparison host (`Keryx.Benchmarks.KeryxHost`)
+with every pipeline context kept (OQ-65's interim), so the dispatch shape is the only difference: BenchmarkDotNet 0.15.8 default job,
+net10.0, Apple M4 Max, macOS 27.2, 2026-11-26; "before" is the text emitters' `if` chains, each row from two interleaved runs of the three
+builds (before, switch expressions, switch statements).
+
+- **JIT code** (`DOTNET_TieredCompilation=0`, `DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`): with switch expressions the method-table
+  compares (ten `cmp` in the linear `Send<int>`) and the jump table survive, but the linear `Send<int>` goes from 10 tail calls (`br`) to
+  none, the above-threshold one from 43 to 1, and `Publish<__Canon>` from 2 to 0 (35 to 1 above the threshold); each zeroes a `ValueTask`
+  slot in its prolog (the effect OQ-15 measured with one local per arm). With switch statements of the same sections (one `return` each)
+  the code of all four generic entry points, linear and above the threshold, is instruction for instruction the code of the `if` chains.
+- **Linear** (10 request types): `Publish` generic 2.80/2.81 ns (1 handler) and 3.07/3.04 ns (5 handlers) before, 3.16/3.10 and
+  3.34/3.32 ns with switch expressions (+0.3 ns), 2.89/2.79 and 3.09/3.15 ns with switch statements. `Send` sync generic: before
+  2.99 to 3.48 ns, switch expressions 3.14 to 4.21 ns (one run of depths 0 and 1 +0.6 to 1.0 ns, the other within noise), switch
+  statements 2.98 to 3.54 ns. `DispatchBenchmarks` (hand-written, one full run each): the switch-expression chain 4 to 9% slower than the
+  `if` chain at the middle request from 16 types up (32 types: 2.94 to 3.19 ns), the switch statement 2 to 3% (3.02 ns).
+- **Above the threshold** (42 request types, `KeryxDispatchPadding=true`): `Send` sync generic before 6.25 to 6.70 ns, switch expressions
+  6.38 to 8.23 ns, switch statements 6.36 to 6.83 ns; `Publish` generic noisy in every build (6.10 to 7.02 ns).
+- `Stream` changed by neither shape beyond noise (it was never a tail call: the arm's result is cast), and allocates the same (120 B at
+  depth 0, 680 B at depth 3).
+- The yielding `Send` rows (`SendYieldDepth*`, `SendUnitYield*`, about 1 µs) are bimodal from run to run whatever the build: in the
+  interleaved runs above the threshold, before measured 881 ns to 1.39 µs, switch expressions 905 ns to 1.42 µs and switch statements 900 ns
+  to 1.56 µs, and within one run two depths of the same build differ by 400 ns. Their spread is about 0.4 µs; they show no regression of the
+  dispatch either way.
+
+- **Interim:** switch statements, `switch (requestType) { case var _ when requestType == typeof(X): return __Dispatch0(...); ... }` and
+  `switch (__RequestIndex(requestType)) { case 0: return ...; }`, then `throw __HandlerNotFound(requestType);` (`return default;` in
+  `Publish`; the value-type branch `switch (typeof(TNotification)) { case var _ when typeof(TNotification) == typeof(X): return ...; }`).
+  They keep the exact-type guards, the compares, the IL `switch` opcode above the threshold and the arms' tail calls, and do not regress.
+- **Proposal:** keep the switch statements. Alternative: the switch expressions as decided, at up to about 0.3 ns per generic `Publish`
+  and an occasional 0.3 to 1.8 ns per generic `Send` with a synchronous handler, and nothing through the typed overloads. Needs a decision.
 
 ## Decided
 
@@ -1513,3 +1589,66 @@ outermost behavior injecting (`IClock`, `IStore`) to a pipeline sharing `IClock`
 optional `retries` default moving to the call site; `CrossAssemblyTests` asserts `Service0`. Folded into the ADR (Injected parameters,
 Behavior methods, Generated pipeline shape, Mediator), the brief (Phases 4, 5 and 6), CONTEXT.md (pipeline context) and the README
 (Behaviors, Hosts).
+
+### Generated code is built with SyntaxFactory (2026-11-26)
+
+Owner decision 5 of the second rework. `HandlerEmitter` and `HostEmitter` (with `HostEmitter.Streams` and `HostEmitter.Notifications`) build
+their sources with Roslyn's `SyntaxFactory`, following Dovetail (`Joinery.Dovetail.Analyzers/Helpers.cs`, `Support/ExportDovetails.cs`,
+`Support/ImportDovetails.cs`); `CodeWriter` is gone. The shared helpers are `src/Keryx.Analyzers/GeneratedSyntax.cs`: types and names from
+the models' `global::` strings (`TypeName`, `Qualified`; the models' default values and service keys, which are C# expressions, through
+`Code`), small builders (members, invocations, `ref`/`out var` arguments, target-typed `new`, switch-expression arms), the
+`[GeneratedCode("Keryx", version)]`, `[MethodImpl(NoInlining)]` and pooling builder attributes, documentation lines (comment trivia, so
+normalization leaves the XML as written), the nullable directives, and `Render`. Syntax is built only inside `RegisterSourceOutput` (the
+emitters are called from the source outputs; the models still carry strings). `Render` normalizes each compilation unit once
+(`NormalizeWhitespace`, four spaces, `\n`), runs a layout pass where normalization alone is hard to read or wrong (blank lines between
+members except plain fields; a break after `=>` with the body indented; the closing brace of a switch expression on its own line, which
+normalization writes as `throw x};`; the space before `is` after `)`, which it drops; a constructor's parameters one per line; a comment in
+an empty block indented as content; no space after the `?` of a nullable type unless a name or keyword follows, so `typeof(int?)`,
+`string?[]` and `int?[]?`), and adds the header trivia (`// <auto-generated/>`, `#nullable enable`, the obsolete-type `#pragma`, which in
+the mediator also disables CS9113 for the link parameters some links do not read, OQ-65) last. No type declaration carries a `;`, and
+nullable types render `T?`. The `[GeneratedCode]` attributes and the `#nullable disable warnings` islands of oblivious fits (OQ-58) are
+unchanged. `GeneratedSyntaxTests` pins each layout rule.
+
+Every handler-generator snapshot changed in whitespace only (token-for-token equal), and so did the host snapshots apart from the shapes
+of decisions 7 and 11 (below). Runtime, allocation, IL-switch and jump-table tests pass unchanged. Generator time on a large host is
+OQ-66 (open): 66 to 384 ms for the host generator, 35 to 102 ms for the handler generator. Folded into the ADR (Incremental generation
+rules, Alternatives considered), the brief (Engineering rules).
+
+### Generic dispatch is a switch expression (2026-11-26)
+
+Owner decision 7 of the second rework: generic `Send`, `Stream` and `Publish<TNotification>` dispatch with switch expressions,
+`return requestType switch { _ when requestType == typeof(X) => ..., _ => throw __HandlerNotFound(requestType) };` (`Publish` ends with
+`_ => default`), exact-type `when` guards and never type patterns, and above `DispatchThreshold`
+`return __RequestIndex(requestType) switch { 0 => ..., _ => ... };`; the change must not regress. Implemented and measured: the switch
+expressions keep the method-table compares and the jump table but lose the arms' tail calls, and they measured slower (OQ-67, open). So
+the generated code uses the decision's sections in a switch statement with one `return` each until OQ-67 is decided:
+`switch (requestType) { case var _ when requestType == typeof(X): return __Dispatch0(request, cancellationToken); ... }`, above the
+threshold `switch (__RequestIndex(requestType)) { case 0: return ...; }`, then `throw __HandlerNotFound(requestType);` (`Publish`:
+`return default;`). The value-type branch of `Publish` is
+`switch (typeof(TNotification)) { case var _ when typeof(TNotification) == typeof(X): return ...; }` then `return default;` (a plain
+`return default;` when no notification type is a struct). With no type to dispatch, the entry point throws or returns directly. The typed
+overloads keep their single `if` (a two-way check, not a chain). `Hosts/GenericDispatch` reads both shapes, so the boundary tests are
+unchanged, and the IL tests still find one `switch` opcode above the threshold and none at or below it. `DispatchBenchmarks` is written in
+the switch-statement shape. The before and after numbers of the comparison benchmarks (linear and above the threshold; the new
+`KeryxDispatchPadding` switch of `Keryx.Benchmarks.KeryxHost` compiles 32 more request, stream request and notification types) are in
+OQ-67. Folded into the ADR (Generic entry points, Alternatives considered), the brief (Phase 3) and the README (Hosts, Benchmarks).
+
+### Links with primary constructors (2026-11-26)
+
+Owner decision 11 of the second rework. Each link is one non-generic `readonly struct` per position, written
+`LinkK(__PipelineN pipeline, TRequest request) : INext<TResponse>` (`notification` in a publish pipeline, `StreamLinkK` for streams), with
+an expression-bodied `InvokeAsync`, a target-typed `new(pipeline, request)` at every behavior call and at the entry call (`TNext` stays an
+explicit type argument), a one-line `<summary>` naming where `next` goes, and `global::` names without `using` aliases. Every pipeline
+context that existed before stays (no pipeline with behaviors is without one, so "pipelines without a context drop the `pipeline`
+parameter" applies to none), and every link takes both parameters. A parameter its `InvokeAsync` does not read (the context in the last
+link of a pipeline whose handler's invoker is static; both in the last link of a notification type without handlers) is not captured, so
+every link holds the fields it held before and the machine code is unchanged; the mediator's header suppresses the CS9113 such a parameter
+raises (`#pragma warning disable CS0612, CS0618, CS9113`). Trimming link parameters and dropping contexts that hold nothing is OQ-65
+(open). `NotificationGeneratorTests` and `NotificationBehaviorTests` cover a notification type with a behavior that injects nothing and no
+handlers (snapshot, typed and generic publish). The Phase 4 gate prototype (`test/Keryx.Benchmarks/Prototype/PrototypePipeline.cs`) is
+written the same way: `--prototype-disasm` gives Tier 1 code for `SendDepth1`, `SendDepth3` and `SendDepth8` byte for byte the same as
+before (112, 144 and 224 bytes; 6, 12 and 27 inlinees; the only call the context's slow-path creation), and
+`--filter '*PipelinePrototype*' --job short` allocates nothing at any depth, with depth 3 at 0.67x the nested calls. The allocation tests
+pass unchanged. Rejected shapes (stage-generic links, a runtime-provided generic link, composed chain types, a single index link) are in
+the ADR's Alternatives considered. Folded into the ADR (Generated pipeline shape, Streaming, Behavior methods, Injected parameters,
+Alternatives considered), the brief (Phase 4) and CONTEXT.md (link).

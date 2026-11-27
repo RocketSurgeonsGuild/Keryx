@@ -25,7 +25,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Threading.Tasks.ValueTask<string?> InvokeAsync(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
+        public global::System.Threading.Tasks.ValueTask<string?> InvokeAsync(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
     }
 }

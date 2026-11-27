@@ -5,14 +5,14 @@
 
 namespace Sample
 {
-    #nullable disable
+#nullable disable
     [global::Keryx.Internal.KeryxHandler(typeof(global::Sample.Ping), global::Keryx.Internal.HandlerKind.Request, Behaviors = new global::System.Type[] { typeof(global::Sample.Audit), typeof(global::Sample.PingBehavior) }, StaticInvoker = true)]
-    #nullable enable
+#nullable enable
     public static partial class PingHandler
     {
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public static global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<string>(Handle(request));
+        public static global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request));
     }
 }

@@ -361,7 +361,7 @@ type, or two keys, stay separate. When the consumers of a service differ:
   and every consumer, optional ones included, receives that instance;
 - if **all** consumers are optional, the context resolves it once with `GetService`/`GetKeyedService` into a nullable field (`T?`, a
   `Nullable<T>` for a value type, matched with the type pattern above), and each call site applies its own parameter's default:
-  `ctx.Service0 ?? <default>`.
+  `pipeline.Service0 ?? <default>`.
 
 The fields are named `Service0`, `Service1`, ... in order of first use (the pipeline's behaviors outermost first, each one's injected
 parameters in declared order). An edit that changes neither the set of services nor the order in which they are first used keeps the
@@ -585,11 +585,12 @@ user writes it; the host's generated pipeline calls it directly. There is no gen
 
 No behavior instance ever exists, so nothing is allocated for a behavior itself, per scope or per call. A behavior method's injected
 parameters are resolved once per DI scope into the generated pipeline context (see Generated pipeline shape), which already holds the
-handler, and the link calls the method as `Audit.Handle<CreateOrder.Command, Guid, Link_2>(request, new Link_2(ctx, request), ctx.Service0, ct)`,
-with the arguments in the method's declared order. The call is a direct static call: no interface, no virtual or generic virtual
-dispatch. A transient service injected into a behavior is created once per scope and pipeline, however many behavior methods of the
-pipeline inject it: they share the context's one instance (Injected parameters, Shared services in a pipeline context). Nothing is registered in DI for a
-behavior, so a behavior cannot be replaced through DI; exclude it with `ExcludeBehavior` and attach another.
+handler, and the link calls the method as
+`Audit.Handle<CreateOrder.Command, Guid, Link2>(request, new(pipeline, request), pipeline.Service0, ct)`, with the arguments in the method's
+declared order. The call is a direct static call: no interface, no virtual or generic virtual dispatch. A transient service injected into a
+behavior is created once per scope and pipeline, however many behavior methods of the pipeline inject it: they share the context's one
+instance (Injected parameters, Shared services in a pipeline context). Nothing is registered in DI for a behavior, so a behavior cannot be
+replaced through DI; exclude it with `ExcludeBehavior` and attach another.
 
 ### Three ways to attach a behavior
 
@@ -671,15 +672,38 @@ notification type that does not match is KRX009.
 For each pipeline the host emits:
 
 - a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
-  the notification type's handlers) and each distinct service the pipeline's behavior methods inject, once (one `ServiceN` field per
-  service type and key, shared by every behavior method that injects it; see Injected parameters), resolved in its constructor;
-- one small **link** struct per position: `readonly struct Link_k : INext<TResponse> { Context ctx; TRequest request; }`. Its
-  `InvokeAsync(ct)` calls the behavior method at position k+1 with `new Link_{k+1}(ctx, request)` as `next` and that method's injected
-  services read from `ctx`; the last link calls the handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the
-  publish strategy).
+  the notification type's handlers, and the publish strategy that runs them) and each distinct service the pipeline's behavior methods
+  inject, once (one `ServiceN` field per service type and key, shared by every behavior method that injects it; see Injected
+  parameters), resolved in its constructor. Every pipeline with behaviors has one, even when it holds nothing but its links (a static
+  invoker and no injected services, or a notification type without handlers whose behaviors inject nothing); a request or stream
+  pipeline without behaviors whose handler's invoker is static has none and calls the invoker directly. Dropping the contexts that hold
+  nothing is proposed (open-questions OQ-65, open);
+- one small **link** struct per position, a `readonly struct` with a primary constructor and an expression-bodied `InvokeAsync`, with a
+  one-line summary that names where its `next` goes (decided 2026-11-26):
 
-Links are **flat**: each one holds two fields regardless of pipeline depth, so struct copying does not grow with depth. A behavior may
-call `next` more than once (retry). The `CancellationToken` is passed as the `InvokeAsync` argument, never stored in a link.
+    ```csharp
+    /// <summary>The <c>next</c> of <c>Sample.Step1</c>: <c>Sample.Step2</c>.</summary>
+    public readonly struct Link1(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<string>
+    {
+        public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
+            global::Sample.Step2.Handle<global::Sample.Ping, string, Link2>(request, new(pipeline, request), cancellationToken, pipeline.Service0);
+    }
+    ```
+
+    Its `InvokeAsync(ct)` calls the behavior method at position k+1 with a target-typed `new(pipeline, request)`, the next link, as
+    `next` (the link type stays the explicit type argument for `TNext`) and that method's injected services read from the context; the last
+    link calls the handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the publish strategy). The entry of the
+    pipeline calls the outermost behavior method the same way. Every link takes the context and the message (`notification` in a publish
+    pipeline). A primary constructor parameter that `InvokeAsync` does not read is not captured, so a link holds what it held before the
+    primary constructors: the last link of a pipeline whose handler's invoker is static holds the request alone, and the last link of a
+    publish pipeline without handlers holds nothing. Such a parameter is warning CS9113, which the mediator's header suppresses
+    (`#pragma warning disable CS0612, CS0618, CS9113`). Taking only what a link reads or passes on is proposed with OQ-65 (open). Types are
+    `global::`-qualified; there are no `using` aliases.
+
+Links are **flat**: each one holds at most two fields regardless of pipeline depth, so struct copying does not grow with depth. A behavior
+may call `next` more than once (retry). The `CancellationToken` is passed as the `InvokeAsync` argument, never stored in a link. The
+spelling does not change the machine code: the Phase 4 gate prototype, written the same way, still allocates nothing and inlines every
+link and behavior method (open-questions, "Links with primary constructors").
 
 Stream pipelines use the same shape with `IStreamNext<TItem>` links (see Streaming), and the publish pipeline of a notification type
 with `INext` links (see Notifications).
@@ -772,10 +796,11 @@ public static class SkipNulls
 }
 ```
 
-**Links.** As for requests, the host emits one flat `readonly struct StreamLink_k : IStreamNext<TItem> { Context ctx; TRequest request; }`
-per position. Its `InvokeAsync(ct)` returns the result of the stream behavior method at position k+1, called with
-`new StreamLink_{k+1}(ctx, request)` as `next` and its injected services from the pipeline context, or the handler's `InvokeAsync` at
-the end. The token is an argument, never stored in a link.
+**Links.** As for requests, the host emits one flat `readonly struct StreamLink_k(Context pipeline, TRequest request) : IStreamNext<TItem>`
+per position, with an expression-bodied `InvokeAsync(ct)` that returns the result of the stream behavior method at position k+1, called
+with a target-typed `new(pipeline, request)` as `next` and its injected services from the pipeline context, or the handler's
+`InvokeAsync` at the end. Every link takes the context and the request; the last link of a pipeline whose handler's invoker is static
+does not read the context, which is then not captured (see Generated pipeline shape). The token is an argument, never stored in a link.
 
 **Cancellation.** The outermost element of the pipeline receives the `Stream(request, ct)` token as its argument and the consumer's
 `WithCancellation` token through `GetAsyncEnumerator`; every inner element receives one token, as its argument, and is enumerated
@@ -948,10 +973,18 @@ internal sealed partial class KeryxMediator : IMediator
 
 ### Generic entry points
 
-- `Send<TResponse>(IRequest<TResponse>)` dispatches on `request.GetType() == typeof(X)` (a method-table pointer compare). With more than
-  32 request types, it looks the type up in a `FrozenDictionary<Type, int>` and then uses a `switch` on the index. The threshold comes
-  from the Phase 3 benchmark (open-questions OQ-15): the lookup costs a flat 4.5 ns, the chain about 0.13 ns per compare, and at 32 types
-  the chain's worst case is 0.6 ns slower than the lookup and its average 1.5 ns faster.
+- `Send<TResponse>(IRequest<TResponse>)` dispatches on `request.GetType() == typeof(X)` (a method-table pointer compare), with one
+  exact-type `when` guard per request type. Never type patterns: `X x` compiles to `isinst`, which a type derived from `X` also matches,
+  and would break exact-type dispatch. With more than 32 request types, it looks the type up in a `FrozenDictionary<Type, int>` and
+  switches on the index, which compiles to a jump table. Owner decision 7 (2026-11-26) asks for switch expressions,
+  `return requestType switch { _ when requestType == typeof(X) => __Dispatch0(request, cancellationToken), ..., _ => throw __HandlerNotFound(requestType) };`
+  and `return __RequestIndex(requestType) switch { 0 => ..., _ => throw ... };`, and says the change must not regress. A switch
+  expression returns through one result local, so the JIT does not tail-call its arms and measured slower; until open-questions OQ-67
+  is decided the generated code is a switch statement of the same sections with one `return` each,
+  `switch (requestType) { case var _ when requestType == typeof(X): return __Dispatch0(request, cancellationToken); ... }` and
+  `switch (__RequestIndex(requestType)) { case 0: return ...; }`, followed by `throw __HandlerNotFound(requestType);`. The threshold
+  comes from the Phase 3 benchmark (open-questions OQ-15): the lookup costs a flat 4.5 ns, the chain about 0.13 ns per compare, and at
+  32 types the chain's worst case is 0.6 ns slower than the lookup and its average 1.5 ns faster.
 - Each arm is its own non-inlined `__Dispatch{n}<TResponse>` method that holds the `Unsafe.As` below, and the lookup is a non-inlined
   `__RequestIndex(Type)` that returns -1 for an unknown type, so the generic `Send` holds no address-taken locals. Arms written inline
   in `Send` made the Tier 1 code zero a frame with one `ValueTask` per arm in the prolog of every call and kept it from tail-calling the
@@ -963,7 +996,10 @@ internal sealed partial class KeryxMediator : IMediator
 - `Stream<TItem>` uses the same dispatch; the result is a reference type and needs only a reference cast.
 - `Publish<TNotification>`: when `typeof(TNotification).IsValueType`, generated arms compare `typeof(TNotification) == typeof(X)` (folded
   by the JIT, because value-type instantiations are not shared) and convert with `Unsafe.As<TNotification, X>(ref notification)`, so a
-  struct notification is never boxed by dispatch. Only for a reference-type `TNotification` does dispatch call `notification.GetType()`.
+  struct notification is never boxed by dispatch
+  (`switch (typeof(TNotification)) { case var _ when typeof(TNotification) == typeof(X): return ...; } return default;`, a switch
+  expression ending with `_ => default` under decision 7; OQ-67). Only for a reference-type `TNotification` does dispatch call
+  `notification.GetType()`, in the shape `Send` uses, ending with `return default;`.
 - Above the threshold (for `Publish`, with a reference-type `TNotification`) the lookup is by exact type as well: a type derived from a
   dispatched type, with no handler of its own, is not in the table, so it takes the default arm (not found for a request or a stream
   request, nothing to run for a notification) and never reaches the base type's handler. Tests cover both sides of the threshold for
@@ -1156,6 +1192,14 @@ generator reads attributes through Roslyn, which ignores `Inherited`, so it has 
   unrelated edit (a new file with no Keryx types), and asserts that every named step after the scan step, and every source output, reports
   `Cached` or `Unchanged`. It also asserts the reverse: swapping in a reference with a changed manifest produces `Modified`. Steps fed
   directly by `CompilationProvider` always run and are not asserted.
+- Generated code is built with Roslyn's `SyntaxFactory` through shared helpers (`GeneratedSyntax`), the pattern Dovetail's generators use,
+  never as concatenated text (decided 2026-11-26). Syntax is built only inside `RegisterSourceOutput`: the models carry strings, never
+  syntax. Each file's compilation unit is normalized once (`NormalizeWhitespace`, four spaces, `\n` line endings), then a layout pass fixes
+  what normalization alone gets wrong or hard to read (`GeneratedSyntax.Render`: blank lines between members, a break after `=>`, the
+  closing brace of a switch expression on its own line, `is` after `)`, no space after the `?` of a nullable type unless a name follows:
+  `typeof(int?)`, `string?[]`), and the header (`// <auto-generated/>`, `#nullable enable`, the `#pragma` for obsolete types, and in the
+  mediator for CS9113, the unread link parameters) is added last. No type declaration carries a stray `;`, and a nullable type renders `T?`.
+  On a very large host the one normalization dominates the generator's time (open-questions OQ-66, open).
 - Generated code is deterministic (ordinal sorting everywhere, no timestamps or GUIDs), starts with `// <auto-generated/>`, enables
   nullable and uses `global::`-qualified names. `[GeneratedCode("Keryx", version)]` goes on each generated member of a user's partial type,
   and at type level only on types Keryx owns outright (see Handlers, Example). A snapshot test asserts that a user's partial declaration
@@ -1218,6 +1262,9 @@ The gate passed on all three criteria with the instance behaviors of Phases 4 to
 the generated pipelines. It was re-run after the static-behavior rework, with the prototype's behaviors written as static
 behavior methods, and passed on all three criteria again (OQ-36): 0 B at every depth, every behavior method and link inlined with no
 generic-virtual-method lookup, and depth 3 at 0.66× the baseline. Static calls inline at least as well as the instance behaviors did.
+It was re-run once more after the links moved to primary constructors and target-typed `new(pipeline, request)` (decided 2026-11-26),
+with the prototype written in that spelling: the Tier 1 code of every depth is byte for byte the same, it allocates nothing, and depth 3
+runs at 0.67× the baseline.
 
 A failed gate does **not** stop implementation (decided 2026-11-26). The measured numbers and the disassembly findings are recorded in
 `docs/adr/open-questions.md`, the work is committed with the struct-based pipeline as designed, and work continues. The ADR's fallback
@@ -1348,6 +1395,22 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - **Ignoring the host-only assembly attributes outside a host** (open-questions OQ-54): the interim rule until 2026-11-26. In a library
   or contracts assembly, `ExternallyHandled` (since removed), `ExcludeHandler` and `ExcludeBehavior` had no effect and nothing was
   reported. Replaced by warning KRX043.
+- **Generated source written as text** (a line-by-line `CodeWriter` of interpolated strings): the emitters until the owner's second rework
+  on 2026-11-26 (decision 5), replaced by syntax built with `SyntaxFactory` and normalized once, the pattern Dovetail's generators use
+  (Incremental generation rules).
+- **`if` chains for generic dispatch** (`if (requestType == typeof(X)) { return __Dispatch0(...); }` per type, and a `switch` statement on
+  the index above the threshold): the generated shape until 2026-11-26. Decision 7 of the second rework replaces them with switch
+  expressions with exact-type `when` guards and an index switch expression; because those lose the arms' tail calls, the generated
+  code uses switch statements of the same sections until OQ-67 is decided (Generic entry points). The compiled dispatch is the same: a
+  chain of method-table compares, or a jump table. Type patterns (`X x`) were rejected: they compile to `isinst`, which a derived type
+  also matches.
+- **Other link shapes** (owner decision 11 of the second rework, 2026-11-26): stage-generic links (one generic link type per position,
+  closed over the next stage), a runtime-provided generic link in `Keryx`, and composed chain types (the whole pipeline as nested
+  generic type arguments) all share `__Canon` code over reference types, so a behavior method the JIT does not inline pays a
+  generic-dictionary lookup per call; a single index link (one struct holding the position, whose `InvokeAsync` switches on it) is
+  recursive and is not inlined. One non-generic link struct per position, as before, written with a primary constructor and
+  target-typed `new(pipeline, request)` (Generated pipeline shape). The earlier spelling, with explicit `_pipeline`/`_request` fields, a
+  constructor and `new LinkK(...)`, compiled to the same machine code and was dropped as noise.
 - **`[assembly: KeryxHost]`**, an assembly attribute that made the assembly a host: the design until the owner's second rework on
   2026-11-26, replaced by the `KeryxHost` MSBuild property (Opting in), the pattern Dovetail uses. The property needs no source edit in the
   common case (an executable or test project is a host by default), a project opts out without touching code, and the build decides

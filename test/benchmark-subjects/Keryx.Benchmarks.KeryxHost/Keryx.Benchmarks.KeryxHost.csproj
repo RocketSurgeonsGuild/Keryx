@@ -7,6 +7,10 @@
     <PropertyGroup>
         <KeryxHost>true</KeryxHost>
     </PropertyGroup>
+    <!-- Padding.cs: more than DispatchThreshold request, stream request and notification types, for the above-threshold dispatch runs. -->
+    <PropertyGroup Condition="'$(KeryxDispatchPadding)' == 'true'">
+        <DefineConstants>$(DefineConstants);KERYX_DISPATCH_PADDING</DefineConstants>
+    </PropertyGroup>
     <ItemGroup>
         <InternalsVisibleTo Include="Keryx.Benchmarks" />
     </ItemGroup>

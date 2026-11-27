@@ -111,7 +111,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_store, __keryx_regional, __keryx_clock, __keryx_services, cancellationToken, __keryx_cache, __keryx_fallbackClock, __keryx_retries, __keryx_limit, __keryx_ratio, __keryx_scale, __keryx_price, __keryx_enabled, __keryx_separator, __keryx_name, __keryx_region, __keryx_maybeRegion, __keryx_maybeCount, __keryx_id, __keryx_delay));
+        public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_store, __keryx_regional, __keryx_clock, __keryx_services, cancellationToken, __keryx_cache, __keryx_fallbackClock, __keryx_retries, __keryx_limit, __keryx_ratio, __keryx_scale, __keryx_price, __keryx_enabled, __keryx_separator, __keryx_name, __keryx_region, __keryx_maybeRegion, __keryx_maybeCount, __keryx_id, __keryx_delay));
     }
 }

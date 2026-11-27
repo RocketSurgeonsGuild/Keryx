@@ -393,8 +393,9 @@ services its behavior methods inject; it never creates a behavior instance. From
 services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's transient dependencies therefore live
 as long as the scope, and the behaviors of one pipeline that inject the same transient share one instance.
 
-The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a `FrozenDictionary` lookup
-and a jump table above 32 request types) and never boxes the response. A struct request is boxed when sent through `ISender`; the typed
+The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type with type compares (a switch statement whose
+sections compare `requestType == typeof(X)`; a `FrozenDictionary` lookup and a jump table above 32 request types) and never boxes the
+response. A struct request is boxed when sent through `ISender`; the typed
 overload avoids it (Info [KRX021](#krx021)). An unknown request type throws `KeryxHandlerNotFoundException`, and so does a type derived
 from a handled request that has no handler of its own: dispatch never falls back to a base type's handler. Generic `Stream` dispatches
 the same way. Generic `Publish` does too, so a notification type the host does not know (even one derived from a type it does) runs
@@ -581,6 +582,14 @@ scenario's handlers and behaviors):
 cd test/Keryx.Benchmarks
 dotnet run -c Release -f net10.0 -- --verify
 dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
+```
+
+The Keryx subject has fewer than 32 request, stream request and notification types, so its `Keryx_Generic` rows measure the linear type
+compares. With the environment variable `KeryxDispatchPadding=true` (an MSBuild property, so BenchmarkDotNet's own build sees it too),
+it compiles 32 more of each (`Padding.cs`), and the same rows measure the `FrozenDictionary` lookup and jump table above the threshold:
+
+```bash
+KeryxDispatchPadding=true dotnet run -c Release -f net10.0 -- --filter '*Comparison*Keryx_Generic*'
 ```
 
 `--filter '*PipelinePrototype*'` runs the hand-written struct pipeline the generated code follows (static behavior methods, struct

@@ -20,7 +20,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken)
-            => Handle(request, __keryx_clock, cancellationToken);
+        public global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
+            Handle(request, __keryx_clock, cancellationToken);
     }
 }

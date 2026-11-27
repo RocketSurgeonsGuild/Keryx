@@ -7,10 +7,11 @@ using BenchmarkDotNet.Attributes;
 namespace Keryx.Benchmarks.Host;
 
 /// <summary>
-///     Generic <c>Send</c> dispatch: a linear chain of exact-type compares against a <c>FrozenDictionary&lt;Type, int&gt;</c> lookup followed by
-///     a <c>switch</c> (ADR 0001, Generic entry points). <see cref="Count" /> is the number of request types the host dispatches; the request
-///     sent is the last one in the chain (the worst case for the linear chain) or the middle one (its average). Each arm calls a
-///     non-inlined per-request method that reinterprets the result with <c>Unsafe.As</c>, as the generated code does (OQ-15).
+///     Generic <c>Send</c> dispatch: a linear chain of exact-type compares (a switch statement with <c>when</c> guards) against a
+///     <c>FrozenDictionary&lt;Type, int&gt;</c> lookup followed by a switch statement on the index, a jump table (ADR 0001, Generic entry
+///     points). <see cref="Count" /> is the number of request types the host dispatches; the request sent is the last one in the chain (the
+///     worst case for the linear chain) or the middle one (its average). Each arm calls a non-inlined per-request method that reinterprets
+///     the result with <c>Unsafe.As</c>, as the generated code does (OQ-15).
 /// </summary>
 [MemoryDiagnoser]
 public class DispatchBenchmarks
@@ -110,409 +111,288 @@ public class DispatchBenchmarks
     [Benchmark]
     public int FrozenMiddle() => Completed.Result(Frozen(_middle));
 
-    // The chain is the generated shape being measured; folding it into a conditional expression would change what is benchmarked.
-#pragma warning disable IDE0046
+    // The generated shapes (OQ-67): switch statements with one return per section, so the JIT tail-calls each arm. Up to the threshold the
+    // sections compare the runtime type with each request type in turn (exact-type when guards, never type patterns, which would match
+    // derived types); above it the switch on the index is a jump table. A switch expression would change what is benchmarked.
+#pragma warning disable IDE0066
     private static ValueTask<TResponse> Linear<TResponse>(IRequest<TResponse> request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var requestType = request.GetType();
-        if (requestType == typeof(R00))
-        {
-            return Dispatch00(request);
-        }
-
-        if (requestType == typeof(R01))
-        {
-            return Dispatch01(request);
-        }
-
-        if (requestType == typeof(R02))
-        {
-            return Dispatch02(request);
-        }
-
-        if (requestType == typeof(R03))
-        {
-            return Dispatch03(request);
-        }
-
-        if (requestType == typeof(R04))
-        {
-            return Dispatch04(request);
-        }
-
-        if (requestType == typeof(R05))
-        {
-            return Dispatch05(request);
-        }
-
-        if (requestType == typeof(R06))
-        {
-            return Dispatch06(request);
-        }
-
-        if (requestType == typeof(R07))
-        {
-            return Dispatch07(request);
-        }
-
-        if (requestType == typeof(R08))
-        {
-            return Dispatch08(request);
-        }
-
-        if (requestType == typeof(R09))
-        {
-            return Dispatch09(request);
-        }
-
-        if (requestType == typeof(R10))
-        {
-            return Dispatch10(request);
-        }
-
-        if (requestType == typeof(R11))
-        {
-            return Dispatch11(request);
-        }
-
-        if (requestType == typeof(R12))
-        {
-            return Dispatch12(request);
-        }
-
-        if (requestType == typeof(R13))
-        {
-            return Dispatch13(request);
-        }
-
-        if (requestType == typeof(R14))
-        {
-            return Dispatch14(request);
-        }
-
-        if (requestType == typeof(R15))
-        {
-            return Dispatch15(request);
-        }
-
-        if (requestType == typeof(R16))
-        {
-            return Dispatch16(request);
-        }
-
-        if (requestType == typeof(R17))
-        {
-            return Dispatch17(request);
-        }
-
-        if (requestType == typeof(R18))
-        {
-            return Dispatch18(request);
-        }
-
-        if (requestType == typeof(R19))
-        {
-            return Dispatch19(request);
-        }
-
-        if (requestType == typeof(R20))
-        {
-            return Dispatch20(request);
-        }
-
-        if (requestType == typeof(R21))
-        {
-            return Dispatch21(request);
-        }
-
-        if (requestType == typeof(R22))
-        {
-            return Dispatch22(request);
-        }
-
-        if (requestType == typeof(R23))
-        {
-            return Dispatch23(request);
-        }
-
-        if (requestType == typeof(R24))
-        {
-            return Dispatch24(request);
-        }
-
-        if (requestType == typeof(R25))
-        {
-            return Dispatch25(request);
-        }
-
-        if (requestType == typeof(R26))
-        {
-            return Dispatch26(request);
-        }
-
-        if (requestType == typeof(R27))
-        {
-            return Dispatch27(request);
-        }
-
-        if (requestType == typeof(R28))
-        {
-            return Dispatch28(request);
-        }
-
-        if (requestType == typeof(R29))
-        {
-            return Dispatch29(request);
-        }
-
-        if (requestType == typeof(R30))
-        {
-            return Dispatch30(request);
-        }
-
-        if (requestType == typeof(R31))
-        {
-            return Dispatch31(request);
-        }
-
-        if (requestType == typeof(R32))
-        {
-            return Dispatch32(request);
-        }
-
-        if (requestType == typeof(R33))
-        {
-            return Dispatch33(request);
-        }
-
-        if (requestType == typeof(R34))
-        {
-            return Dispatch34(request);
-        }
-
-        if (requestType == typeof(R35))
-        {
-            return Dispatch35(request);
-        }
-
-        if (requestType == typeof(R36))
-        {
-            return Dispatch36(request);
-        }
-
-        if (requestType == typeof(R37))
-        {
-            return Dispatch37(request);
-        }
-
-        if (requestType == typeof(R38))
-        {
-            return Dispatch38(request);
-        }
-
-        if (requestType == typeof(R39))
-        {
-            return Dispatch39(request);
-        }
-
-        if (requestType == typeof(R40))
-        {
-            return Dispatch40(request);
-        }
-
-        if (requestType == typeof(R41))
-        {
-            return Dispatch41(request);
-        }
-
-        if (requestType == typeof(R42))
-        {
-            return Dispatch42(request);
-        }
-
-        if (requestType == typeof(R43))
-        {
-            return Dispatch43(request);
-        }
-
-        if (requestType == typeof(R44))
-        {
-            return Dispatch44(request);
-        }
-
-        if (requestType == typeof(R45))
-        {
-            return Dispatch45(request);
-        }
-
-        if (requestType == typeof(R46))
-        {
-            return Dispatch46(request);
-        }
-
-        if (requestType == typeof(R47))
-        {
-            return Dispatch47(request);
-        }
-
-        if (requestType == typeof(R48))
-        {
-            return Dispatch48(request);
-        }
-
-        if (requestType == typeof(R49))
-        {
-            return Dispatch49(request);
-        }
-
-        if (requestType == typeof(R50))
-        {
-            return Dispatch50(request);
-        }
-
-        if (requestType == typeof(R51))
-        {
-            return Dispatch51(request);
-        }
-
-        if (requestType == typeof(R52))
-        {
-            return Dispatch52(request);
-        }
-
-        if (requestType == typeof(R53))
-        {
-            return Dispatch53(request);
-        }
-
-        if (requestType == typeof(R54))
-        {
-            return Dispatch54(request);
-        }
-
-        if (requestType == typeof(R55))
-        {
-            return Dispatch55(request);
-        }
-
-        if (requestType == typeof(R56))
-        {
-            return Dispatch56(request);
-        }
-
-        if (requestType == typeof(R57))
-        {
-            return Dispatch57(request);
-        }
-
-        if (requestType == typeof(R58))
-        {
-            return Dispatch58(request);
-        }
-
-        if (requestType == typeof(R59))
-        {
-            return Dispatch59(request);
-        }
-
-        if (requestType == typeof(R60))
-        {
-            return Dispatch60(request);
-        }
-
-        if (requestType == typeof(R61))
-        {
-            return Dispatch61(request);
-        }
-
-        if (requestType == typeof(R62))
-        {
-            return Dispatch62(request);
-        }
-
-        if (requestType == typeof(R63))
-        {
-            return Dispatch63(request);
+        switch (requestType)
+        {
+            case var _ when requestType == typeof(R00):
+                return Dispatch00(request);
+            case var _ when requestType == typeof(R01):
+                return Dispatch01(request);
+            case var _ when requestType == typeof(R02):
+                return Dispatch02(request);
+            case var _ when requestType == typeof(R03):
+                return Dispatch03(request);
+            case var _ when requestType == typeof(R04):
+                return Dispatch04(request);
+            case var _ when requestType == typeof(R05):
+                return Dispatch05(request);
+            case var _ when requestType == typeof(R06):
+                return Dispatch06(request);
+            case var _ when requestType == typeof(R07):
+                return Dispatch07(request);
+            case var _ when requestType == typeof(R08):
+                return Dispatch08(request);
+            case var _ when requestType == typeof(R09):
+                return Dispatch09(request);
+            case var _ when requestType == typeof(R10):
+                return Dispatch10(request);
+            case var _ when requestType == typeof(R11):
+                return Dispatch11(request);
+            case var _ when requestType == typeof(R12):
+                return Dispatch12(request);
+            case var _ when requestType == typeof(R13):
+                return Dispatch13(request);
+            case var _ when requestType == typeof(R14):
+                return Dispatch14(request);
+            case var _ when requestType == typeof(R15):
+                return Dispatch15(request);
+            case var _ when requestType == typeof(R16):
+                return Dispatch16(request);
+            case var _ when requestType == typeof(R17):
+                return Dispatch17(request);
+            case var _ when requestType == typeof(R18):
+                return Dispatch18(request);
+            case var _ when requestType == typeof(R19):
+                return Dispatch19(request);
+            case var _ when requestType == typeof(R20):
+                return Dispatch20(request);
+            case var _ when requestType == typeof(R21):
+                return Dispatch21(request);
+            case var _ when requestType == typeof(R22):
+                return Dispatch22(request);
+            case var _ when requestType == typeof(R23):
+                return Dispatch23(request);
+            case var _ when requestType == typeof(R24):
+                return Dispatch24(request);
+            case var _ when requestType == typeof(R25):
+                return Dispatch25(request);
+            case var _ when requestType == typeof(R26):
+                return Dispatch26(request);
+            case var _ when requestType == typeof(R27):
+                return Dispatch27(request);
+            case var _ when requestType == typeof(R28):
+                return Dispatch28(request);
+            case var _ when requestType == typeof(R29):
+                return Dispatch29(request);
+            case var _ when requestType == typeof(R30):
+                return Dispatch30(request);
+            case var _ when requestType == typeof(R31):
+                return Dispatch31(request);
+            case var _ when requestType == typeof(R32):
+                return Dispatch32(request);
+            case var _ when requestType == typeof(R33):
+                return Dispatch33(request);
+            case var _ when requestType == typeof(R34):
+                return Dispatch34(request);
+            case var _ when requestType == typeof(R35):
+                return Dispatch35(request);
+            case var _ when requestType == typeof(R36):
+                return Dispatch36(request);
+            case var _ when requestType == typeof(R37):
+                return Dispatch37(request);
+            case var _ when requestType == typeof(R38):
+                return Dispatch38(request);
+            case var _ when requestType == typeof(R39):
+                return Dispatch39(request);
+            case var _ when requestType == typeof(R40):
+                return Dispatch40(request);
+            case var _ when requestType == typeof(R41):
+                return Dispatch41(request);
+            case var _ when requestType == typeof(R42):
+                return Dispatch42(request);
+            case var _ when requestType == typeof(R43):
+                return Dispatch43(request);
+            case var _ when requestType == typeof(R44):
+                return Dispatch44(request);
+            case var _ when requestType == typeof(R45):
+                return Dispatch45(request);
+            case var _ when requestType == typeof(R46):
+                return Dispatch46(request);
+            case var _ when requestType == typeof(R47):
+                return Dispatch47(request);
+            case var _ when requestType == typeof(R48):
+                return Dispatch48(request);
+            case var _ when requestType == typeof(R49):
+                return Dispatch49(request);
+            case var _ when requestType == typeof(R50):
+                return Dispatch50(request);
+            case var _ when requestType == typeof(R51):
+                return Dispatch51(request);
+            case var _ when requestType == typeof(R52):
+                return Dispatch52(request);
+            case var _ when requestType == typeof(R53):
+                return Dispatch53(request);
+            case var _ when requestType == typeof(R54):
+                return Dispatch54(request);
+            case var _ when requestType == typeof(R55):
+                return Dispatch55(request);
+            case var _ when requestType == typeof(R56):
+                return Dispatch56(request);
+            case var _ when requestType == typeof(R57):
+                return Dispatch57(request);
+            case var _ when requestType == typeof(R58):
+                return Dispatch58(request);
+            case var _ when requestType == typeof(R59):
+                return Dispatch59(request);
+            case var _ when requestType == typeof(R60):
+                return Dispatch60(request);
+            case var _ when requestType == typeof(R61):
+                return Dispatch61(request);
+            case var _ when requestType == typeof(R62):
+                return Dispatch62(request);
+            case var _ when requestType == typeof(R63):
+                return Dispatch63(request);
         }
 
         throw new KeryxHandlerNotFoundException(requestType);
     }
-#pragma warning restore IDE0046
 
     private static ValueTask<TResponse> Frozen<TResponse>(IRequest<TResponse> request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var requestType = request.GetType();
-        return RequestIndex(requestType) switch
+        switch (RequestIndex(requestType))
         {
-            0 => Dispatch00(request),
-            1 => Dispatch01(request),
-            2 => Dispatch02(request),
-            3 => Dispatch03(request),
-            4 => Dispatch04(request),
-            5 => Dispatch05(request),
-            6 => Dispatch06(request),
-            7 => Dispatch07(request),
-            8 => Dispatch08(request),
-            9 => Dispatch09(request),
-            10 => Dispatch10(request),
-            11 => Dispatch11(request),
-            12 => Dispatch12(request),
-            13 => Dispatch13(request),
-            14 => Dispatch14(request),
-            15 => Dispatch15(request),
-            16 => Dispatch16(request),
-            17 => Dispatch17(request),
-            18 => Dispatch18(request),
-            19 => Dispatch19(request),
-            20 => Dispatch20(request),
-            21 => Dispatch21(request),
-            22 => Dispatch22(request),
-            23 => Dispatch23(request),
-            24 => Dispatch24(request),
-            25 => Dispatch25(request),
-            26 => Dispatch26(request),
-            27 => Dispatch27(request),
-            28 => Dispatch28(request),
-            29 => Dispatch29(request),
-            30 => Dispatch30(request),
-            31 => Dispatch31(request),
-            32 => Dispatch32(request),
-            33 => Dispatch33(request),
-            34 => Dispatch34(request),
-            35 => Dispatch35(request),
-            36 => Dispatch36(request),
-            37 => Dispatch37(request),
-            38 => Dispatch38(request),
-            39 => Dispatch39(request),
-            40 => Dispatch40(request),
-            41 => Dispatch41(request),
-            42 => Dispatch42(request),
-            43 => Dispatch43(request),
-            44 => Dispatch44(request),
-            45 => Dispatch45(request),
-            46 => Dispatch46(request),
-            47 => Dispatch47(request),
-            48 => Dispatch48(request),
-            49 => Dispatch49(request),
-            50 => Dispatch50(request),
-            51 => Dispatch51(request),
-            52 => Dispatch52(request),
-            53 => Dispatch53(request),
-            54 => Dispatch54(request),
-            55 => Dispatch55(request),
-            56 => Dispatch56(request),
-            57 => Dispatch57(request),
-            58 => Dispatch58(request),
-            59 => Dispatch59(request),
-            60 => Dispatch60(request),
-            61 => Dispatch61(request),
-            62 => Dispatch62(request),
-            63 => Dispatch63(request),
-            _ => throw new KeryxHandlerNotFoundException(requestType),
-        };
+            case 0:
+                return Dispatch00(request);
+            case 1:
+                return Dispatch01(request);
+            case 2:
+                return Dispatch02(request);
+            case 3:
+                return Dispatch03(request);
+            case 4:
+                return Dispatch04(request);
+            case 5:
+                return Dispatch05(request);
+            case 6:
+                return Dispatch06(request);
+            case 7:
+                return Dispatch07(request);
+            case 8:
+                return Dispatch08(request);
+            case 9:
+                return Dispatch09(request);
+            case 10:
+                return Dispatch10(request);
+            case 11:
+                return Dispatch11(request);
+            case 12:
+                return Dispatch12(request);
+            case 13:
+                return Dispatch13(request);
+            case 14:
+                return Dispatch14(request);
+            case 15:
+                return Dispatch15(request);
+            case 16:
+                return Dispatch16(request);
+            case 17:
+                return Dispatch17(request);
+            case 18:
+                return Dispatch18(request);
+            case 19:
+                return Dispatch19(request);
+            case 20:
+                return Dispatch20(request);
+            case 21:
+                return Dispatch21(request);
+            case 22:
+                return Dispatch22(request);
+            case 23:
+                return Dispatch23(request);
+            case 24:
+                return Dispatch24(request);
+            case 25:
+                return Dispatch25(request);
+            case 26:
+                return Dispatch26(request);
+            case 27:
+                return Dispatch27(request);
+            case 28:
+                return Dispatch28(request);
+            case 29:
+                return Dispatch29(request);
+            case 30:
+                return Dispatch30(request);
+            case 31:
+                return Dispatch31(request);
+            case 32:
+                return Dispatch32(request);
+            case 33:
+                return Dispatch33(request);
+            case 34:
+                return Dispatch34(request);
+            case 35:
+                return Dispatch35(request);
+            case 36:
+                return Dispatch36(request);
+            case 37:
+                return Dispatch37(request);
+            case 38:
+                return Dispatch38(request);
+            case 39:
+                return Dispatch39(request);
+            case 40:
+                return Dispatch40(request);
+            case 41:
+                return Dispatch41(request);
+            case 42:
+                return Dispatch42(request);
+            case 43:
+                return Dispatch43(request);
+            case 44:
+                return Dispatch44(request);
+            case 45:
+                return Dispatch45(request);
+            case 46:
+                return Dispatch46(request);
+            case 47:
+                return Dispatch47(request);
+            case 48:
+                return Dispatch48(request);
+            case 49:
+                return Dispatch49(request);
+            case 50:
+                return Dispatch50(request);
+            case 51:
+                return Dispatch51(request);
+            case 52:
+                return Dispatch52(request);
+            case 53:
+                return Dispatch53(request);
+            case 54:
+                return Dispatch54(request);
+            case 55:
+                return Dispatch55(request);
+            case 56:
+                return Dispatch56(request);
+            case 57:
+                return Dispatch57(request);
+            case 58:
+                return Dispatch58(request);
+            case 59:
+                return Dispatch59(request);
+            case 60:
+                return Dispatch60(request);
+            case 61:
+                return Dispatch61(request);
+            case 62:
+                return Dispatch62(request);
+            case 63:
+                return Dispatch63(request);
+        }
+
+        throw new KeryxHandlerNotFoundException(requestType);
     }
+#pragma warning restore IDE0066
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static int RequestIndex(Type requestType) => _index.TryGetValue(requestType, out var index) ? index : -1;

@@ -10,7 +10,7 @@ namespace Sample
     {
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public static global::System.Threading.Tasks.ValueTask InvokeAsync(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken)
-            => Handle(notification);
+        public static global::System.Threading.Tasks.ValueTask InvokeAsync(global::Sample.Placed notification, global::System.Threading.CancellationToken cancellationToken) =>
+            Handle(notification);
     }
 }

@@ -12,8 +12,8 @@ namespace Sample.Orders
         {
             /// <summary>Runs the handler only. No behaviors run.</summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-            public static global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.Orders.Orders.Create.Command request, global::System.Threading.CancellationToken cancellationToken)
-                => Handle(request);
+            public static global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.Orders.Orders.Create.Command request, global::System.Threading.CancellationToken cancellationToken) =>
+                Handle(request);
         }
     }
 }

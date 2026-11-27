@@ -56,7 +56,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
+        public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
     }
 }

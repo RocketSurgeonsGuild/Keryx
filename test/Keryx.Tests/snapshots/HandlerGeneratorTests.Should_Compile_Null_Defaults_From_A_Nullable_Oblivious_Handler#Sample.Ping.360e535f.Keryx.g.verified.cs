@@ -31,7 +31,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Q1 request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_foo, __keryx_s, __keryx_count));
+        public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Q1 request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_foo, __keryx_s, __keryx_count));
     }
 }

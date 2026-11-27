@@ -1,5 +1,8 @@
 using System.Collections.Immutable;
-using Keryx.Analyzers.Handlers;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using static Keryx.Analyzers.GeneratedSyntax;
+using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace Keryx.Analyzers.Hosts;
 
@@ -12,35 +15,49 @@ internal static partial class HostEmitter
 {
     private const string AsyncEnumerable = "global::System.Collections.Generic.IAsyncEnumerable";
 
-    private static void WriteTypedStream(CodeWriter writer, HostHandlerModel request, int index)
+    private static MethodDeclarationSyntax TypedStream(HostHandlerModel request, int index)
     {
-        writer.Line("/// <summary>");
-        writer.Line(
-            $"///     Streams a <c>{Display(request.MessageType)}</c> through its pipeline from its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}."
-        );
-        writer.Line("/// </summary>");
-        writer.Line("/// <param name=\"request\">The stream request.</param>");
-        writer.Line("/// <param name=\"cancellationToken\">The token passed to the outermost stream behavior, or to the handler when there is none.</param>");
-        writer.Line("/// <returns>The items the handler produces, after every stream behavior has seen them.</returns>");
-        writer.Line($"public {AsyncEnumerable}<{request.ResponseType}> Stream({request.MessageType} request, {CancellationToken} cancellationToken = default)");
-        writer.Open();
+        var statements = new List<StatementSyntax>();
         if (!request.MessageIsValueType)
         {
-            writer.Line($"{ThrowIfNull}(request);");
+            statements.Add(Call(Qualified(ThrowIfNull), Id("request")));
         }
 
         if (!request.MessageIsSealed)
         {
             // Dispatch is by exact runtime type: a derived stream request statically typed as this one goes to its own handler (OQ-31).
-            writer.Line($"if (request.GetType() != typeof({request.MessageType}))");
-            writer.Open();
-            writer.Line($"return Stream<{request.ResponseType}>((global::Keryx.IStreamRequest<{request.ResponseType}>)request, cancellationToken);");
-            writer.Close();
-            writer.Line();
+            statements.Add(
+                IfStatement(
+                    NotEqual(Invoke(Member(Id("request"), "GetType")), TypeOf(request.MessageType)),
+                    Block(
+                        Return(
+                            Invoke(
+                                Generic("Stream", TypeName(request.ResponseType!)),
+                                Cast(TypeName($"global::Keryx.IStreamRequest<{request.ResponseType}>"), Id("request")),
+                                Id(CancellationTokenName)
+                            )
+                        )
+                    )
+                )
+            );
         }
 
-        writer.Line($"return {StreamCoreName(index)}(request, cancellationToken);");
-        writer.Close();
+        statements.Add(Return(Invoke(Id(StreamCoreName(index)), Id("request"), Id(CancellationTokenName))));
+        return Method(
+                   Modifiers(SyntaxKind.PublicKeyword),
+                   TypeName($"{AsyncEnumerable}<{request.ResponseType}>"),
+                   "Stream",
+                   Params(Param(TypeName(request.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
+               )
+              .Statements(statements)
+              .Documented(
+                   "<summary>",
+                   $"    Streams a <c>{Display(request.MessageType)}</c> through its pipeline from its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
+                   "</summary>",
+                   "<param name=\"request\">The stream request.</param>",
+                   "<param name=\"cancellationToken\">The token passed to the outermost stream behavior, or to the handler when there is none.</param>",
+                   "<returns>The items the handler produces, after every stream behavior has seen them.</returns>"
+               );
     }
 
     /// <summary>
@@ -49,194 +66,87 @@ internal static partial class HostEmitter
     ///     <c>IAsyncEnumerable&lt;X&gt;</c> as <c>IAsyncEnumerable&lt;TItem&gt;</c> (the same type at run time, because
     ///     <c>IStreamRequest&lt;&gt;</c> is invariant and a stream request implements exactly one closing) needs only a reference cast.
     /// </summary>
-    private static void WriteGenericStream(CodeWriter writer, ImmutableArray<HostHandlerModel> streams)
+    private static IEnumerable<MemberDeclarationSyntax> GenericStream(ImmutableArray<HostHandlerModel> streams)
     {
-        writer.Line("/// <inheritdoc />");
-        writer.Line(
-            $"public {AsyncEnumerable}<TItem> Stream<TItem>(global::Keryx.IStreamRequest<TItem> request, {CancellationToken} cancellationToken = default)"
+        yield return Method(
+                         Modifiers(SyntaxKind.PublicKeyword),
+                         TypeName($"{AsyncEnumerable}<TItem>"),
+                         "Stream",
+                         Params(Param(TypeName("global::Keryx.IStreamRequest<TItem>"), "request"), Param(TypeName(CancellationToken), CancellationTokenName, DefaultLiteral()))
+                     )
+                    .WithTypeParameterList(TypeParameterList(SingletonSeparatedList(TypeParameter("TItem"))))
+                    .Statements(
+                         [
+                             Call(Qualified(ThrowIfNull), Id("request")),
+                             Var("requestType", Invoke(Member(Id("request"), "GetType"))),
+                             .. Dispatch(
+                                 "requestType",
+                                 "__StreamRequestIndex",
+                                 streams.Select(static s => s.MessageType).ToImmutableArray(),
+                                 (_, i) => StreamArm(streams[i], i),
+                                 ThrowStatement(Invoke(Id("__HandlerNotFound"), Id("requestType")))
+                             ),
+                         ]
+                     )
+                    .Documented("<inheritdoc />");
+
+        if (streams.Length > DispatchThreshold)
+        {
+            foreach (var member in TypeTable("stream request", "__streamRequestTypes", "__StreamRequestIndex", streams.Select(static h => h.MessageType).ToImmutableArray()))
+            {
+                yield return member;
+            }
+        }
+    }
+
+    private static ExpressionSyntax StreamArm(HostHandlerModel stream, int index) =>
+        Invoke(
+            Member(Qualified(Unsafe), Generic("As", TypeName($"{AsyncEnumerable}<TItem>"))),
+            Invoke(Id(StreamCoreName(index)), Exact(stream.MessageType, stream.MessageIsValueType, Id("request")), Id(CancellationTokenName))
         );
-        writer.Open();
-        writer.Line($"{ThrowIfNull}(request);");
-        writer.Line("var requestType = request.GetType();");
-        if (streams.Length > DispatchThreshold)
-        {
-            writer.Line("switch (__StreamRequestIndex(requestType))");
-            writer.Open();
-            for (var i = 0; i < streams.Length; i++)
-            {
-                writer.Line($"case {Number(i)}:");
-                writer.Line($"    return {StreamArm(streams[i], i)};");
-            }
-
-            writer.Line("default:");
-            writer.Line("    throw __HandlerNotFound(requestType);");
-            writer.Close();
-        }
-        else
-        {
-            for (var i = 0; i < streams.Length; i++)
-            {
-                writer.Line($"if (requestType == typeof({streams[i].MessageType}))");
-                writer.Open();
-                writer.Line($"return {StreamArm(streams[i], i)};");
-                writer.Close();
-                writer.Line();
-            }
-
-            writer.Line("throw __HandlerNotFound(requestType);");
-        }
-
-        writer.Close();
-
-        if (streams.Length > DispatchThreshold)
-        {
-            writer.Line();
-            WriteTypeTable(writer, "stream request", "__streamRequestTypes", "__StreamRequestIndex", streams);
-        }
-    }
-
-    private static string StreamArm(HostHandlerModel stream, int index)
-    {
-        var argument = stream.MessageIsValueType ? $"({stream.MessageType})(object)request" : $"{Unsafe}.As<{stream.MessageType}>(request)";
-        return $"{Unsafe}.As<{AsyncEnumerable}<TItem>>({StreamCoreName(index)}({argument}, cancellationToken))";
-    }
 
     /// <summary>
     ///     The pipeline of one stream request, without checks: the typed overload and generic dispatch both call it. Without behaviors it
     ///     returns the handler's enumerable as is; with behaviors it calls the outermost stream behavior method directly, so one that is not an
     ///     iterator runs at the <c>Stream</c> call.
     /// </summary>
-    private static void WriteStreamCore(CodeWriter writer, HostPipeline pipeline, int index)
-    {
-        var request = pipeline.Handler;
-        var context = $"global::System.Threading.Volatile.Read(ref {StreamContextField(index)}) ?? {CreateStreamContextName(index)}()";
-        var signature = $"private {AsyncEnumerable}<{request.ResponseType}> {StreamCoreName(index)}({request.MessageType} request, {CancellationToken} cancellationToken)";
-        if (pipeline.Behaviors.IsEmpty)
-        {
-            var target = NeedsContext(pipeline) ? $"({context}).Handler" : request.HandlerClass;
-            writer.Line(signature + " =>");
-            writer.Line($"    {target}.{HandlerAnalysis.InvokerName}(request, cancellationToken);");
-        }
-        else
-        {
-            writer.Line(signature);
-            writer.Open();
-            writer.Line($"var pipeline = {context};");
-            BehaviorCallLine(writer, pipeline.Behaviors[0], $"return {BehaviorCall(pipeline.Behaviors[0], request.ContextServices, StreamContextName(index) + "." + StreamLinkName(0), "pipeline", "request")};");
-            writer.Close();
-        }
-
-        if (!NeedsContext(pipeline))
-        {
-            return;
-        }
-
-        writer.Line();
-        writer.Line(NoInlining);
-        writer.Line($"private {StreamContextName(index)} {CreateStreamContextName(index)}() =>");
-        writer.Line(
-            $"    global::System.Threading.Interlocked.CompareExchange(ref {StreamContextField(index)}, new {StreamContextName(index)}(__serviceProvider), null) ?? {StreamContextField(index)}!;"
+    private static IEnumerable<MemberDeclarationSyntax> StreamCore(HostPipeline pipeline, int index) =>
+        PipelineCore(
+            pipeline,
+            Method(
+                Modifiers(SyntaxKind.PrivateKeyword),
+                TypeName($"{AsyncEnumerable}<{pipeline.Handler.ResponseType}>"),
+                StreamCoreName(index),
+                Params(Param(TypeName(pipeline.Handler.MessageType), "request"), Param(TypeName(CancellationToken), CancellationTokenName))
+            ),
+            StreamContextName(index),
+            StreamContextField(index),
+            CreateStreamContextName(index),
+            StreamLinkName(0)
         );
-    }
 
     /// <summary>
     ///     The pipeline context of one stream request: its handler (unless the invoker is static) and the injected services of its stream
     ///     behaviors, resolved once per scope, and one flat link struct per stream behavior (<c>StreamLink{k}</c>, the <c>next</c> of behavior
     ///     <c>k</c>).
     /// </summary>
-    private static void WriteStreamContext(CodeWriter writer, HostPipeline pipeline, int index)
-    {
-        var request = pipeline.Handler;
-        var behaviors = pipeline.Behaviors;
-        writer.Line($"/// <summary>The stream pipeline context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
-        writer.Line($"private sealed class {StreamContextName(index)}");
-        writer.Open();
-        if (!request.StaticInvoker)
-        {
-            writer.Line($"public readonly {request.HandlerClass} Handler;");
-        }
-
-        WriteServiceFields(writer, request.ContextServices);
-        writer.Line();
-        writer.Line($"public {StreamContextName(index)}({ServiceProvider} {ServiceProviderName})");
-        writer.Open();
-        if (!request.StaticInvoker)
-        {
-            writer.Line($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
-        }
-
-        WriteServiceResolution(writer, request.ContextServices);
-        writer.Close();
-
-        for (var k = 0; k < behaviors.Length; k++)
-        {
-            writer.Line();
-            WriteStreamLink(writer, pipeline, k, index);
-        }
-
-        writer.Close();
-    }
-
-    /// <summary>
-    ///     The <c>next</c> of one stream behavior: <c>InvokeAsync</c> calls the next stream behavior method directly, or the handler's invoker.
-    ///     Holds the context and the request; the token is an argument, never stored.
-    /// </summary>
-    private static void WriteStreamLink(CodeWriter writer, HostPipeline pipeline, int position, int index)
-    {
-        var request = pipeline.Handler;
-        var context = StreamContextName(index);
-        var link = StreamLinkName(position);
-        var isLast = position == pipeline.Behaviors.Length - 1;
-        writer.Line(
-            isLast
-                ? $"/// <summary>The <c>next</c> of <c>{Display(pipeline.Behaviors[position].Identity)}</c>: the handler.</summary>"
-                : $"/// <summary>The <c>next</c> of <c>{Display(pipeline.Behaviors[position].Identity)}</c>: <c>{Display(pipeline.Behaviors[position + 1].Identity)}</c>.</summary>"
+    private static ClassDeclarationSyntax StreamContext(HostPipeline pipeline, int index) =>
+        PipelineContext(
+            pipeline,
+            StreamContextName(index),
+            "stream pipeline",
+            StreamLinkName,
+            $"global::Keryx.IStreamNext<{pipeline.Handler.ResponseType}>",
+            $"{AsyncEnumerable}<{pipeline.Handler.ResponseType}>"
         );
-        // The last link of a pipeline whose handler has a static invoker needs only the request.
-        var holdsContext = !isLast || !request.StaticInvoker;
-        writer.Line($"public readonly struct {link} : global::Keryx.IStreamNext<{request.ResponseType}>");
-        writer.Open();
-        if (holdsContext)
-        {
-            writer.Line($"private readonly {context} _pipeline;");
-        }
 
-        writer.Line($"private readonly {request.MessageType} _request;");
-        writer.Line();
-        writer.Line($"public {link}({context} pipeline, {request.MessageType} request)");
-        writer.Open();
-        if (holdsContext)
-        {
-            writer.Line("_pipeline = pipeline;");
-        }
+    private static string StreamLinkName(int position) => "StreamLink" + Digits(position + 1);
 
-        writer.Line("_request = request;");
-        writer.Close();
-        writer.Line();
-        writer.Line($"public {AsyncEnumerable}<{request.ResponseType}> InvokeAsync({CancellationToken} cancellationToken) =>");
-        if (!isLast)
-        {
-            BehaviorCallLine(writer, pipeline.Behaviors[position + 1], $"    {BehaviorCall(pipeline.Behaviors[position + 1], request.ContextServices, StreamLinkName(position + 1), "_pipeline", "_request")};");
-        }
-        else if (request.StaticInvoker)
-        {
-            writer.Line($"    {request.HandlerClass}.{HandlerAnalysis.InvokerName}(_request, cancellationToken);");
-        }
-        else
-        {
-            writer.Line($"    _pipeline.Handler.{HandlerAnalysis.InvokerName}(_request, cancellationToken);");
-        }
+    private static string StreamContextName(int index) => "__StreamPipeline" + Digits(index);
 
-        writer.Close();
-    }
+    private static string StreamContextField(int index) => "__streamPipeline" + Digits(index);
 
-    private static string StreamLinkName(int position) => "StreamLink" + Number(position + 1);
+    private static string CreateStreamContextName(int index) => "__CreateStreamPipeline" + Digits(index);
 
-    private static string StreamContextName(int index) => "__StreamPipeline" + Number(index);
-
-    private static string StreamContextField(int index) => "__streamPipeline" + Number(index);
-
-    private static string CreateStreamContextName(int index) => "__CreateStreamPipeline" + Number(index);
-
-    private static string StreamCoreName(int index) => "__Stream" + Number(index);
+    private static string StreamCoreName(int index) => "__Stream" + Digits(index);
 }

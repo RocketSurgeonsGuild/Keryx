@@ -10,7 +10,7 @@ namespace Sample
     {
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public static global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Ping.Query request, global::System.Threading.CancellationToken cancellationToken)
-            => new global::System.Threading.Tasks.ValueTask<string>(Handle(request));
+        public static global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Ping.Query request, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request));
     }
 }

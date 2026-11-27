@@ -153,6 +153,9 @@ public class NotificationBehaviorTests : HostTest
         public sealed record Reviewed2 : IReviewed;
         public sealed record Quiet : IAudited;
         public sealed record Silent : INotification;
+        /// <summary>No handlers, and its only behavior injects nothing: a pipeline context that holds nothing but its links.</summary>
+        [Behavior(typeof(TypePublish))]
+        public sealed record Unattended : INotification;
         [Behavior(typeof(Skip))]
         public sealed record Plain : INotification;
         public readonly record struct Tock(int Value) : IReviewed;
@@ -243,6 +246,13 @@ public class NotificationBehaviorTests : HostTest
                     case "quiet":
                         await mediator.Publish(new Quiet());
                         break;
+                    case "unattended typed":
+                        await mediator.Publish(new Unattended());
+                        break;
+                    case "unattended generic":
+                        await publisher.Publish<Unattended>(new Unattended());
+                        Log.Write("completed");
+                        break;
                     case "silent":
                         Log.Write("completed synchronously " + mediator.Publish(new Silent()).IsCompletedSuccessfully);
                         break;
@@ -307,6 +317,9 @@ public class NotificationBehaviorTests : HostTest
         var host = await CompileHostAsync(Source, cancellationToken);
 
         await Assert.That(await RunAsync(host, "quiet")).IsEquivalentTo(["assembly-publish Quiet", "global-publish Quiet"], CollectionOrdering.Matching);
+        // No handlers and a behavior that injects nothing: the last link runs nothing and the publish completes.
+        await Assert.That(await RunAsync(host, "unattended typed")).IsEquivalentTo(["type-publish>", "<type-publish"], CollectionOrdering.Matching);
+        await Assert.That(await RunAsync(host, "unattended generic")).IsEquivalentTo(["type-publish>", "<type-publish", "completed"], CollectionOrdering.Matching);
         // Neither handlers nor notification behaviors: Publish completes immediately.
         await Assert.That(await RunAsync(host, "silent")).IsEquivalentTo(["completed synchronously True"], CollectionOrdering.Matching);
     }

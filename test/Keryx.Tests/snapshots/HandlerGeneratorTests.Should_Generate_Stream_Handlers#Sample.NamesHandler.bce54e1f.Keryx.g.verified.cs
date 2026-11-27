@@ -20,7 +20,7 @@ namespace Sample
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        public global::System.Collections.Generic.IAsyncEnumerable<string> InvokeAsync(global::Sample.Names request, global::System.Threading.CancellationToken cancellationToken)
-            => Handle(request, __keryx_source);
+        public global::System.Collections.Generic.IAsyncEnumerable<string> InvokeAsync(global::Sample.Names request, global::System.Threading.CancellationToken cancellationToken) =>
+            Handle(request, __keryx_source);
     }
 }

@@ -18,6 +18,6 @@ public partial class GlobalHandler
 
     /// <summary>Runs the handler only. No behaviors run.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-    public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::GlobalRequest request, global::System.Threading.CancellationToken cancellationToken)
-        => new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_mediator));
+    public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::GlobalRequest request, global::System.Threading.CancellationToken cancellationToken) =>
+        new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_mediator));
 }

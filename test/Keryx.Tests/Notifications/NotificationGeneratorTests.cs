@@ -55,11 +55,23 @@ public class NotificationGeneratorTests : HostTest
                 next.InvokeAsync(cancellationToken);
         }
 
+        /// <summary>Injects nothing; attached only to <c>Unattended</c>, which has no handlers.</summary>
+        [NotificationBehavior]
+        public static class Counted
+        {
+            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, CancellationToken cancellationToken)
+                where TNotification : INotification
+                where TNext : struct, INext =>
+                next.InvokeAsync(cancellationToken);
+        }
+
         [Behavior(typeof(Guarded))]
         public sealed record OrderPlaced(string Sku) : IDomainEvent;
         public record Shipped : IDomainEvent;
         public readonly record struct Tick(int Value) : IDomainEvent;
         public sealed record Unheard : INotification;
+        [Behavior(typeof(Counted))]
+        public sealed record Unattended : INotification;
 
         [PublishStrategy(PublishStrategy.Parallel)]
         [Behavior(typeof(Timed))]

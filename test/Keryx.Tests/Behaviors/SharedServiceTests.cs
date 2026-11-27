@@ -112,7 +112,7 @@ public partial class SharedServiceTests : HostTest
             "cancellationToken, pipeline.Service0 ?? \"!\", pipeline.Service1 ?? 3, pipeline.Service2, pipeline.Service3, pipeline.Service4.GetValueOrDefault())"
         );
         await Assert.That(mediator).Contains(
-            "cancellationToken, _pipeline.Service0 ?? \"?\", _pipeline.Service1 ?? 5, _pipeline.Service2 ?? 7, _pipeline.Service3, _pipeline.Service4.GetValueOrDefault())"
+            "cancellationToken, pipeline.Service0 ?? \"?\", pipeline.Service1 ?? 5, pipeline.Service2 ?? 7, pipeline.Service3, pipeline.Service4.GetValueOrDefault())"
         );
         await VerifyHost(result);
     }
@@ -216,7 +216,7 @@ public partial class SharedServiceTests : HostTest
         await Assert.That(before.Single().ServiceType).IsEqualTo("global::Sample.IClock");
 
         var mediator = second.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName];
-        await Assert.That(mediator).Contains("global::Sample.Outer.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new __Pipeline0.Link1(pipeline, request), pipeline.Service0, cancellationToken)");
+        await Assert.That(mediator).Contains("global::Sample.Outer.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), pipeline.Service0, cancellationToken)");
         await Assert.That(Fields(mediator)).IsEquivalentTo(Fields(first.GeneratedSources<HostGenerator>()[HostEmitter.MediatorHintName]), TUnit.Assertions.Enums.CollectionOrdering.Matching);
     }
 
