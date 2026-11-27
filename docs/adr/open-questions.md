@@ -23,7 +23,8 @@ interface" (decision 4, which keeps the design as it was) follows. OQ-67, decide
 (decision 14) follow; OQ-68 and OQ-69 were raised while implementing them, and OQ-68, decided by the owner (decision 18),
 follows. OQ-65, decided by the owner (decision 16), follows; OQ-70 was raised while implementing it. OQ-66, decided by
 the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69, OQ-71 and OQ-70, decided by the owner on 2026-11-27
-(decisions 19, 21 and 20), come last; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
+(decisions 19, 21 and 20), follow; decision 21 supersedes "Generated code is built with SyntaxFactory" and OQ-66's implementation.
+"Generic `Stream` at depth 0 is tracked for the release" (decision 22, 2026-11-27) comes last.
 
 ## Open
 
@@ -1997,3 +1998,13 @@ changes the publish code (every `PublishTo` comparison benchmark is such a pipel
   and from 40 to 6 (the context reads and the non-inlined create calls are gone). Folded into the ADR (status, Generated pipeline shape,
   Notifications, Mediator, Alternatives considered), the brief (Phases 4 and 6), CONTEXT.md (pipeline context), the README (Hosts,
   Benchmarks) and whats-left.md.
+
+### Generic `Stream` at depth 0 is tracked for the release (2026-11-27)
+
+Owner decision 22. "Requests are sealed" (above) measured one row slower beyond noise after the type patterns: `StreamDepth0` through
+generic `Stream` (100 items, no stream behaviors) at 668 to 717 ns in five runs against 649 to 661 ns before (+20 to +60 ns, 3 to 9%),
+while its typed row and `StreamDepth3` (typed and generic) did not move and the generic `Stream<int>` code got shorter; code placement in
+the rebuilt host assembly is the suspect, not verified. Decision: track it for the release and do not investigate it now. It stays on the
+before-release list in [whats-left.md](../whats-left.md) (check it when the comparison benchmarks are re-run on the release candidate,
+then decide whether it needs work). No code changed. Folded into the ADR (status, Benchmarks), the brief (Phase 8), the README
+(Benchmarks) and whats-left.md (owner decisions 19 to 22, Gates and checks, Before a first release).

@@ -572,8 +572,8 @@ Since that run, a pipeline that resolves nothing has no pipeline context and its
 OQ-65), so with 3 stream behaviors Keryx allocates 648 B per `Stream` (typed and `IMediator`) instead of the 680 B above. Generic
 dispatch now tests each sealed request type with a type pattern (open-questions, "Requests are sealed"): in interleaved reruns against
 the code before it, `IMediator` `Send` with a synchronous handler measured 0.4 to 0.7 ns faster, and `IMediator` `Stream` with no stream
-behaviors 20 to 60 ns slower (3 to 9%) for a reason not found in its code. The other Keryx rows measured within run-to-run noise of the
-tables, with the same allocations.
+behaviors 20 to 60 ns slower (3 to 9%) for a reason not found in its code, which the release candidate's run checks again. The other
+Keryx rows measured within run-to-run noise of the tables, with the same allocations.
 
 ### Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only)
 

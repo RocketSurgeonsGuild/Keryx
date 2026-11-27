@@ -35,11 +35,12 @@ KRX038, open-questions OQ-68, decided), and generic `Send` and `Stream` test eac
 (`Publish` keeps exact-type guards, because notification types need not be sealed); links are written with primary constructors and target-typed `new(...)`, a pipeline that resolves nothing has no pipeline context, and
 each link takes only what it reads or passes on (open-questions OQ-65, decided); and `next` stays a struct
 implementing `INext<TResponse>`, `INext` or `IStreamNext<TItem>` (typed next delegates rejected).
-Amended a sixth time 2026-11-27 (owner decisions 19 to 21): a closed request base from a referenced assembly is treated, and named in
+Amended a sixth time 2026-11-27 (owner decisions 19 to 22): a closed request base from a referenced assembly is treated, and named in
 KRX003, as abstract (open-questions OQ-69, decided); a publish pipeline whose handlers' invokers are all static and whose behaviors inject
 nothing has no pipeline context either, its publish strategy being static (open-questions OQ-70, decided); and the generators write
 their output as text through an indented writer again (`CodeWriter`), every generated source unchanged, because `SyntaxFactory` measured
-slower (open-questions OQ-71, decided).
+slower (open-questions OQ-71, decided); the generic `Stream` slowdown at depth 0 measured after the type patterns is tracked for the
+release rather than investigated (open-questions, "Generic `Stream` at depth 0 is tracked for the release").
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1414,7 +1415,10 @@ Setup rules, which every number depends on:
 
 CI builds the benchmarks, runs `Keryx.Benchmarks --verify` (every comparison benchmark is called with a call counter on, and the run
 fails when a library does not run the scenario's handlers and behaviors), and runs every benchmark with `--job Dry` only; numbers are
-never published from shared runners. The README's numbers come from local runs, with the machine and job stated.
+never published from shared runners. The README's numbers come from local runs, with the machine and job stated. Before a release the
+comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream behaviors, which measured
+20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision 22, 2026-11-27: tracked
+for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
 
 ## AOT verification
 

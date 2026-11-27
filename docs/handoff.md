@@ -150,8 +150,9 @@ next to their handlers; whitespace-only pre-commit formatting), 5afb535 (the `Ke
 4b0658f (every test compilation through the testing library 11.0.2; jump-table dispatch tests), eca51b5 (one context field per shared
 service) and 1fddbdd (`SyntaxFactory` emitters, switch-statement dispatch, primary-constructor links); the follow-up (2e8e4e1, 6e7465a,
 bd2029b, 38c8f74) sealed the requests, dropped the contexts of pipelines that resolve nothing and built the syntax's whitespace in, and
-owner decision 21 then returned the emitters to text (`CodeWriter`, OQ-71). The phases below describe the resulting design as what each
-phase builds.
+the owner's decisions of 2026-11-27 then returned the emitters to text (100bfe1: `CodeWriter`, OQ-71; OQ-69 accepted) and dropped the
+contexts of publish pipelines that resolve nothing (febb1a6, OQ-70), and keep the generic `Stream` depth-0 slowdown on the release list
+(decision 22). The phases below describe the resulting design as what each phase builds.
 
 ## Phases
 
@@ -477,5 +478,7 @@ names (`PipelineBehavior`, `IStreamHookBehavior`, `PublishBehavior`, `Notificati
 `IRequestPipelineBehavior`, `IStreamHookBehavior`, `INotificationPipelineBehavior`, `INotificationHandlerPipelineBehavior`,
 `NotificationHandlerBehavior`, `PublishBehavior` or generic `RunsAfter<T>`/`RunsBefore<T>` (the other libraries' subjects keep those
 libraries' own `IPipelineBehavior` and `IStreamPipelineBehavior`), and no hook-behavior code, test or benchmark variant is left; the
-`AnalyzerReleases.Unshipped.md` descriptions match the README's diagnostics table and the ADR; `docs/whats-left.md` is current;
-`mise run build` passes and the draft PR's CI is green. Marking the PR ready for review is left to the owner.
+`AnalyzerReleases.Unshipped.md` descriptions match the README's diagnostics table and the ADR; `docs/whats-left.md` is current, and its
+before-release list keeps the comparison re-run on the release candidate, including the generic `Stream` depth-0 row that measured 20 to
+60 ns slower after the type patterns (owner decision 22: tracked for the release, not investigated now); `mise run build` passes and the
+draft PR's CI is green. Marking the PR ready for review is left to the owner.

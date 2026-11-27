@@ -1,14 +1,15 @@
 # What is left
 
 Nov 27, 2026 · first written at the end of Phase 8 ([docs/handoff.md](handoff.md)); rewritten after the static-behavior rework, after the
-owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 21 (2026-11-27).
+owner's second rework, and again after its follow-up (owner decisions 14 to 18); updated for owner decisions 19 to 22 (2026-11-27).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
 Two reworks followed the first build, each decided by the owner on 2026-11-26 and recorded in
 [open-questions.md](adr/open-questions.md) under **Decided**, and a follow-up to the second applied the owner's later decisions of the same
-day; the brief's phases describe the resulting design as what they build, so there is no separate rework phase. This note lists the
-current state, what still needs a person, and what is left before a release.
+day; the owner's decisions 19 to 22 of 2026-11-27 answered the questions the follow-up raised. The brief's phases describe the resulting
+design as what they build, so there is no separate rework phase. This note lists the current state, every commit since the second
+rework, what still needs a person, and what is left before a release.
 
 ## Done: the static-behavior rework
 
@@ -48,13 +49,13 @@ One commit per step, each with build and tests green:
 - **eca51b5, shared services:** a pipeline context (request, stream, publish) has one `ServiceN` field per distinct service (type and
   key) its behavior methods inject, computed in the model; a transient shared by several behavior methods of a pipeline is one instance
   per scope and pipeline.
-- **1fddbdd, generated code with `SyntaxFactory`:** `HandlerEmitter` and `HostEmitter` build their output with Roslyn's `SyntaxFactory`
-  through `GeneratedSyntax` (at the time with one `NormalizeWhitespace` per compilation unit, a layout pass and the header; 38c8f74 below
-  built the whitespace in); links are one `readonly struct` per position with a primary constructor and target-typed
-  `new(pipeline, request)`. The commit title says "switch-expression dispatch", but the code it committed does not use switch expressions:
-  generic dispatch was written as `switch` statements with exact-type `when` guards, one `return` per section, because the switch
-  expressions decision 7 named lost the arms' tail calls and measured slower (OQ-67, then open). 6e7465a below replaced the guards of
-  `Send` and `Stream` with type patterns.
+- **1fddbdd, generated code with `SyntaxFactory`:** `HandlerEmitter` and `HostEmitter` built their output with Roslyn's `SyntaxFactory`
+  through `GeneratedSyntax` (one `NormalizeWhitespace` per compilation unit, a layout pass and the header; 38c8f74 below built the
+  whitespace in, and 100bfe1 replaced the `SyntaxFactory` emitters with text emitters that write the same bytes); links are one
+  `readonly struct` per position with a primary constructor and target-typed `new(pipeline, request)`. The commit title says
+  "switch-expression dispatch", but the code it committed does not use switch expressions: generic dispatch was written as `switch`
+  statements with exact-type `when` guards, one `return` per section, because the switch expressions decision 7 named lost the arms' tail
+  calls and measured slower (OQ-67, then open). 6e7465a below replaced the guards of `Send` and `Stream` with type patterns.
 - **02fb58e, docs:** decision 4 recorded with no code change (`next` stays a struct implementing `INext<TResponse>`, `INext` or
   `IStreamNext<TItem>`; typed next delegates are rejected in the ADR's Alternatives considered), and the docs aligned with the commits
   above.
@@ -83,12 +84,15 @@ open-questions.md, CONTEXT.md and the README:
   what it reads or passes on (`(pipeline, request)`, `(request)`, or nothing), so the mediator no longer suppresses CS9113 and its header
   pragma is the obsolete-type one alone. OQ-65 is decided; OQ-70 (a publish pipeline with handlers that resolves nothing keeps its
   context) was raised, and decision 20 below answered it.
-- **38c8f74, generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` builds every token with its spaces and every
-  line from the depth its container gives it, so `Render` writes the tree as built: no `NormalizeWhitespace` and no layout pass. Type
-  names are parsed once per file and constant attribute lists built once. Every snapshot is byte for byte unchanged (a temporary two-way
-  render of 7,472 generated files found no difference); two shapes no snapshot covers now read `int[,]` and `Dictionary<,>` where
-  normalization wrote `int[, ]` and `Dictionary<, >`, and `GeneratedSyntaxTests` pins each layout rule against the helpers. OQ-66 is
-  decided; OQ-71 (generator time still above the target) was raised, and decision 21 below answered it.
+- **38c8f74, generated syntax with its whitespace (decision 16 for OQ-66):** `GeneratedSyntax` built every token with its spaces and every
+  line from the depth its container gave it, so `Render` wrote the tree as built: no `NormalizeWhitespace` and no layout pass. Type names
+  were parsed once per file and constant attribute lists built once (all of it removed by 100bfe1 below). Every snapshot is byte for byte
+  unchanged (a temporary two-way render of 7,472 generated files found no difference); two shapes no snapshot covers now read `int[,]` and
+  `Dictionary<,>` where normalization wrote `int[, ]` and `Dictionary<, >`, and `GeneratedSyntaxTests` pinned each layout rule against the
+  helpers. OQ-66 is decided; OQ-71 (generator time still above the target) was raised, and decision 21 below answered it.
+- **e8f8655, docs:** whats-left.md rewritten around the follow-up's commits and measurements; the README, ADR and brief noted that
+  context-free pipelines (OQ-65), built-in whitespace (OQ-66), KRX024/KRX038 and the type-pattern dispatch changed their earlier text, and
+  the Orders sample's requests are listed as sealed.
 
 Measured in the second rework and its follow-up (Apple M4 Max, macOS 27.2, .NET SDK 11.0.100, BenchmarkDotNet 0.15.8 default job,
 net10.0; JIT code with `DOTNET_TieredCompilation=0` and `DOTNET_JitDisasm`; details in the open-questions entries named, raw results in
@@ -115,26 +119,32 @@ the session scratchpad of the follow-up, `followup-*/`, which is not kept in the
   `SyntaxFactory` and explicit trivia, 58 ms and 33 ms with the text emitters before 1fddbdd, 51 ms and 29 ms with the text emitters of
   decision 21 (raw results in the session scratchpad, `text-before/` and `text-after/`).
 
-## Done: owner decisions 19 to 21 (2026-11-27)
+## Done: owner decisions 19 to 22 (2026-11-27)
 
-- **Text emitters (decision 21 for OQ-71):** every generator writes its source as text through `CodeWriter`
+Each code change is one commit, with build and tests green:
+
+- **100bfe1, text emitters (decision 21 for OQ-71; decision 19 recorded):** every generator writes its source as text through `CodeWriter`
   (`src/Keryx.Analyzers/CodeWriter.cs`, the writer removed in 1fddbdd, recovered and extended with the layout rules the `SyntaxFactory`
-  helpers had: blank lines between members, after a statement that ends with a block, the break after `=>`, one constructor parameter
-  per line, switch sections, directives at column 0). `GeneratedSyntax` is removed and `GeneratedSyntaxTests` became `CodeWriterTests`.
-  No snapshot changed; every source the test suite generates (734 distinct, on both target frameworks, plus three hosts of keywords,
-  unusual type shapes, escaped keys and literals, and every kind above the jump-table threshold, built for the check only), the large
-  host's 393 sources and the samples' and benchmark host's 168 are byte for byte what `SyntaxFactory` wrote. Decision 5 ("Generated code
-  is built with SyntaxFactory") and OQ-66's implementation are marked superseded.
-- **OQ-69 (decision 19):** accepted with no code change: a closed request base from a referenced assembly is treated, and named in
-  KRX003, as abstract; the attribute lookup stays in case a compiler returns it.
-- **Publish pipelines that resolve nothing (decision 20 for OQ-70):** a publish pipeline whose handlers' invokers are all static and
-  whose behaviors inject nothing has no context: its `RunHandlers` (and `RunHandlersAsync`) are static members of
+  helpers had: blank lines between members, after a statement that ends with a block, the break after `=>`, one constructor parameter per
+  line, switch sections, directives at column 0). `GeneratedSyntax` is removed and `GeneratedSyntaxTests` became `CodeWriterTests`. No
+  snapshot changed; every source the test suite generates (734 distinct, on both target frameworks, plus three hosts of keywords, unusual
+  type shapes, escaped keys and literals, and every kind above the jump-table threshold, built for the check only), the large host's 393
+  sources and the samples' and benchmark host's 168 are byte for byte what `SyntaxFactory` wrote. Decision 5 ("Generated code is built with
+  SyntaxFactory") and OQ-66's implementation are marked superseded.
+- **OQ-69 (decision 19, recorded in 100bfe1):** accepted with no code change: a closed request base from a referenced assembly is
+  treated, and named in KRX003, as abstract; the attribute lookup stays in case a compiler returns it.
+- **febb1a6, publish pipelines that resolve nothing (decision 20 for OQ-70):** a publish pipeline whose handlers' invokers are all static
+  and whose behaviors inject nothing has no context: its `RunHandlers` (and `RunHandlersAsync`) are static members of
   `private static class __NotificationN`, called as `__NotificationN.RunHandlers(notification, cancellationToken)`, with no
   `__notificationN` field and no `__CreateNotificationN`. The notification jump-table snapshots changed accordingly; new snapshots cover
   such a pipeline sequential and parallel, with and without behaviors, and the allocation tests add six 0 B rows. Measured in interleaved
   runs: typed `PublishTo1` and `PublishTo5` about 0.3 ns faster (linear and above the threshold), generic `PublishTo5` 3.03 to 2.74 ns,
-  the other generic rows within noise, 0 B everywhere; generic `Publish<__Canon>` keeps its 2 and 35 tail calls and its code shrinks
-  (392 to 300 bytes linear, 2,856 to 1,468 above the threshold). Raw results in the session scratchpad, `oq70-before/` and `oq70-after/`.
+  the other generic rows within noise, 0 B everywhere; generic `Publish<__Canon>` keeps its 2 and 35 tail calls and its code shrinks (392
+  to 300 bytes linear, 2,856 to 1,468 above the threshold). Raw results in the session scratchpad, `oq70-before/` and `oq70-after/`.
+- **Generic `Stream` at depth 0 (decision 22):** the 20 to 60 ns (3 to 9%) slowdown of generic `Stream` with no stream behaviors measured
+  after the type patterns (6e7465a; cause not verified, code placement suspected) is tracked for the release and is on the list below; it is
+  not investigated now. The docs sweep after the text emitters and OQ-70 recorded it and checked the ADR, the brief, open-questions.md,
+  CONTEXT.md, the README, the samples' READMEs and the analyzer release notes against the code.
 
 ## Decisions for the owner
 
@@ -158,7 +168,7 @@ each one's **Interim** line:
   them; number by a stable sort of (type, key) instead?
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20) and OQ-71 (decision 21) are
-decided and applied.
+decided and applied; decision 22 keeps the generic `Stream` depth-0 slowdown on the release list below.
 
 ## Gates and checks
 
@@ -182,10 +192,12 @@ decided and applied.
   both allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers come from one
   machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting them. The
   tables predate the follow-up: the dispatch comparison (OQ-67) found the switch statements within noise of the earlier code, the type
-  patterns made generic `Send` slightly faster and generic `Stream` at depth 0 slightly slower, and three stream behaviors now allocate
-  648 B instead of the table's 680 B (the README notes it).
+  patterns made generic `Send` slightly faster and generic `Stream` at depth 0 slightly slower (tracked for the release, decision 22),
+  three stream behaviors now allocate 648 B instead of the table's 680 B, and a publish to static handlers without a context (OQ-70) made
+  the typed `Publish` rows about 0.3 ns faster (the README notes each).
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
-  README's Publish table shows 0.04 ns (inlined) and 0.67 ns for 1 and 5 handlers, against Keryx typed at 0.65 ns and 0.84 ns.
+  README's Publish table shows 0.04 ns (inlined) and 0.67 ns for 1 and 5 handlers, against Keryx typed at 0.65 ns and 0.84 ns (0.35 to
+  0.42 ns and 0.46 to 0.51 ns in the OQ-70 reruns, with the publish strategy static).
 
 ## Before a first release
 
@@ -196,8 +208,12 @@ decided and applied.
   environment). Then set `PackageValidationBaselineVersion` (Directory.Build.props) to the released version.
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
-- Re-run the comparison benchmarks on the release candidate and update the README's numbers (its tables are from before the follow-up);
-  check whether generic `Stream` at depth 0 is still 20 to 60 ns slower than before the type patterns ("Requests are sealed").
+- Re-run the comparison benchmarks on the release candidate and update the README's numbers (its tables are from before the follow-up,
+  OQ-65 and OQ-70).
+- Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
+  `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
+  generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified
+  suspect. Check it on the release candidate and decide then whether it needs work.
 
 ## Out of scope for v1
 
