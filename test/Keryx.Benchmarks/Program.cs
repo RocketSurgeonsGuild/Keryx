@@ -29,7 +29,14 @@ if (args is ["--prototype-disasm"])
 // KeryxBenchmarksProbe=false, Probe.Enabled is a const false and Probe.Hit is empty, so no measured call carries the verification probe
 // (owner decision 34). BenchmarkDotNet 0.15.8 passes ArtifactsPath and OutDir to those builds, so every project they rebuild goes to the
 // generated project's folder and never over this process's own binaries. --verify, above, never sets the property.
+//
+// The NativeAOT job of PublishTo1.Baseline, a call that returns default, runs a fixed invocation count: BenchmarkDotNet 0.15.8's pilot
+// measures it as 0 ns and throws (owner decision 39, OQ-77; Comparison/FixedInvocationCount.cs). Every other job and benchmark keeps its
+// settings.
 Environment.SetEnvironmentVariable("KeryxBenchmarksProbe", "false");
-var config = DefaultConfig.Instance.AddFilter(NativeAot.Filter).AddValidator(ScenarioListValidator.Instance);
+var config = DefaultConfig
+            .Instance.AddFilter(NativeAot.Filter)
+            .AddValidator(ScenarioListValidator.Instance)
+            .WithOrderer(FixedInvocationCount.Instance);
 var summaries = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 return summaries.Any(static summary => summary.HasCriticalValidationErrors || summary.Reports.Any(static report => !report.Success)) ? 1 : 0;

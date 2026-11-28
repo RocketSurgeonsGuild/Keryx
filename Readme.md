@@ -411,8 +411,9 @@ namespace:
   all with generated factories and `TryAdd`. It registers no behavior types: behaviors are static. Because the interfaces are factories,
   `ValidateOnBuild` does not report a singleton that injects `IMediator`, `ISender` or `IPublisher` (MediatR's transient `IMediator`
   behaves the same); with `ValidateScopes` on, as in ASP.NET Core's Development environment, that singleton fails the first time it is
-  resolved ("Cannot resolve scoped service '…KeryxMediator' from root provider"). Inject the mediator into scoped or transient services,
-  or create a scope (open-questions OQ-76).
+  resolved ("Cannot resolve scoped service '…KeryxMediator' from root provider"). That is a deliberate trade-off, the one MediatR makes,
+  and the generator does not warn about it (open-questions OQ-76, decided): inject the mediator into scoped or transient services, or
+  create a scope.
 
 The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
 services its behavior methods inject; it never creates a behavior instance. A request or stream pipeline with a static handler whose
@@ -785,10 +786,13 @@ three things in mind:
 - In the `Send` scenarios nothing is inlined into the benchmark the way the JIT inlines it, so the direct call's synchronous `Send`
   measures 1.34 to 1.35 ns at every depth: that is the floor of a NativeAOT `Send` row, and the sub-nanosecond JIT `Send` rows have no
   NativeAOT equivalent. The `Publish` rows of the direct call and Keryx's typed overload measure under a nanosecond (the direct call
-  0.06 ns and 0.67 ns, Keryx 0.68 ns both), so compare those by order of magnitude. The direct call's `Publish` to one handler is a
-  call that returns `default`, and BenchmarkDotNet 0.15.8 could not measure it with the job above: its pilot stage read 0 ns for the
-  first 16 calls and threw (open-questions OQ-77). That one cell comes from a run of that benchmark alone with a fixed invocation
-  count (160,000,000 calls per iteration, which skips the pilot), the job otherwise the same.
+  0.04 ns and 0.67 ns, Keryx 0.68 ns both), so compare those by order of magnitude. The direct call's `Publish` to one handler is a
+  call that returns `default`, and BenchmarkDotNet 0.15.8 cannot measure it with the job above: its pilot stage reads 0 ns for the
+  first 16 calls and throws. So the runner gives that one benchmark's NativeAOT job a fixed invocation count, 160,000,000 calls per
+  iteration, which skips the pilot, the job otherwise the same (owner decision 39, open-questions OQ-77; its summary row shows
+  `InvocationCount` 160000000, the others `Default`, and BenchmarkDotNet flags it as indistinguishable from an empty method). Its cell
+  is from the run that proved it (2026-11-27, `PublishTo1` under NativeAOT with these settings, on the same machine and SDK): 0.04 ns
+  (0.06 ns in decision 37's run, where it was run alone with `--invocationCount 160000000`); the class's other rows are decision 37's.
 - The builds BenchmarkDotNet makes have no verification probe (owner decision 34, OQ-73: the runner sets `KeryxBenchmarksProbe=false`
   before they build, and every comparison benchmark's setup fails a build that still has it, so CI's Dry runs check it). Decision 32's
   run still had it under NativeAOT, where it was not compiled away as under the JIT: each handler and behavior call carried a field load
@@ -863,7 +867,7 @@ Publish, sequential, synchronous handlers:
 
 | Subject | 1 handler | 5 handlers |
 | --- | ---: | ---: |
-| Hand-written direct call | 0.01 ns → 0.06 ns · 0 B | 0.53 ns → 0.67 ns · 0 B |
+| Hand-written direct call | 0.01 ns → 0.04 ns · 0 B | 0.53 ns → 0.67 ns · 0 B |
 | **Keryx**, typed overload | 0.44 ns → 0.68 ns · 0 B | 0.48 ns → 0.68 ns · 0 B |
 | **Keryx**, `IMediator` | 3.31 ns → 6.26 ns · 0 B | 4.07 ns → 6.48 ns · 0 B |
 | Mediator 3.0.2 scoped, `Mediator` class | 16.6 ns → 41.1 ns · 0 B | 33.7 ns → 55.1 ns · 0 B |
@@ -956,12 +960,9 @@ aot/Keryx.Benchmarks --verify
 dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --runtimes nativeaot10.0 --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
 ```
 
-Until OQ-77 is decided, that run reports `PublishTo1.Baseline` as NA and exits 1 (BenchmarkDotNet's pilot throws on it, see above);
-this run measures that one cell, with a fixed invocation count:
-
-```bash
-dotnet run -c Release -f net10.0 -- --filter '*Comparison.PublishTo1.Baseline' --runtimes nativeaot10.0 --invocationCount 160000000 --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
-```
+That run measures every benchmark and needs no separate step: the runner itself gives the direct call's `Publish` to one handler its
+fixed invocation count under NativeAOT (see above; `Comparison/FixedInvocationCount.cs`), and leaves every other benchmark, every JIT
+job, the Dry job and an explicit `--invocationCount` as they are.
 
 Run it on its own: `--runtimes net10.0 nativeaot10.0` runs both in one summary, but BenchmarkDotNet then takes the JIT job's `Baseline`
 as the only baseline, so the NativeAOT rows have no ratios (`?`).

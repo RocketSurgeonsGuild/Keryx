@@ -68,11 +68,16 @@ what that run found, the `IMediator` scope entry and the benchmark behaviors' ty
 decision 35, below), and OQ-75, decided (owner decision 36, below)).
 Amended a thirteenth time 2026-11-27 (owner decision 35, OQ-74): `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as
 transient factories that forward to the scoped `KeryxMediator`, so resolving them adds no scope entry, and `ValidateOnBuild` no longer
-reports a singleton that depends on one of them (Injected parameters; Generated host, DI registration; that trade-off is OQ-76, open).
+reports a singleton that depends on one of them (Injected parameters; Generated host, DI registration; that trade-off is OQ-76, decided
+(owner decision 38, below)).
 Amended a fourteenth time 2026-11-27 (owner decisions 33, 34 and 36): the real-world benchmark scenarios' setup is confirmed as
 implemented and written down beside the first scenarios' rules (open-questions OQ-72, decided); the verification probe is compiled out of
 the builds BenchmarkDotNet makes, under the JIT and NativeAOT, while `--verify` keeps it (OQ-73, decided); and every logging behavior and
 the baseline read the message type's name once per type, through one `MessageName<T>` cache (OQ-75, decided) (Benchmarks).
+Amended a fifteenth time 2026-11-27 (owner decisions 38 and 39): the `ValidateOnBuild` trade-off of the transient forwarders is accepted
+and documented, as MediatR's is, with no generator warning (Generated host, DI registration; open-questions OQ-76, decided); and the
+benchmark runner gives the NativeAOT job of the direct call's `Publish` to one handler a fixed invocation count, so a full NativeAOT run
+of the comparison suite measures every benchmark with no manual step (Benchmarks; OQ-77, decided).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1199,7 +1204,9 @@ internal static class KeryxServiceCollectionExtensions
   the provider builds, and the singleton fails the first time it is resolved ("Cannot resolve scoped service '…KeryxMediator' from root
   provider") rather than at build time ("Cannot consume scoped service 'Keryx.IMediator' from singleton …"). MediatR, whose `IMediator`
   is transient by default, behaves the same. Without scope validation such a singleton captures the root provider's mediator, as it did
-  with scoped forwarders (open-questions OQ-76, open);
+  with scoped forwarders. This trade-off is accepted, as MediatR accepts it, and documented here and in the README (Hosts); the host
+  generator does not warn about such a singleton (owner decision 38, open-questions OQ-76), and
+  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it;
 - every handler class that has injected parameters, scoped.
 
 Behaviors are not registered: they are static, and the pipeline contexts resolve their injected services.
@@ -1589,7 +1596,12 @@ throws at startup with the suite's behaviors, and without behaviors the containe
 runs every scenario it runs under the JIT. The same config leaves the Phase 4 pipeline prototype out of NativeAOT jobs: it is JIT
 disassembly evidence, and BenchmarkDotNet rejects its `DisassemblyDiagnoser` for a NativeAOT job on Linux and Windows. The benchmark classes
 with a baseline group by job, so a run with several runtimes never computes one runtime's ratios against another's baseline (BenchmarkDotNet
-0.15.8 then shows `?` for the runtimes after the first). `--verify` runs in the NativeAOT build too: the benchmark project published with
+0.15.8 then shows `?` for the runtimes after the first). One benchmark has a job of its own under NativeAOT (owner decision 39,
+open-questions OQ-77): the direct call's `Publish` to one handler is a call that returns `default`, which BenchmarkDotNet 0.15.8's pilot
+stage measures as 0 ns and then throws on, so the runner's config gives its NativeAOT job a fixed invocation count (160,000,000 calls per
+iteration, which skips the pilot; `Comparison/FixedInvocationCount.cs`). The case stays in its class's logical group, so it is still
+the baseline of that class's ratios, and every other job (the JIT's, the Dry job, one with `--invocationCount` given) and every other
+benchmark keeps its settings. `--verify` runs in the NativeAOT build too: the benchmark project published with
 NativeAOT (`-p:KeryxBenchmarksNativeAot=true`, which sets `PublishAot` for that publish only, since `PublishAot` writes the AOT feature
 switches into a JIT build's runtimeconfig) checks every NativeAOT subject's results and handler and behavior calls, and lists the n/a ones.
 Its scenarios are listed, not found by scanning the assembly, so the check has no trim warnings, and a benchmark run fails when a comparison

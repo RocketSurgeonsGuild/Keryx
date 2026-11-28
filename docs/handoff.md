@@ -33,7 +33,8 @@ question, the interim behavior you are using and a proposal, continue with the s
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
   lambdas (nothing for behaviors); `IMediator`, `ISender` and `IPublisher` are transient factories forwarding to the scoped
   `KeryxMediator`, so they add no scope entry (owner decision 35, OQ-74); as a result `ValidateOnBuild` no longer reports a singleton
-  that injects one of them, which fails when first resolved instead (OQ-76, open).
+  that injects one of them, which fails when first resolved instead: a trade-off accepted and documented, as MediatR's is, with no
+  generator warning (owner decision 38, OQ-76).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
   kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
   kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
@@ -517,9 +518,12 @@ nothing else running; the README states the date, commit and environment and sho
 scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT; decided:
 `MessageName<T>`, owner decision 36). The current tables are decision 37's full run (2026-11-27, at 3575a50, after decisions 34 to 36,
 recorded in the same entry): with a scope per request Keryx's `IMediator` rows allocate what its typed rows allocate, and under NativeAOT
-the typed `Send` stays at 1.40 to 1.41 ns at every depth and the behavior rows allocate what they allocate under the JIT. It raised OQ-77
-(open): BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish` to one handler with the job (its pilot reads 0 ns), so
-that one benchmark is run alone with a fixed invocation count.
+the typed `Send` stays at 1.40 to 1.41 ns at every depth and the behavior rows allocate what they allocate under the JIT. It raised OQ-77:
+BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish` to one handler with the job (its pilot reads 0 ns and throws).
+Decided (owner decision 39): the runner's config gives that benchmark's NativeAOT job a fixed invocation count, 160,000,000 calls per
+iteration, which skips the pilot (`Comparison/FixedInvocationCount.cs`, an orderer, the one place BenchmarkDotNet lets the config change
+a single case; it keeps the case in its class's logical group, so it stays the baseline), while the JIT and Dry jobs and every other
+benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`

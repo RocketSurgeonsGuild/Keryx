@@ -30,52 +30,13 @@ the owner (decision 16), follows; OQ-71 was raised while implementing it. OQ-69,
 and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27) and "NativeAOT benchmark run" (decisions 29 and 31,
 the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second. "Full benchmark run"
 (decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27 (decision 35),
-follows; OQ-76 was raised while implementing it, and is open. OQ-72, OQ-73 and OQ-75, decided by the owner the same day (decisions 33, 34
-and 36), come last. Decision 37's run (the same day) is recorded in "Full benchmark run" and in those entries; OQ-77 was raised while
-doing it, and is open.
+follows; OQ-76 was raised while implementing it. OQ-72, OQ-73 and OQ-75, decided by the owner the same day (decisions 33, 34
+and 36), follow. Decision 37's run (the same day) is recorded in "Full benchmark run" and in those entries; OQ-77 was raised while
+doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 39), come last.
 
 ## Open
 
-### OQ-76: `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (2026-11-27)
-
-Decision 35 (OQ-74, Decided) makes the three interfaces transient factories that forward to the scoped `KeryxMediator`. With the scoped
-forwarders, a singleton that injects one of them was rejected when the provider was built with `ValidateOnBuild`: "Cannot consume scoped
-service 'IMediator' from singleton '…'". `ValidateOnBuild` cannot see inside a factory, so with the transient forwarders the provider
-builds, and with `ValidateScopes` the singleton fails the first time it is resolved, with the less direct "Cannot resolve scoped service
-'…KeryxMediator' from root provider". A probe (Microsoft.Extensions.DependencyInjection 10.0.15, `ValidateScopes` and `ValidateOnBuild`
-on, a scoped class, a scoped or transient forwarding factory for its interface and a singleton that takes the interface) showed both
-outcomes. ASP.NET Core turns both options on in the Development environment, as do the sample host and the benchmark subjects, so a
-hosted service or other singleton that injects `IMediator` now passes the startup check, and one resolved lazily fails later. Without
-validation nothing changes: the singleton captures the root provider's mediator either way. Resolving an interface from the root still
-throws under `ValidateScopes`. MediatR registers its `IMediator`, `ISender` and `IPublisher` transient by default, with the same effect.
-Neither OQ-74 nor decision 35 named this trade-off.
-
-- **Interim:** the transient forwarders as decided; the caveat is in the ADR (DI registration) and the README (Hosts), and
-  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it: with
-  `ValidateScopes` and `ValidateOnBuild` the provider builds, and resolving a singleton that takes `IMediator`, `ISender` or `IPublisher`
-  throws `InvalidOperationException` naming `KeryxMediator`.
-- **Proposal:** accept the trade-off, as MediatR does, and keep the caveat documented. Alternative: have the host generator report a
-  singleton consumer where it can see one (a `services.AddSingleton<T>()` in the host whose `T` takes one of the interfaces), as a
-  warning; it cannot see registrations made elsewhere or by reflection. Needs a decision.
-
-### OQ-77: BenchmarkDotNet cannot measure the direct call's NativeAOT `Publish` to one handler (2026-11-27)
-
-Decision 37's NativeAOT run ("Full benchmark run", at the end) could not measure `PublishTo1.Baseline` with the README's job. With the
-verification probe compiled out (decision 34, OQ-73) the benchmark, `B.Handlers.Publish(_baseline)`, is a call to a handler that returns
-`default`. BenchmarkDotNet 0.15.8's pilot stage measured its first 16 calls as 0 ns (`WorkloadPilot 1: 16 op, 0.00 ns`, below the
-clock's resolution) and threw `System.OverflowException` ("Negating the minimum value of a twos complement number is invalid.") in
-`EnginePilotStageSpecific.GetShouldRunIteration`; the benchmark process exited with code 255, the class's eight other benchmarks ran, the
-report shows the row as NA and the run exits 1. Decision 32's run measured it (0.17 ns, with the probe's field load and branch in the
-call), and so does the JIT (0.01 ns; there the pilot read 1,125 ns for its first 16 calls). CI does not see it:
-`--job Dry` runs one invocation and no pilot. So a full NativeAOT run of `--filter '*Comparison*'` with the README's settings now fails
-on this one benchmark.
-
-- **Interim:** the README's cell comes from a run of that benchmark alone with `--invocationCount 160000000`, which skips the pilot
-  (decision 32's pilot chose 158,640,064 calls per iteration for it), the rest of the job unchanged: 0.06 ns, 0 B. The other eight rows
-  are from the class's run with the README's job, and the README says so.
-- **Proposal:** have `Program.cs`'s config give NativeAOT jobs of `PublishTo1.Baseline` a fixed invocation count (the README's job
-  otherwise), so a full run measures every benchmark with no manual step and exits 0, and say so in the README. Alternative: keep the
-  manual step, documented, until a BenchmarkDotNet release handles a 0 ns pilot measurement. Needs a decision.
+None.
 
 ## Decided
 
@@ -2326,9 +2287,9 @@ and then NativeAOT, with the README's settings, from a clean `git archive` of 35
   `SendYieldDepth8` 7, NativeAOT `SendSyncDepth1` 2; some JIT repeats were the runner's own reused MSBuild nodes, which `run4.sh` turns
   off; every kept run has no sample). The JIT reruns took 6 min 5 s; the NativeAOT run, class
   by class (each class builds its own NativeAOT executable), 215 benchmarks in 40 min 53 s of runs, MediatR's 23 left out.
-- **OQ-77 (open):** under NativeAOT, BenchmarkDotNet could not measure `PublishTo1.Baseline` with the job (its pilot read 0 ns and
-  threw); that cell is from a run of that benchmark alone with a fixed invocation count, and the other eight rows of the class are from
-  the class's run (`merge_publishto1.py` writes the merged report the tables read).
+- **OQ-77** (decided since: owner decision 39, at the end): under NativeAOT, BenchmarkDotNet could not measure `PublishTo1.Baseline`
+  with the job (its pilot read 0 ns and threw); that cell is from a run of that benchmark alone with a fixed invocation count, and the
+  other eight rows of the class are from the class's run (`merge_publishto1.py` writes the merged report the tables read).
 - **Reports.** In the session scratchpad: `bench-final-2/jit` (the whole-suite run's `BenchmarkRun-20261127-174001.log`, the per-class
   logs of the reruns, `results`, and `results-first-run` with the overlapped first reports) and `bench-final-2/aot` (`results`, the
   per-class logs, `publishto1-baseline`, and `tables-input`, the merged input), with `status.txt` and `overlap.log`. The tables come from
@@ -2388,7 +2349,8 @@ the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`)
   two entries do not cross it), so they alone would not catch a return to scoped forwarders; the rows that fail are "all four" (736 B
   against 376 B) and every send and publish row, `IMediator` and `ISender` then `Send`, `IMediator` and `IPublisher` then `Publish` (808 B
   against 448 B). With the transient forwarders every row matches its baseline. A consequence for `ValidateOnBuild` was found while
-  implementing this and is OQ-76 (open). Measured in decision 37's run ("Full benchmark run", at the end): with a scope per request
+  implementing this and is OQ-76 (decided since: owner decision 38, at the end). Measured in decision 37's run ("Full benchmark
+  run", at the end): with a scope per request
   Keryx's `IMediator` rows allocate what its typed rows allocate under the JIT and NativeAOT (`RealWorldPublish1ScopePerRequest` and `5`
   560 B and 1,336 B, against 920 B and 2,136 B in decision 32's run), and measure 172 ns and 580 ns against 164 ns and 570 ns (219 ns and
   634 ns before); `RealWorldPingScopePerRequest` through `IMediator` 67.9 ns against 55.1 ns typed (80.4 ns against 54.3 ns before).
@@ -2636,3 +2598,82 @@ benchmark code, not to the library.
   behavior rows are 96 B smaller than then.
 
 Folded into the ADR (status; Benchmarks), the README (Benchmarks) and whats-left.md.
+
+### OQ-76: `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (2026-11-27)
+
+Decision 35 (OQ-74, Decided) makes the three interfaces transient factories that forward to the scoped `KeryxMediator`. With the scoped
+forwarders, a singleton that injects one of them was rejected when the provider was built with `ValidateOnBuild`: "Cannot consume scoped
+service 'IMediator' from singleton '…'". `ValidateOnBuild` cannot see inside a factory, so with the transient forwarders the provider
+builds, and with `ValidateScopes` the singleton fails the first time it is resolved, with the less direct "Cannot resolve scoped service
+'…KeryxMediator' from root provider". A probe (Microsoft.Extensions.DependencyInjection 10.0.15, `ValidateScopes` and `ValidateOnBuild`
+on, a scoped class, a scoped or transient forwarding factory for its interface and a singleton that takes the interface) showed both
+outcomes. ASP.NET Core turns both options on in the Development environment, as do the sample host and the benchmark subjects, so a
+hosted service or other singleton that injects `IMediator` now passes the startup check, and one resolved lazily fails later. Without
+validation nothing changes: the singleton captures the root provider's mediator either way. Resolving an interface from the root still
+throws under `ValidateScopes`. MediatR registers its `IMediator`, `ISender` and `IPublisher` transient by default, with the same effect.
+Neither OQ-74 nor decision 35 named this trade-off.
+
+- **Interim:** the transient forwarders as decided; the caveat is in the ADR (DI registration) and the README (Hosts), and
+  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it: with
+  `ValidateScopes` and `ValidateOnBuild` the provider builds, and resolving a singleton that takes `IMediator`, `ISender` or `IPublisher`
+  throws `InvalidOperationException` naming `KeryxMediator`.
+- **Proposal:** accept the trade-off, as MediatR does, and keep the caveat documented. Alternative: have the host generator report a
+  singleton consumer where it can see one (a `services.AddSingleton<T>()` in the host whose `T` takes one of the interfaces), as a
+  warning; it cannot see registrations made elsewhere or by reflection. Needs a decision.
+- **Decision** (owner decision 38, 2026-11-27): accept the trade-off, documented, as MediatR does. No generator warning and no code
+  change: the caveat stays in the ADR (Generated host, DI registration, now stating that the trade-off is accepted) and the README
+  (Hosts), and `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` keeps pinning
+  it.
+
+Folded into the ADR (status; DI registration), the brief (the host), the README (Hosts) and whats-left.md.
+
+### OQ-77: BenchmarkDotNet cannot measure the direct call's NativeAOT `Publish` to one handler (2026-11-27)
+
+Decision 37's NativeAOT run ("Full benchmark run", at the end) could not measure `PublishTo1.Baseline` with the README's job. With the
+verification probe compiled out (decision 34, OQ-73) the benchmark, `B.Handlers.Publish(_baseline)`, is a call to a handler that returns
+`default`. BenchmarkDotNet 0.15.8's pilot stage measured its first 16 calls as 0 ns (`WorkloadPilot 1: 16 op, 0.00 ns`, below the
+clock's resolution) and threw `System.OverflowException` ("Negating the minimum value of a twos complement number is invalid.") in
+`EnginePilotStageSpecific.GetShouldRunIteration`; the benchmark process exited with code 255, the class's eight other benchmarks ran, the
+report shows the row as NA and the run exits 1. Decision 32's run measured it (0.17 ns, with the probe's field load and branch in the
+call), and so does the JIT (0.01 ns; there the pilot read 1,125 ns for its first 16 calls). CI does not see it:
+`--job Dry` runs one invocation and no pilot. So a full NativeAOT run of `--filter '*Comparison*'` with the README's settings now fails
+on this one benchmark.
+
+- **Interim:** the README's cell comes from a run of that benchmark alone with `--invocationCount 160000000`, which skips the pilot
+  (decision 32's pilot chose 158,640,064 calls per iteration for it), the rest of the job unchanged: 0.06 ns, 0 B. The other eight rows
+  are from the class's run with the README's job, and the README says so.
+- **Proposal:** have `Program.cs`'s config give NativeAOT jobs of `PublishTo1.Baseline` a fixed invocation count (the README's job
+  otherwise), so a full run measures every benchmark with no manual step and exits 0, and say so in the README. Alternative: keep the
+  manual step, documented, until a BenchmarkDotNet release handles a 0 ns pilot measurement. Needs a decision.
+- **Decision** (owner decision 39, 2026-11-27): adopt the proposal. `Program.cs`'s config gives the NativeAOT job of
+  `PublishTo1.Baseline` a fixed invocation count, 160,000,000 calls per iteration (about what decision 32's pilot chose), the README's job
+  otherwise, so a full NativeAOT run of `--filter '*Comparison*'` measures every benchmark with no manual step and exits 0. Done:
+    - **How.** BenchmarkDotNet 0.15.8 has no hook that changes one case's job, but `BenchmarkConverter` passes every case of a type
+      through the config's orderer (`IOrderer.GetExecutionOrder`) before the cases are built and run. `Comparison/FixedInvocationCount.cs`
+      is that orderer (`Program.cs`: `.WithOrderer(FixedInvocationCount.Instance)`), wrapping `DefaultOrderer`: it replaces the one case
+      whose descriptor is `PublishTo1.Baseline`, whose runtime is `NativeAotRuntime`, whose run strategy is `Throughput` and whose job sets
+      no invocation count, with the same case on `job.WithInvocationCount(160_000_000)`. The default logical group key includes the job's
+      display text, so the replacement alone would be a group of its own and the class's other rows would have no baseline; the orderer
+      therefore computes the logical group keys, the highlight keys and the summary order from the original cases and maps them back,
+      which keeps the row in its class's group, in its declared place, as the baseline. A JIT job, the Dry job (`ColdStart`, one
+      invocation, no pilot) and a job with `--invocationCount` given are left as they are, as is every other benchmark. The invocation
+      count goes into the job the generated benchmark program runs, not into the build, so the case stays in the class's NativeAOT build.
+    - **Proof run** (2026-11-27 at 23:58, from the working tree with this change, on the machine and SDK of decision 37's run):
+      `--filter '*Comparison.PublishTo1.*' --runtimes nativeaot10.0` with the README's settings (IterationCount=15, IterationTime=200ms,
+      LaunchCount=1, WarmupCount=5). The script waited until no dotnet-related process was busy (three samples 10 s apart) and a watcher
+      sampled every 3 s for a busy build, test or benchmark process outside its own process tree: none during the run. Exit 0, 1 min 47 s,
+      9 benchmarks. The Baseline row: `InvocationCount` 160000000 (the other rows `Default`), 0.0427 ns, error 0.0062 ns, 0 B, ratio 1.02
+      (the mean of the per-iteration ratios against itself; the other rows' ratios are against it, so the group holds); each of its 15
+      iterations ran 160,000,000 calls in 187.6 to 190.5 ms, 5.7 to 8.6 ms after the overhead is subtracted. BenchmarkDotNet flags the
+      row as indistinguishable from an empty method (`ZeroMeasurement`) and possibly bimodal. The other eight rows had their pilot-chosen
+      counts (for example Keryx's typed overload 124,732,064 calls, 0.50 ns). The whole suite was not run again: every other class ran
+      with the README's job in decision 37's run, and nothing else in it changed.
+    - **JIT and Dry unaffected.** Dry runs of `PublishTo1` (`--job Dry`) under the JIT and with `--runtimes nativeaot10.0` both exit 0,
+      the Baseline running `1 op` with the Dry job's characteristics and no `InvocationCount`. A JIT job never matches (the runtime test);
+      decision 37's JIT run measured the row with the pilot.
+    - **README.** The NativeAOT cell is the proof run's 0.04 ns (0.06 ns in decision 37's run, from the separate run with
+      `--invocationCount 160000000` this replaces); the class's other cells stay decision 37's. The run instructions drop the separate
+      step, and the NativeAOT caveat says the runner sets the count. Build, the 1,576 tests and `--verify` (238 under the JIT, net10.0 and
+      net11.0) pass. The reports are in the session scratchpad, `oq77/aot-measured-1` (with `run.log`), `oq77/dry-jit` and `oq77/dry-aot`.
+
+Folded into the ADR (status; Benchmarks, NativeAOT), the brief (Phase 8), the README (Benchmarks) and whats-left.md.

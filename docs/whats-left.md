@@ -7,7 +7,8 @@ scenarios, 2026-11-27) and decisions 29 and 31 (the NativeAOT benchmark run and 
 README's numbers from a full local run under the JIT and NativeAOT, 2026-11-27) and decision 35 (transient `IMediator`, `ISender`
 and `IPublisher` forwarders, OQ-74); updated for decisions 33, 34 and 36 (the real-world setup rules in the ADR, the verification probe
 compiled out of the benchmark builds, `MessageName<T>`; OQ-72, OQ-73 and OQ-75); updated for decision 37 (the second full benchmark
-run, at 3575a50; OQ-77).
+run, at 3575a50; OQ-77); updated for decisions 38 and 39 (OQ-76 and OQ-77 decided: the `ValidateOnBuild` trade-off accepted and
+documented, a fixed invocation count for the direct call's NativeAOT `Publish` to one handler).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -225,7 +226,8 @@ different instances across scopes and scope validation from the root; a new allo
 `IMediator`, `ISender`, `IPublisher` or all four, or resolving one of them and then sending or publishing through a handler with a scoped
 service, allocates the same as the same work starting from `KeryxMediator` (with the scoped forwarders, all four allocated 736 B per scope
 against 376 B and every send and publish row 808 B against 448 B; a single interface resolved alone does not cross the scope's capacity
-boundary and matches either way). A new test pins the trade-off found while doing it, OQ-76 (open): `ValidateOnBuild` no longer reports
+boundary and matches either way). A new test pins the trade-off found while doing it, OQ-76 (decided: decision 38 accepts it):
+`ValidateOnBuild` no longer reports
 a singleton that injects one of the interfaces, which fails when first resolved instead. 1,576 tests pass (788 per target framework).
 Measured in decision 37's run (below): the `IMediator` rows with a scope per request now allocate what the typed rows allocate.
 
@@ -258,18 +260,35 @@ other build, test or benchmark was busy and repeated when one started during it;
 benchmark run", second run). What it shows: Keryx's `IMediator` rows with a scope per request allocate what its typed rows allocate
 (OQ-74; 560 B and 1,336 B for the per-request publishes, against 920 B and 2,136 B before); under NativeAOT, without the probe, Keryx's
 typed `Send` measures 1.40 to 1.41 ns at every depth and the direct call 1.34 to 1.35 ns (OQ-73); the NativeAOT behavior rows allocate
-what they allocate under the JIT (OQ-75). One new open question, OQ-77: BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT
-`Publish` to one handler with the job (its pilot reads 0 ns and throws), so that cell is from a run of that benchmark alone with a fixed
-invocation count. The reports are in the session scratchpad (`bench-final-2/jit`, `bench-final-2/aot`); a script checks that every
-README table row matches the generated tables.
+what they allocate under the JIT (OQ-75). It raised OQ-77: BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish`
+to one handler with the job (its pilot reads 0 ns and throws), so that cell was from a run of that benchmark alone with a fixed
+invocation count (decided since: decision 39, below, puts the count in the runner's config). The reports are in the session scratchpad
+(`bench-final-2/jit`, `bench-final-2/aot`); a script checks that every README table row matches the generated tables.
+
+## Done: OQ-76 and OQ-77 decided (owner decisions 38 and 39, 2026-11-27)
+
+- **OQ-76** (decision 38): the trade-off of the transient forwarders is accepted, as MediatR's is: `ValidateOnBuild` does not report a
+  singleton that injects `IMediator`, `ISender` or `IPublisher`, and with `ValidateScopes` it fails when first resolved. No code changed
+  and no generator warning; the caveat stays in the ADR (Generated host, DI registration) and the README (Hosts), and
+  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it.
+- **OQ-77** (decision 39): `Program.cs`'s config gives the NativeAOT job of `PublishTo1.Baseline` a fixed invocation count,
+  160,000,000 calls per iteration, which skips BenchmarkDotNet's pilot (`Comparison/FixedInvocationCount.cs`). BenchmarkDotNet 0.15.8
+  has no per-case job hook, so it is an orderer, through which every benchmark case passes before it is built; it replaces that one
+  case and computes logical group keys and the summary order from the original cases, so the row stays in its class's group and is its
+  baseline. It leaves JIT jobs, jobs that are not `Throughput` (the Dry job) and jobs with `--invocationCount` given as they are.
+  Proved: `PublishTo1` under NativeAOT with the README's settings, waiting for a quiet machine and watched throughout (no other build,
+  test or benchmark ran), exit 0, 1 min 47 s; the Baseline row measured 0.0427 ns (0 B, ratio 1.02 against itself; the other rows'
+  ratios against it), with 15 iterations of 160,000,000 calls each taking 187.6 to 190.5 ms (5.7 to 8.6 ms after the overhead), and
+  the other eight rows on the usual pilot-chosen counts. Dry runs of `PublishTo1` under the JIT and NativeAOT still run one invocation
+  per benchmark. The README's NativeAOT cell is now 0.04 ns (0.06 ns before). Build, 1,576 tests and `--verify` (238, net10.0 and
+  net11.0) pass. The reports are in the session scratchpad (`oq77/aot-measured-1`, `oq77/dry-jit`, `oq77/dry-aot`).
 
 ## Decisions for the owner
 
-Two questions are open ([open-questions.md](adr/open-questions.md), **Open**): OQ-76 asks whether to accept that, with the transient
-forwarders, `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (as with MediatR), or to
-have the host generator warn where it can see one; OQ-77 asks whether the benchmark runner should give the direct call's NativeAOT
-`Publish` to one handler a fixed invocation count, so a full NativeAOT run measures every benchmark with no manual step. OQ-74
-(decision 35), OQ-72 (decision 33), OQ-73 (decision 34) and OQ-75 (decision 36) are decided (above), and decision 37's run is done.
+No question is open ([open-questions.md](adr/open-questions.md), **Open**: none). OQ-76 (decision 38: the `ValidateOnBuild` trade-off
+accepted, no generator warning) and OQ-77 (decision 39: a fixed invocation count for the direct call's NativeAOT `Publish` to one
+handler) are decided (above), as are OQ-74 (decision 35), OQ-72 (decision 33), OQ-73 (decision 34) and OQ-75 (decision 36), and
+decision 37's run is done.
 
 OQ-65, OQ-66 and OQ-67 (decision 16), OQ-68 (decision 18), OQ-69 (decision 19), OQ-70 (decision 20), OQ-71 (decision 21), OQ-59
 (decision 23: `ExcludeHandler` names only notification handlers, a request handler is KRX039), OQ-60 (decision 24: no host KRX005), OQ-61
@@ -314,8 +333,9 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   and single-file analyzers. The Phase 4 prototype is JIT-only (left out of NativeAOT jobs: BenchmarkDotNet rejects its Linux
   `DisassemblyDiagnoser` there). Local Dry runs of every benchmark pass under NativeAOT (242) and the JIT (271), and the NativeAOT job's
   steps pass on Linux (linux-arm64 container: `--verify` 215 passed, 23 n/a; Dry run 242, exit 0). Measured in decision 37's
-  run (README, NativeAOT), without the probe (decision 34, OQ-73); one benchmark, the direct call's `Publish` to one handler, is run
-  alone with a fixed invocation count because BenchmarkDotNet's pilot cannot measure it (OQ-77, open).
+  run (README, NativeAOT), without the probe (decision 34, OQ-73); one benchmark, the direct call's `Publish` to one handler, has a
+  fixed invocation count in its NativeAOT job because BenchmarkDotNet's pilot cannot measure it, set by the runner's config, so a full
+  NativeAOT run needs no manual step (decision 39, OQ-77).
 - **Performance contract against the comparison run** (README, Benchmarks; decision 37's run, 2026-11-27, at 3575a50): Keryx
   allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1
   and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state machine); a
@@ -332,7 +352,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   run, with the scoped forwarders decision 35 replaced, measured 360 B and 800 B more for the publishes; OQ-74).
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.01 ns (inlined) and 0.53 ns for 1 and 5 handlers, against Keryx typed at 0.44 ns and 0.48 ns; under
-  NativeAOT 0.06 ns (OQ-77: run alone with a fixed invocation count) and 0.67 ns against 0.68 ns both.
+  NativeAOT 0.04 ns (a fixed invocation count, decision 39, OQ-77; from the run that proved it, 0.06 ns in decision 37's run) and 0.67
+  ns against 0.68 ns both.
 
 ## Before a first release
 
