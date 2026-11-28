@@ -705,6 +705,167 @@ public class HostRuntimeTests : HostTest
         await Assert.That((int)handlerTypes[0].GetField("Constructed")!.GetValue(null)!).IsEqualTo(1);
     }
 
+    /// <summary>
+    ///     The injected parameter names of <see cref="Injected_Parameter_Names_Never_Collide_With_Generated_Members" />: the generated members'
+    ///     own names (<c>InvokeAsync</c>, the static entry <c>__keryx_InvokeAsync</c>, a field <c>__keryx_p_InvokeAsync</c>), the invokers'
+    ///     parameter names (<c>request</c>, <c>notification</c>, <c>cancellationToken</c>), the handler method's name and keywords (OQ-79).
+    ///     Each parameter has its own service type, so a service that reached the wrong parameter shows in the result.
+    /// </summary>
+    private const string OddNames = """
+        public sealed class S1 { public string Name => "1"; }
+        public sealed class S2 { public string Name => "2"; }
+        public sealed class S3 { public string Name => "3"; }
+        public sealed class S4 { public string Name => "4"; }
+        public sealed class S5 { public string Name => "5"; }
+        public sealed class S6 { public string Name => "6"; }
+        public sealed class S7 { public string Name => "7"; }
+
+        public static class OddNames
+        {
+            public static string Of(S1 a, S2 b, S3 c, S4 d, S5 e, S6 f, S7 g) => a.Name + b.Name + c.Name + d.Name + e.Name + f.Name + g.Name;
+        }
+        """;
+
+    /// <summary>The handlers of <see cref="Injected_Parameter_Names_Never_Collide_With_Generated_Members" />, in the namespace it is put in.</summary>
+    private const string OddNameHandlers = """
+        public sealed record OddSend(string Prefix) : IRequest<string>;
+        public partial class OddSendHandler
+        {
+            private static string Handle(
+                OddSend message,
+                S1 InvokeAsync,
+                S2 __keryx_InvokeAsync,
+                S3 __keryx_p_InvokeAsync,
+                S4 request,
+                S5 cancellationToken,
+                S6 Handle,
+                S7 @class,
+                CancellationToken ct) =>
+                message.Prefix + OddNames.Of(InvokeAsync, __keryx_InvokeAsync, __keryx_p_InvokeAsync, request, cancellationToken, Handle, @class);
+        }
+
+        public sealed record OddPublish(System.Collections.Concurrent.ConcurrentQueue<string> Seen) : INotification;
+        public partial class OddPublishHandler
+        {
+            private static ValueTask Handle(
+                OddPublish message,
+                S1 notification,
+                S2 InvokeAsync,
+                S3 __keryx_InvokeAsync,
+                S4 @event,
+                S5 cancellationToken,
+                S6 __keryx_p_notification,
+                S7 @this,
+                CancellationToken ct)
+            {
+                message.Seen.Enqueue(OddNames.Of(notification, InvokeAsync, __keryx_InvokeAsync, @event, cancellationToken, __keryx_p_notification, @this));
+                return default;
+            }
+        }
+
+        public sealed record OddStream : IStreamRequest<string>;
+        public partial class OddStreamHandler
+        {
+            private static async IAsyncEnumerable<string> Handle(
+                OddStream message,
+                S1 request,
+                S2 InvokeAsync,
+                S3 __keryx_InvokeAsync,
+                S4 @return,
+                S5 @yield,
+                S6 value,
+                S7 @namespace,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+            {
+                await Task.Yield();
+                yield return OddNames.Of(request, InvokeAsync, __keryx_InvokeAsync, @return, @yield, value, @namespace);
+            }
+        }
+        """;
+
+    [Test]
+    public async Task Injected_Parameter_Names_Never_Collide_With_Generated_Members(CancellationToken cancellationToken)
+    {
+        // Owner decision 50 (OQ-79): an injected parameter's field is __keryx_p_<parameterName>, a name no other generated member takes, so a
+        // handler whose parameters are named like the invoker, the static entry, a field, the invokers' own parameters or keywords compiles
+        // in a library (constructor and InvokeAsync) and in a host (static entry too), and each service reaches its own parameter. The
+        // library's handlers run through the host's contexts, which construct them; the host's own through their static entries. A
+        // parameter named __keryx_p_InvokeAsync takes the field name of the one named InvokeAsync, so the constructor assigns with this.
+        const string usings = """
+            #nullable enable
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Keryx;
+
+            """;
+        var library = await CompileLibraryAsync("Lib", usings + "namespace Lib;\n\n" + OddNames + OddNameHandlers, cancellationToken);
+        var hostResult = await HostBuilder.AddCompilationReferences(library)
+                                          .AddSources(Usings + "namespace Sample\n{\n    using Lib;\n\n" + OddNameHandlers + "\n}\n")
+                                          .Build()
+                                          .GenerateAsync(cancellationToken);
+        hostResult.AssertCompilationWasSuccessful();
+        var host = hostResult.Assembly!;
+        var lib = library.Assembly!;
+
+        var libSend = library.Results[typeof(Analyzers.HandlerGenerator)].SyntaxTrees.Single(static t => t.FilePath.Contains("Lib.OddSendHandler.", StringComparison.Ordinal)).ToString();
+        var ownSend = hostResult.Results[typeof(Analyzers.HandlerGenerator)].SyntaxTrees.Single(static t => t.FilePath.Contains("Sample.OddSendHandler.", StringComparison.Ordinal)).ToString();
+        foreach (var partial in (string[])[libSend, ownSend])
+        {
+            await Assert.That(partial).Contains("private readonly global::Lib.S1 __keryx_p_InvokeAsync;");
+            await Assert.That(partial).Contains("private readonly global::Lib.S2 __keryx_p___keryx_InvokeAsync;");
+            await Assert.That(partial).Contains("private readonly global::Lib.S3 __keryx_p___keryx_p_InvokeAsync;");
+            await Assert.That(partial).Contains("            this.__keryx_p_class = @class;\n");
+            await Assert.That(partial).Contains("            this.__keryx_p_InvokeAsync = InvokeAsync;\n");
+            await Assert.That(partial).Contains("            this.__keryx_p___keryx_p_InvokeAsync = __keryx_p_InvokeAsync;\n");
+            await Assert.That(partial).Contains(" InvokeAsync(global::");
+        }
+
+        await Assert.That(libSend).DoesNotContain(" __keryx_InvokeAsync(");
+        await Assert.That(ownSend).Contains("internal static global::System.Threading.Tasks.ValueTask<string> __keryx_InvokeAsync(global::Sample.OddSend request, global::Lib.S1 __keryx_p_InvokeAsync, ");
+
+        await using var provider = BuildProvider(
+            host,
+            services =>
+            {
+                foreach (var name in (string[])["S1", "S2", "S3", "S4", "S5", "S6", "S7"])
+                {
+                    services.AddTransient(lib.GetType("Lib." + name, throwOnError: true)!);
+                }
+            }
+        );
+        await using var scope = provider.CreateAsyncScope();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+        foreach (var (assembly, ns) in ((Assembly Assembly, string Namespace)[])[(lib, "Lib"), (host, "Sample")])
+        {
+            var sent = await mediator.Send((IRequest<string>)Create(assembly, ns + ".OddSend", ns + ":"), cancellationToken);
+            await Assert.That(sent).IsEqualTo(ns + ":1234567");
+
+            var seen = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            await mediator.Publish((INotification)Create(assembly, ns + ".OddPublish", seen), cancellationToken);
+            await Assert.That(seen).IsEquivalentTo(["1234567"]);
+
+            var streamed = new List<string>();
+            await foreach (var item in mediator.Stream((IStreamRequest<string>)Create(assembly, ns + ".OddStream"), cancellationToken))
+            {
+                streamed.Add(item);
+            }
+
+            await Assert.That(streamed).IsEquivalentTo(["1234567"]);
+        }
+
+        // The public constructor and InvokeAsync, which a unit test calls, take the services in the handler method's order.
+        var services = Enumerable.Range(1, 7).Select(i => Activator.CreateInstance(lib.GetType("Lib.S" + i, throwOnError: true)!)!).ToArray();
+        foreach (var assembly in (Assembly[])[lib, host])
+        {
+            var handlerType = assembly.GetTypes().Single(static t => t.Name == "OddSendHandler");
+            var handler = Activator.CreateInstance(handlerType, services)!;
+            var request = Activator.CreateInstance(assembly.GetTypes().Single(static t => t.Name == "OddSend"), "unit:")!;
+            var invoked = await (ValueTask<string>)handlerType.GetMethod("InvokeAsync")!.Invoke(handler, [request, cancellationToken])!;
+            await Assert.That(invoked).IsEqualTo("unit:1234567");
+        }
+    }
+
     [Test]
     public async Task FrozenDictionary_Dispatch_Sends_Each_Request_To_Its_Own_Handler(CancellationToken cancellationToken)
     {

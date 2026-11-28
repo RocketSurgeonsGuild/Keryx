@@ -8,10 +8,10 @@ namespace Sample
     internal partial class AnimalHandler
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::System.IServiceProvider __keryx_services;
+        private readonly global::System.IServiceProvider __keryx_p_services;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Keryx.IMediator __keryx_mediator;
+        private readonly global::Keryx.IMediator __keryx_p_mediator;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
@@ -19,21 +19,21 @@ namespace Sample
             global::System.IServiceProvider services,
             global::Keryx.IMediator mediator)
         {
-            __keryx_services = services;
-            __keryx_mediator = mediator;
+            this.__keryx_p_services = services;
+            this.__keryx_p_mediator = mediator;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<string?> InvokeAsync(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
+            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_p_services, __keryx_p_mediator));
 
         /// <summary>
         ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
         ///     context resolved, so they never construct this class. No behaviors run.
         /// </summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        internal static global::System.Threading.Tasks.ValueTask<string?> __keryx_InvokeAsync(global::Sample.Animal request, global::System.IServiceProvider __keryx_services, global::Keryx.IMediator __keryx_mediator, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
+        internal static global::System.Threading.Tasks.ValueTask<string?> __keryx_InvokeAsync(global::Sample.Animal request, global::System.IServiceProvider __keryx_p_services, global::Keryx.IMediator __keryx_p_mediator, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_p_services, __keryx_p_mediator));
     }
 }

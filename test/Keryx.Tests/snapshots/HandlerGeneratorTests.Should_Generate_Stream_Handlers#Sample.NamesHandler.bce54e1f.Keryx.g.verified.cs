@@ -9,18 +9,18 @@ namespace Sample
     public partial class NamesHandler
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.INameSource __keryx_source;
+        private readonly global::Sample.INameSource __keryx_p_source;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public NamesHandler(global::Sample.INameSource source)
         {
-            __keryx_source = source;
+            this.__keryx_p_source = source;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Collections.Generic.IAsyncEnumerable<string> InvokeAsync(global::Sample.Names request, global::System.Threading.CancellationToken cancellationToken) =>
-            Handle(request, __keryx_source);
+            Handle(request, __keryx_p_source);
     }
 }

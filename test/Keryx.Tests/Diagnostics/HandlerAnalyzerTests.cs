@@ -513,6 +513,26 @@ public class HandlerAnalyzerTests : AnalyzerTest
         await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX015"]);
     }
 
+    /// <summary>
+    ///     KRX015 is about members: an injected parameter may take any name, the generated members' own included, because its field is
+    ///     <c>__keryx_p_&lt;parameterName&gt;</c>, which no other generated member takes (owner decision 50, OQ-79), in a library and a host.
+    /// </summary>
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task KRX015_Not_Reported_For_Injected_Parameter_Names(bool host, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping
+          + "public partial class H { private static string Handle(Ping request, IServiceProvider InvokeAsync, IServiceProvider __keryx_InvokeAsync,"
+          + " IServiceProvider __keryx_p_InvokeAsync, IServiceProvider cancellationToken, IServiceProvider @class, CancellationToken ct) => \"\"; }",
+            cancellationToken,
+            host: host
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
     [Test]
     public async Task KRX016_Injected_Type_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
     {

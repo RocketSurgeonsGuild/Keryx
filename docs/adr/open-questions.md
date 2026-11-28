@@ -35,10 +35,11 @@ and 36), follow. Decision 37's run (the same day) is recorded in "Full benchmark
 doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 39), follow. "The mediator is transient over a scoped
 state" (owner decisions 46 and 47, 2026-11-28; it supersedes decision 35's one-mediator-per-scope guarantee and changes decision 38's
 trade-off) and "Handlers are not registered" (owner decisions 42, 44 and 45, the same day) follow; OQ-78 was raised while implementing
-decision 47 and OQ-79 while implementing decision 44, both open. "Handlers and behaviors share a context's services" (owner decision
+decision 47 and OQ-79 while implementing decision 44 (OQ-79 is decided, below). "Handlers and behaviors share a context's services" (owner decision
 43, the same day) follows, and "Publish to 25, 50 and 100 handlers" (owner decision 41, with decision 48's note, the same day) comes
 last; OQ-80 and OQ-81 were raised while implementing it, both open. The full run after those decisions is recorded in "Full benchmark
-run" (third run, 2026-11-28); it measured OQ-81's cases and raised OQ-82, open.
+run" (third run, 2026-11-28); it measured OQ-81's cases and raised OQ-82, open. OQ-79, decided by the owner on 2026-11-28 (decision
+50), comes at the end; OQ-83 was raised while implementing it and OQ-84 by its review, both open.
 
 ## Open
 
@@ -68,20 +69,6 @@ with many pipelines (decision 41's 25, 50 and 100 notification handlers in the b
   others in the non-inlined create method (smaller inlined code; the four-slot chain is the suspect for the generic row, unverified), or
   chunked pages of 16 fields allocated on first use. Alternative: accept the per-field layout for every size and document the 8 B per
   pipeline. Needs a decision.
-
-### OQ-79: An injected parameter named `InvokeAsync` in a host's own handler (2026-11-28)
-
-Owner decision 44 gives a host's own handler with injected parameters a static entry named `__keryx_InvokeAsync` (the `__keryx_` prefix
-KRX015 reserves). The handler generator also names each injected parameter's field `__keryx_<parameterName>`, so a handler method with
-an injected parameter named `InvokeAsync` (`Handle(Ping request, IClock InvokeAsync)`) gets a field and a method with the same name in a
-host, and the generated partial does not compile (CS0102). Outside a host there is no static entry, so the library compiles. Any
-`__keryx_` name would collide with some parameter name, so the static entry's name cannot avoid it alone.
-
-- **Interim:** nothing reports it; such a handler fails to compile in a host only, with CS0102 in generated code. No test covers it.
-- **Proposal:** KRX015 also reports an injected handler parameter named `InvokeAsync` ("parameter 'InvokeAsync' would take the name of
-  the generated static entry; rename it"), in libraries and hosts alike so a library cannot ship a handler a host cannot compile, and the
-  handler generator skips such a handler like any handler error. Alternative: name the fields differently from the static entry (for
-  example `__keryx_p_<parameterName>`), which changes every handler partial. Needs a decision.
 
 ### OQ-80: An allocation test failed once under the full test run (2026-11-28)
 
@@ -149,6 +136,54 @@ and the `IMediator` path that ends in the same pipeline did not.
   machine to find the commit, then compare the typed `Send` path the yielding pipeline compiles to (generated source and a
   `DOTNET_JitDisasm` listing of the benchmark method) before and after it, and fix it if the generated code is the cause; if it is not
   (the same code, the hop alone), record that and close this. Needs a decision.
+
+### OQ-83: A handler class named like a generated member (2026-11-28)
+
+While implementing owner decision 50 (OQ-79, at the end), every generated member name in the handler partial was checked against the
+field scheme. No injected parameter's name can collide with a generated member any more, but the class's own name can: C# forbids a
+member named like its enclosing type (CS0542), and the generator adds members named `InvokeAsync` (every handler class),
+`__keryx_InvokeAsync` (a host's own handler with injected parameters) and `__keryx_p_<parameterName>` (each injected parameter). KRX015
+checks the class's members, not its name. A probe compiled four handler classes with the handler generator, outside a host and in one,
+with nothing but the compiler's diagnostics: `public partial class InvokeAsync` with an injected `IServiceProvider sp`, and the same class
+`static` without one, fail with CS0542 ("'InvokeAsync': member names cannot be the same as their enclosing type") in both; a class named
+`__keryx_p_sp` that injects `sp` fails with CS0542 on its field in both; a class named `__keryx_InvokeAsync` that injects a service
+compiles outside a host and fails in a host, on the static entry. The errors are in generated code, and nothing reports them first. The
+class names before decision 50 collided the same way (`InvokeAsync` since the first handler generator, `__keryx_<parameterName>` with
+the old fields, `__keryx_InvokeAsync` since decision 44).
+
+- **Interim:** nothing reports it; such a handler fails to compile with CS0542 in its generated partial. No test covers it (the probe was
+  not kept).
+- **Proposal:** KRX015 also reports a handler class whose own name is `InvokeAsync` or starts with `__keryx_` ("'{0}' is named like a
+  member Keryx generates in handler classes; rename it"), in libraries and hosts alike, so a library cannot ship a handler a host cannot
+  compile, and the handler generator skips such a handler like any handler error (positive tests for the four names above, a negative one
+  for a class named `Invoke`). Alternative: leave it to the compiler and list the reserved class names in the README's KRX015 row. Needs
+  a decision.
+
+### OQ-84: A handler class that inherits a member with a generated member's name (2026-11-28)
+
+Raised by a review of owner decision 50 (OQ-79, at the end). KRX015 checks the members a handler class declares itself
+(`type.GetMembers()`), not the ones it inherits, so a base class member named `InvokeAsync` or starting with `__keryx_` is hidden by
+the generated member of the same name, and the generated partial gets CS0108 ("hides inherited member"), a warning that breaks the
+build under `TreatWarningsAsErrors`. A probe compiled eight cases with the handler generator and the handler analyzer, outside a host
+and in one (the session scratchpad's `oq84-probe/`, source and output; the probe was not kept as a test): a base with a public
+`InvokeAsync(Ping, CancellationToken)`, and one with a property `int InvokeAsync`, give CS0108 on the generated `InvokeAsync` in both;
+a base with a `protected IServiceProvider __keryx_p_sp` under a handler that injects `sp` gives CS0108 on the field in both; a base with
+an `internal static __keryx_InvokeAsync(Ping, IServiceProvider, CancellationToken)` gives CS0108 on the static entry in a host only.
+None is reported by the analyzer. Two cases do not collide: a base `InvokeAsync(int)` is an overload (nothing reported), and a `private`
+base field is not inherited (nothing). A handler class that derives from another handler class of the same notification (both Keryx
+classes, so the base's members are Keryx-generated) gets CS0108 on `InvokeAsync`, and in a host with injected parameters also on the
+static entry, so a check that skips Keryx-generated members would miss it. The old `__keryx_<parameterName>` fields had the same gap.
+
+- **Interim:** nothing reports it; such a handler fails with CS0108 in its generated partial when warnings are errors, and otherwise
+  compiles with the generated member hiding the base's. No test covers it.
+- **Proposal:** KRX015 also walks the handler class's base types up to `object` and reports each member that the class can access
+  (`Compilation.IsSymbolAccessibleWithin`), is not implicitly declared, and is named `InvokeAsync` or starts with `__keryx_`, in
+  libraries and hosts alike ("'{0}' inherits '{1}' from '{2}', a name Keryx generates in handler classes"), at the base member's source
+  location or the handler's; Keryx-generated base members are reported too, which forbids a handler class deriving from an accessible
+  handler class (or only when the request type matches). Open points: whether an overload with another signature (`InvokeAsync(int)`)
+  is reported, which is safe but stricter than the compiler; whether a handler class may derive from another handler class at all.
+  Alternative: the generator adds `new` to a generated member that hides an inherited one, which compiles but silently hides the base's
+  member. Tests: the probe's cases, as `HandlerAnalyzerTests` positives and negatives in a library and a host. Needs a decision.
 
 ## Decided
 
@@ -3107,7 +3142,8 @@ Done:
 Folded into the ADR (status; Handler classes; Example; Injected parameters; Diagnostics, KRX015 and KRX025 rows; Generated pipeline
 shape; Mediator; DI registration; Hosts; Performance contract; Consequences), the brief (handlers, the host, Phase 3 and Phase 4),
 CONTEXT.md (invoker and static entry, pipeline context), the README (quick start, handler classes, testing, Hosts, diagnostics,
-Benchmarks notes) and whats-left.md. OQ-34 carries a superseded note. A parameter named `InvokeAsync` is OQ-79 (open).
+Benchmarks notes) and whats-left.md. OQ-34 carries a superseded note. A parameter named `InvokeAsync` is OQ-79 (decided by owner
+decision 50, at the end).
 
 ### Handlers and behaviors share a context's services (2026-11-28)
 
@@ -3298,3 +3334,55 @@ Folded into the ADR (Benchmarks: the scenarios, a setup rule for the fan-out pro
 and whats-left.md; OQ-78's interim notes where the benchmarks went. No term changes. OQ-80 (an allocation test that failed once under
 the full test run) and OQ-81 (the NativeAOT pilot on the fan-out direct-call publish) were raised while doing it. The reports are in the
 session scratchpad (`fanout/`).
+
+### OQ-79: An injected parameter named `InvokeAsync` in a host's own handler (2026-11-28)
+
+Owner decision 44 gives a host's own handler with injected parameters a static entry named `__keryx_InvokeAsync` (the `__keryx_` prefix
+KRX015 reserves). The handler generator also names each injected parameter's field `__keryx_<parameterName>`, so a handler method with
+an injected parameter named `InvokeAsync` (`Handle(Ping request, IClock InvokeAsync)`) gets a field and a method with the same name in a
+host, and the generated partial does not compile (CS0102). Outside a host there is no static entry, so the library compiles. Any
+`__keryx_` name would collide with some parameter name, so the static entry's name cannot avoid it alone.
+
+- **Interim:** nothing reports it; such a handler fails to compile in a host only, with CS0102 in generated code. No test covers it.
+- **Proposal:** KRX015 also reports an injected handler parameter named `InvokeAsync` ("parameter 'InvokeAsync' would take the name of
+  the generated static entry; rename it"), in libraries and hosts alike so a library cannot ship a handler a host cannot compile, and the
+  handler generator skips such a handler like any handler error. Alternative: name the fields differently from the static entry (for
+  example `__keryx_p_<parameterName>`), which changes every handler partial. Needs a decision.
+- **Decision** (owner decision 50, 2026-11-28): adopt the alternative. The handler partial's injected-parameter fields get a prefix of
+  their own, `__keryx_p_<parameterName>` (`HandlerAnalysis.InjectedFieldPrefix`; the static entry's parameters, which are named like the
+  fields, follow), that no other generated member uses; KRX015 is unchanged (it still reserves `InvokeAsync` and every `__keryx_` name).
+  Every generated member name in the handler partial was checked against the scheme: `InvokeAsync` has no prefix and the static entry
+  `__keryx_InvokeAsync` has `I` where a field has `p_`, so no field can take either name; two fields cannot share a name because two
+  parameters cannot; the invokers' own parameters (`request` or `notification`, `cancellationToken`) never start with the prefix, and
+  in the static entry the injected parameters are the fields' names, not the user's. The check found one more collision, in the
+  constructor, whose parameters keep the handler method's names: a parameter named like another one's field (`__keryx_p_InvokeAsync`
+  next to `InvokeAsync`) hid that field, so `__keryx_p_InvokeAsync = InvokeAsync;` assigned the parameter instead: CS0029 when the two
+  types differ (the test below failed so), a field silently left `null` when they are the same. The old scheme had it too (a parameter
+  named `__keryx_clock` next to `clock`). The constructor now assigns every field through `this.` (`this.__keryx_p_clock = clock;`).
+  The class's own name can still collide (CS0542), which is OQ-83 (open, above). The check covered the members the partial declares,
+  not those the class inherits: a base class member named `InvokeAsync` or starting with `__keryx_` is hidden by the generated one
+  (CS0108), which KRX015 does not report, OQ-84 (open, above).
+- **Tests:** `HostRuntimeTests.Injected_Parameter_Names_Never_Collide_With_Generated_Members` compiles a library and a host that each
+  declare a request, a notification and a stream handler, each with seven injected parameters named like the generated members
+  (`InvokeAsync`, `__keryx_InvokeAsync`, `__keryx_p_InvokeAsync`, `__keryx_p_notification`), the invokers' parameters (`request`,
+  `notification`, `cancellationToken`), the handler method (`Handle`) and keywords (`@class`, `@event`, `@this`, `@return`, `@yield`,
+  `@namespace`, `value`); each parameter has its own service type, and the host sends, publishes and streams to the library's handlers
+  (constructed by their contexts) and its own (through their static entries) and gets every service in its own parameter, as do the
+  public constructor and `InvokeAsync` of both. It checks the fields' names, the `this.` assignments and that only the host's partial
+  has the static entry. `HandlerAnalyzerTests.KRX015_Not_Reported_For_Injected_Parameter_Names` (library and host) pins that KRX015 does
+  not report such parameters; `CodeWriterTests` expects `this.__keryx_p_class = @class;`. Build, 1,618 tests (809 per target framework)
+  and `--verify` (352 under the JIT, net10.0 and net11.0) pass.
+- **Snapshots** (15 changed, the same on both target frameworks, each diff read): the 14 handler partials with injected parameters (the
+  four of `HostGeneratorTests.Should_Generate_The_Handlers_Of_A_Host`, with the static entry, and ten of `HandlerGeneratorTests`) rename
+  every field and static entry parameter from `__keryx_<name>` to `__keryx_p_<name>` and assign the fields with `this.`, and nothing
+  else (checked by undoing both and comparing with the old snapshot); handler partials without injected parameters and every mediator
+  snapshot do not change (the pipelines call the static entry and the constructor positionally). `Reports_Every_Rule_With_Its_Message`
+  changes KRX015's description, which now names the field scheme and the static entry.
+- **Measured:** no benchmark. The generated sources of `Keryx.Benchmarks.KeryxHost` (81 files) and `Keryx.Benchmarks.FanOut.KeryxHost`
+  (878 Keryx files) built from a `git worktree` of 5a23468 and from the working tree are the same once the rename and the `this.` are
+  undone (26 and 702 files differ before that), so the compiled code differs in field and parameter names only (the session
+  scratchpad's `oq79-gen-head/`, `oq79-gen-work/`).
+
+Folded into the ADR (status, twentieth amendment; Handler classes; Example; Diagnostics, the KRX015 row), the brief (handlers), the
+README (handler classes, the KRX015 row) and whats-left.md. No term changes. OQ-83 (a handler class named like a generated member) was
+raised while doing it, and OQ-84 (a handler class that inherits a member with a generated member's name) by its review.

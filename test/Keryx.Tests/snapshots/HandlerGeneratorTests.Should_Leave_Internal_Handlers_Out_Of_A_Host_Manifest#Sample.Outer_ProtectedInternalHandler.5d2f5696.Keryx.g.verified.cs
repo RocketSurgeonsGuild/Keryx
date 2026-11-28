@@ -10,27 +10,27 @@ namespace Sample
         protected internal partial class ProtectedInternalHandler
         {
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-            private readonly global::Sample.IInternalService __keryx_service;
+            private readonly global::Sample.IInternalService __keryx_p_service;
 
             /// <summary>Creates the handler with the services its handler method injects.</summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
             internal ProtectedInternalHandler(global::Sample.IInternalService service)
             {
-                __keryx_service = service;
+                this.__keryx_p_service = service;
             }
 
             /// <summary>Runs the handler only. No behaviors run.</summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
             internal global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::Sample.OtherRequest request, global::System.Threading.CancellationToken cancellationToken) =>
-                new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_service));
+                new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_p_service));
 
             /// <summary>
             ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
             ///     context resolved, so they never construct this class. No behaviors run.
             /// </summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-            internal static global::System.Threading.Tasks.ValueTask<int> __keryx_InvokeAsync(global::Sample.OtherRequest request, global::Sample.IInternalService __keryx_service, global::System.Threading.CancellationToken cancellationToken) =>
-                new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_service));
+            internal static global::System.Threading.Tasks.ValueTask<int> __keryx_InvokeAsync(global::Sample.OtherRequest request, global::Sample.IInternalService __keryx_p_service, global::System.Threading.CancellationToken cancellationToken) =>
+                new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_p_service));
         }
     }
 }

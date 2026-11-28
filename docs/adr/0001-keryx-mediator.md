@@ -90,7 +90,7 @@ context resolves the services the host's own handler injects and calls the handl
 the mediator never constructs the host's own handler classes, and constructs a referenced handler with `new` over the same resolutions;
 a handler class that implements `IDisposable` or `IAsyncDisposable` is the new error KRX025 (Handler classes; Example; Injected
 parameters; Generated pipeline shape; Mediator; DI registration; Diagnostics; open-questions, "Handlers are not registered"). An injected
-parameter named `InvokeAsync` collides with the static entry in a host, OQ-79 (open).
+parameter named `InvokeAsync` collided with the static entry in a host (OQ-79, decided by the twentieth amendment).
 Amended an eighteenth time 2026-11-28 (owner decision 43, with 48): a pipeline context resolves each distinct service (type and key)
 once for its behavior methods and its handlers together, by the shared-service rules of decision 9 and the stable numbering of decision
 28: the host's own handlers receive the context's `ServiceN` fields through their static entries, referenced handlers through the
@@ -100,6 +100,13 @@ Consequences; open-questions, "Handlers and behaviors share a context's services
 Amended a nineteenth time 2026-11-28 (owner decision 41, with 48): the comparison suite also publishes to 25, 50 and 100 handlers in
 the sync, per-request (with Keryx's behavior variant), async and parallel publish scenarios, from fan-out projects of their own per
 library that one program writes, so no existing subject changes (Benchmarks; open-questions, "Publish to 25, 50 and 100 handlers").
+Amended a twentieth time 2026-11-28 (owner decision 50, OQ-79): the field the handler generator adds for each injected parameter, and
+the static entry's parameter for it, is `__keryx_p_<parameterName>`, a prefix no other generated member uses, so no parameter name can
+collide with `InvokeAsync`, the static entry `__keryx_InvokeAsync` or another parameter's field; the generated constructor, whose
+parameters keep the handler method's names, assigns the fields through `this.` (Handler classes; Example; open-questions, OQ-79). A
+handler class whose own name is a generated member's (`InvokeAsync`, `__keryx_InvokeAsync`, `__keryx_p_<parameterName>`) still fails
+with CS0542 in the generated partial, OQ-83 (open), and one that inherits an accessible member with such a name gets CS0108 there,
+which KRX015 does not report, OQ-84 (open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -371,8 +378,15 @@ synchronous `void`.
   `public static partial class Orders` containing `public partial class Create` and `public partial class Cancel`.
 - One handler per request type per application: one per assembly (KRX005), in the request's own assembly (KRX023). Notifications may have any number of handlers, including none.
 - Where the handler lives is a convention of the code fix only. Any class in the same assembly may host a request's handler.
-- A user member named `InvokeAsync` in a handler class is an error (KRX015). Generated fields use reserved names
-  (`__keryx_<parameterName>`), and so does the static entry a host gives its own handlers (`__keryx_InvokeAsync`; Example).
+- A user member named `InvokeAsync` or starting with `__keryx_` in a handler class is an error (KRX015): every other name the generator
+  adds starts with that prefix. Each injected parameter's field is `__keryx_p_<parameterName>` (owner decision 50, OQ-79), and the
+  static entry a host gives its own handlers is `__keryx_InvokeAsync` (Example). No generated member other than the fields starts with
+  `__keryx_p_`, and the constructor's parameters and the handler method's arguments are never members, so a handler method's
+  parameter may have any name, `InvokeAsync`, `__keryx_InvokeAsync`, another parameter's field name or a keyword included; the
+  constructor assigns the fields through `this.`, because one of its parameters may have another parameter's field name. A handler
+  class whose own name is one of the generated members' names fails with CS0542 in the generated partial, OQ-83 (open). KRX015 checks
+  the members the class declares, not those it inherits: an accessible base class member named `InvokeAsync` or starting with
+  `__keryx_` is hidden by the generated one (CS0108, an error under `TreatWarningsAsErrors`), OQ-84 (open).
 - A handler class must not implement `IDisposable` or `IAsyncDisposable`, directly or through a base type or an interface (KRX025,
   owner decision 45, 2026-11-28). Handlers are stateless, and nothing in Keryx disposes a handler object: a host never constructs its
   own handler classes, and a referenced handler is constructed by a pipeline context that nothing disposes. A handler that needs a
@@ -406,19 +420,19 @@ it in other projects):
 public partial class CreateOrder
 {
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "1.0.0")]
-    private readonly global::IOrderRepository __keryx_orders;
+    private readonly global::IOrderRepository __keryx_p_orders;
 
     /// <summary>Creates the handler with the services its handler method injects.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "1.0.0")]
     public CreateOrder(global::IOrderRepository orders)
     {
-        __keryx_orders = orders;
+        this.__keryx_p_orders = orders;
     }
 
     /// <summary>Runs the handler only. No behaviors run.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "1.0.0")]
     public global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
-        Handle(request, __keryx_orders, cancellationToken);
+        Handle(request, __keryx_p_orders, cancellationToken);
 }
 ```
 
@@ -428,7 +442,7 @@ public partial class CreateOrder
 - A handler with no injected parameters gets a `public static InvokeAsync` and no constructor. No handler class is registered in DI
   (owner decision 42, 2026-11-28).
 - **Static entry** (owner decision 44, 2026-11-28). In a host, a handler with injected parameters also gets
-  `internal static ValueTask<Guid> __keryx_InvokeAsync(CreateOrder.Command request, IOrderRepository __keryx_orders, CancellationToken cancellationToken)`:
+  `internal static ValueTask<Guid> __keryx_InvokeAsync(CreateOrder.Command request, IOrderRepository __keryx_p_orders, CancellationToken cancellationToken)`:
   the injected services as parameters, named like the fields, and the body of `InvokeAsync` (the same call of `Handle` and return
   adaptation). The host's pipeline contexts hold the services and call it, so the mediator never constructs the host's own handler
   classes or runs their constructors. It is `internal` whatever the class's accessibility and exists only in a host, so a library's
@@ -564,7 +578,7 @@ assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placemen
 | KRX012 | Error                | analyzer                            | A request, stream request or notification type has type parameters, is nested in a generic type, or is a `ref struct`; or a handler class has type parameters or is nested in a generic type.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | KRX013 | Error                | analyzer                            | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | KRX014 | Error                | analyzer                            | `static` handler class has injected parameters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member (generated fields and the static entry use the prefix).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member (the generated fields, `__keryx_p_<parameter>`, and the static entry use the prefix).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | KRX016 | Error                | analyzer                            | Outside a host, a request, response (including generic arguments), notification, behavior class or behavior method that a pipeline needs, or a type the generated constructor or invoker mentions (injected parameter types, a polymorphic handler's parameter type), is not effectively public. In a host, such a type or behavior is narrower than `internal` ("must be at least internal"); file-local types count as narrower than `internal`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | KRX017 | Warning              | analyzer                            | Handler response type differs from the request's `TResponse` only in nullability.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | KRX018 | Error                | analyzer                            | `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

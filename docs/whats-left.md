@@ -14,7 +14,8 @@ updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler regis
 KRX025 for a disposable handler class; OQ-79); updated for owner decision 43, with 48 (2026-11-28: a context's handlers and behaviors
 share its services); updated for owner decision 41, with 48 (2026-11-28: publish to 25, 50 and 100 handlers in the benchmarks;
 OQ-80 and OQ-81); updated for the third full benchmark run (2026-11-28, at bdaf06f, after the scope-cost rework: every README table
-refreshed, the fan-out tables added; OQ-81 measured, OQ-82 raised).
+refreshed, the fan-out tables added; OQ-81 measured, OQ-82 raised); updated for owner decision 50 (2026-11-28: injected-parameter
+fields named `__keryx_p_<parameterName>`, OQ-79 decided; OQ-83 raised, and OQ-84 by its review).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -384,7 +385,33 @@ re-run, while `IMediator` did not. A script checks that each of the README's 22 
 Details: open-questions, "Full benchmark run" (third run); the reports are in the session scratchpad (`bench-final-3/jit`,
 `bench-final-3/aot`).
 
+## Done: handler fields that cannot collide with generated members (owner decision 50, 2026-11-28)
+
+The handler partial's field for each injected parameter, and the static entry's parameter for it, is `__keryx_p_<parameterName>`
+(`__keryx_<parameterName>` before), a prefix no other generated member uses, so a parameter named `InvokeAsync` no longer collides with
+a host's static entry `__keryx_InvokeAsync` (OQ-79, which was CS0102 in a host). Checking every generated member against the scheme
+found one more collision: the constructor's parameters keep the handler method's names, so a parameter named like another one's field
+hid it; the constructor now assigns its fields through `this.`. KRX015 is unchanged, and its description now names the scheme. A test
+compiles a library and a host whose request, notification and stream handlers inject parameters named like the generated members, the
+invokers' parameters, the handler method and keywords, and runs them through the host's contexts, the static entries and the public
+constructors; another pins that KRX015 does not report such parameters. 15 snapshots change (the 14 handler partials with injected
+parameters, renames and `this.` only, and the KRX015 description). No benchmark was measured: the benchmark hosts' generated sources are
+the same as before once the rename is undone. Build, 1,618 tests and `--verify` (352, net10.0 and net11.0) pass. A handler class named
+like a generated member still fails with CS0542, OQ-83 (open). KRX015 checks the class's own members only, so one that inherits an
+accessible member named `InvokeAsync` or starting with `__keryx_` gets CS0108 in its generated partial, OQ-84 (open, raised by the
+review). Details: open-questions, OQ-79 (at the end).
+
 ## Decisions for the owner
+
+**OQ-84** is open ([open-questions.md](adr/open-questions.md)): KRX015 checks the members a handler class declares, not those it
+inherits, so a base class member named `InvokeAsync` or starting with `__keryx_` (or a base handler class of the same notification) is
+hidden by the generated member and the generated partial gets CS0108, which breaks the build under `TreatWarningsAsErrors`; the
+proposal extends KRX015 to accessible inherited members, with open points on overloads and handler classes that derive from handler
+classes.
+
+**OQ-83** is open ([open-questions.md](adr/open-questions.md)): a handler class whose own name is `InvokeAsync`, `__keryx_InvokeAsync`
+(in a host, with injected parameters) or `__keryx_p_<parameterName>` of one of its parameters fails with CS0542 in its generated partial,
+since a member cannot be named like its type, and nothing reports it first; the proposal extends KRX015 to the class's own name.
 
 **OQ-82** is open ([open-questions.md](adr/open-questions.md)): under the JIT, Keryx's typed `Send` with a yielding handler measured
 1,064 to 1,180 ns in the third full run, 1.11 to 1.47 times the direct call, in every yielding class and again in a re-run, while its
@@ -401,9 +428,6 @@ NativeAOT run could hit OQ-77's 0 ns pilot failure on them. The third full run m
 **OQ-80** is open ([open-questions.md](adr/open-questions.md)): `HostAllocationTests.A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State`
 failed once in a full test run (60,008 B where 32,000 B is expected) and passed on every re-run; the proposal warms each measured region
 up until two windows agree.
-
-**OQ-79** is open ([open-questions.md](adr/open-questions.md)): in a host, a handler whose injected parameter is named `InvokeAsync`
-gets a field `__keryx_InvokeAsync` next to the static entry of that name, and does not compile (CS0102); the proposal extends KRX015.
 
 **OQ-78** is open ([open-questions.md](adr/open-questions.md)): the scope state has one field per pipeline with a context (8 B each, in
 every scope that uses a context) because decision 47's slot cache measured slower on the long-lived path; the proposal keeps the fields

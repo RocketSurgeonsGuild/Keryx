@@ -9,13 +9,13 @@ namespace Sample
     public partial class Ping
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IFoo __keryx_foo;
+        private readonly global::Sample.IFoo __keryx_p_foo;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly string __keryx_s;
+        private readonly string __keryx_p_s;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int? __keryx_count;
+        private readonly int? __keryx_p_count;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
@@ -24,14 +24,14 @@ namespace Sample
             string s = null!,
             int? count = null)
         {
-            __keryx_foo = foo;
-            __keryx_s = s;
-            __keryx_count = count;
+            this.__keryx_p_foo = foo;
+            this.__keryx_p_s = s;
+            this.__keryx_p_count = count;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Q1 request, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_foo, __keryx_s, __keryx_count));
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_p_foo, __keryx_p_s, __keryx_p_count));
     }
 }

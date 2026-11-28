@@ -7,17 +7,17 @@
 public partial class GlobalHandler
 {
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-    private readonly global::Keryx.IMediator __keryx_mediator;
+    private readonly global::Keryx.IMediator __keryx_p_mediator;
 
     /// <summary>Creates the handler with the services its handler method injects.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     public GlobalHandler(global::Keryx.IMediator mediator)
     {
-        __keryx_mediator = mediator;
+        this.__keryx_p_mediator = mediator;
     }
 
     /// <summary>Runs the handler only. No behaviors run.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::GlobalRequest request, global::System.Threading.CancellationToken cancellationToken) =>
-        new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_mediator));
+        new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_p_mediator));
 }

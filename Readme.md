@@ -121,9 +121,11 @@ A **handler** is a method named `Handle` (or `HandleAsync`) with the request as 
 
 The **handler class** contains exactly one handler ([KRX006](#krx006)), is `partial` all the way out, and is `public` outside a host
 ([KRX004](#krx004), with a code fix). It declares no instance constructor ([KRX007](#krx007)); Keryx generates one for the injected
-parameters. A `static partial` class is fine when nothing is injected ([KRX014](#krx014)). A handler class must not implement
-`IDisposable` or `IAsyncDisposable` ([KRX025](#krx025)): handlers are stateless and Keryx never disposes one, so inject the disposable
-service instead. Group handlers with nested classes:
+parameters, with a field `__keryx_p_<parameterName>` for each, so an injected parameter may take any name. Members named
+`InvokeAsync` or starting with `__keryx_` are Keryx's ([KRX015](#krx015)); KRX015 checks only the class's own members, so a base
+class member with such a name is hidden by the generated one (CS0108). A `static partial` class is fine when nothing is injected
+([KRX014](#krx014)). A handler class must not implement `IDisposable` or `IAsyncDisposable` ([KRX025](#krx025)): handlers are
+stateless and Keryx never disposes one, so inject the disposable service instead. Group handlers with nested classes:
 
 ```csharp
 public static partial class Orders
@@ -499,7 +501,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx012"></a>KRX012      | Error    | A request, stream request or notification is generic, nested in a generic type or a `ref struct`; or a handler class is generic.                             |
 | <a id="krx013"></a>KRX013      | Error    | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`. |
 | <a id="krx014"></a>KRX014      | Error    | A `static` handler class has injected parameters. Code fix: remove `static`.                                                                                  |
-| <a id="krx015"></a>KRX015      | Error    | A handler class declares a member named `InvokeAsync` or starting with `__keryx_` (the generated fields and static entry use it).                                                                            |
+| <a id="krx015"></a>KRX015      | Error    | A handler class declares a member named `InvokeAsync` or starting with `__keryx_` (the generated fields, `__keryx_p_<parameter>`, and static entry use it).                                                  |
 | <a id="krx016"></a>KRX016      | Error    | Outside a host, a type a pipeline needs (request, response, notification, injected parameter type) or a behavior class or method is not public. In a host, one is narrower than `internal` or file-local. |
 | <a id="krx017"></a>KRX017      | Warning  | A handler's response type differs from the request's only in nullability.                                                                                     |
 | <a id="krx018"></a>KRX018      | Error    | A `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form. |

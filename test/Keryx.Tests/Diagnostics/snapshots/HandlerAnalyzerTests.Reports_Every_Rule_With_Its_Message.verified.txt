@@ -41,7 +41,7 @@
     Severity: Error,
     WarningLevel: 0,
     Location: Input0.cs: (19,20)-(19,31),
-    Description: Keryx generates InvokeAsync and fields named __keryx_<parameter> in every handler class.,
+    Description: Keryx generates InvokeAsync in every handler class, and members whose names start with __keryx_: a field __keryx_p_<parameter> for each injected parameter and, in a host, the static entry __keryx_InvokeAsync.,
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx015,
     MessageFormat: '{0}' declares '{1}', a name Keryx generates in handler classes,
     Message: 'NotPartial.Handler' declares 'InvokeAsync', a name Keryx generates in handler classes,

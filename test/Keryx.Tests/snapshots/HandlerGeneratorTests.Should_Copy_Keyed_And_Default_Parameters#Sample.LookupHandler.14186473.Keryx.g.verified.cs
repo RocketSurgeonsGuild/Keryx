@@ -9,61 +9,61 @@ namespace Sample
     public partial class LookupHandler
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IStore __keryx_store;
+        private readonly global::Sample.IStore __keryx_p_store;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IStore __keryx_regional;
+        private readonly global::Sample.IStore __keryx_p_regional;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IClock __keryx_clock;
+        private readonly global::Sample.IClock __keryx_p_clock;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::System.IServiceProvider __keryx_services;
+        private readonly global::System.IServiceProvider __keryx_p_services;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.ICache? __keryx_cache;
+        private readonly global::Sample.ICache? __keryx_p_cache;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IClock? __keryx_fallbackClock;
+        private readonly global::Sample.IClock? __keryx_p_fallbackClock;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int __keryx_retries;
+        private readonly int __keryx_p_retries;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly long __keryx_limit;
+        private readonly long __keryx_p_limit;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly double __keryx_ratio;
+        private readonly double __keryx_p_ratio;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly float __keryx_scale;
+        private readonly float __keryx_p_scale;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly decimal __keryx_price;
+        private readonly decimal __keryx_p_price;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly bool __keryx_enabled;
+        private readonly bool __keryx_p_enabled;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly char __keryx_separator;
+        private readonly char __keryx_p_separator;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly string __keryx_name;
+        private readonly string __keryx_p_name;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.Region __keryx_region;
+        private readonly global::Sample.Region __keryx_p_region;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.Region? __keryx_maybeRegion;
+        private readonly global::Sample.Region? __keryx_p_maybeRegion;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int? __keryx_maybeCount;
+        private readonly int? __keryx_p_maybeCount;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::System.Guid __keryx_id;
+        private readonly global::System.Guid __keryx_p_id;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::System.TimeSpan __keryx_delay;
+        private readonly global::System.TimeSpan __keryx_p_delay;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
@@ -88,30 +88,30 @@ namespace Sample
             global::System.Guid id = default,
             global::System.TimeSpan delay = default)
         {
-            __keryx_store = store;
-            __keryx_regional = regional;
-            __keryx_clock = clock;
-            __keryx_services = services;
-            __keryx_cache = cache;
-            __keryx_fallbackClock = fallbackClock;
-            __keryx_retries = retries;
-            __keryx_limit = limit;
-            __keryx_ratio = ratio;
-            __keryx_scale = scale;
-            __keryx_price = price;
-            __keryx_enabled = enabled;
-            __keryx_separator = separator;
-            __keryx_name = name;
-            __keryx_region = region;
-            __keryx_maybeRegion = maybeRegion;
-            __keryx_maybeCount = maybeCount;
-            __keryx_id = id;
-            __keryx_delay = delay;
+            this.__keryx_p_store = store;
+            this.__keryx_p_regional = regional;
+            this.__keryx_p_clock = clock;
+            this.__keryx_p_services = services;
+            this.__keryx_p_cache = cache;
+            this.__keryx_p_fallbackClock = fallbackClock;
+            this.__keryx_p_retries = retries;
+            this.__keryx_p_limit = limit;
+            this.__keryx_p_ratio = ratio;
+            this.__keryx_p_scale = scale;
+            this.__keryx_p_price = price;
+            this.__keryx_p_enabled = enabled;
+            this.__keryx_p_separator = separator;
+            this.__keryx_p_name = name;
+            this.__keryx_p_region = region;
+            this.__keryx_p_maybeRegion = maybeRegion;
+            this.__keryx_p_maybeCount = maybeCount;
+            this.__keryx_p_id = id;
+            this.__keryx_p_delay = delay;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_store, __keryx_regional, __keryx_clock, __keryx_services, cancellationToken, __keryx_cache, __keryx_fallbackClock, __keryx_retries, __keryx_limit, __keryx_ratio, __keryx_scale, __keryx_price, __keryx_enabled, __keryx_separator, __keryx_name, __keryx_region, __keryx_maybeRegion, __keryx_maybeCount, __keryx_id, __keryx_delay));
+            new global::System.Threading.Tasks.ValueTask<string>(Handle(request, __keryx_p_store, __keryx_p_regional, __keryx_p_clock, __keryx_p_services, cancellationToken, __keryx_p_cache, __keryx_p_fallbackClock, __keryx_p_retries, __keryx_p_limit, __keryx_p_ratio, __keryx_p_scale, __keryx_p_price, __keryx_p_enabled, __keryx_p_separator, __keryx_p_name, __keryx_p_region, __keryx_p_maybeRegion, __keryx_p_maybeCount, __keryx_p_id, __keryx_p_delay));
     }
 }

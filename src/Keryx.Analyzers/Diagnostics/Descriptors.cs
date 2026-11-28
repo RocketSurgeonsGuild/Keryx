@@ -190,7 +190,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Keryx generates InvokeAsync and fields named __keryx_<parameter> in every handler class.",
+        description: "Keryx generates InvokeAsync in every handler class, and members whose names start with __keryx_: a field __keryx_p_<parameter> for each injected parameter and, in a host, the static entry __keryx_InvokeAsync.",
         helpLinkUri: HelpLinkBase + "krx015"
     );
 

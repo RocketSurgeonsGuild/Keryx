@@ -9,26 +9,26 @@ namespace Sample
     public partial class CreateOrder
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IClock __keryx_clock;
+        private readonly global::Sample.IClock __keryx_p_clock;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public CreateOrder(global::Sample.IClock clock)
         {
-            __keryx_clock = clock;
+            this.__keryx_p_clock = clock;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
-            Handle(request, __keryx_clock, cancellationToken);
+            Handle(request, __keryx_p_clock, cancellationToken);
 
         /// <summary>
         ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
         ///     context resolved, so they never construct this class. No behaviors run.
         /// </summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        internal static global::System.Threading.Tasks.ValueTask<global::System.Guid> __keryx_InvokeAsync(global::Sample.CreateOrder.Command request, global::Sample.IClock __keryx_clock, global::System.Threading.CancellationToken cancellationToken) =>
-            Handle(request, __keryx_clock, cancellationToken);
+        internal static global::System.Threading.Tasks.ValueTask<global::System.Guid> __keryx_InvokeAsync(global::Sample.CreateOrder.Command request, global::Sample.IClock __keryx_p_clock, global::System.Threading.CancellationToken cancellationToken) =>
+            Handle(request, __keryx_p_clock, cancellationToken);
     }
 }

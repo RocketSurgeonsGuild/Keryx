@@ -7,17 +7,17 @@
 public partial class @event
 {
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-    private readonly global::System.IServiceProvider __keryx_class;
+    private readonly global::System.IServiceProvider __keryx_p_class;
 
     /// <summary>Creates the handler with the services its handler method injects.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     public @event(global::System.IServiceProvider @class)
     {
-        __keryx_class = @class;
+        this.__keryx_p_class = @class;
     }
 
     /// <summary>Runs the handler only. No behaviors run.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     public global::System.Threading.Tasks.ValueTask<int> InvokeAsync(global::@event.Fire request, global::System.Threading.CancellationToken cancellationToken) =>
-        new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_class));
+        new global::System.Threading.Tasks.ValueTask<int>(Handle(request, __keryx_p_class));
 }

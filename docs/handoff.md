@@ -26,10 +26,13 @@ question, the interim behavior you are using and a proposal, continue with the s
   `build/Keryx.props` defaults `LangVersion` to `latest`; Keryx needs C# 14 or later in every project that references it (KRX022, OQ-52);
   `netstandard2.0` targets stay supported.
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
-  half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
-  attribute; in a host, a handler with injected parameters also gets `internal static __keryx_InvokeAsync`, the invoker with the
-  services as parameters, which the host's pipelines call (owner decision 44). A handler class that implements `IDisposable` or
-  `IAsyncDisposable` is KRX025 (owner decision 45).
+  half: a constructor for injected dependencies (a field `__keryx_p_<parameterName>` for each, a prefix no other generated member uses,
+  so any parameter name compiles; owner decision 50, OQ-79), a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]`
+  manifest attribute; in a host, a handler with injected parameters also gets `internal static __keryx_InvokeAsync`, the invoker with
+  the services as parameters, which the host's pipelines call (owner decision 44). A handler class that implements `IDisposable` or
+  `IAsyncDisposable` is KRX025 (owner decision 45). A handler class named like a generated member (`InvokeAsync`, a `__keryx_` name)
+  fails with CS0542 in generated code, OQ-83 (open); one that inherits an accessible member with such a name gets CS0108 there, which
+  KRX015 (own members only) does not report, OQ-84 (open).
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
   net10.0 or later, OQ-61 and OQ-62) gets an internal transient `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers the mediator with generated factory

@@ -9,18 +9,18 @@ namespace Sample
     public partial class CreateOrder
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IOrderRepository __keryx_orders;
+        private readonly global::Sample.IOrderRepository __keryx_p_orders;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public CreateOrder(global::Sample.IOrderRepository orders)
         {
-            __keryx_orders = orders;
+            this.__keryx_p_orders = orders;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<global::System.Guid> InvokeAsync(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
-            Handle(request, __keryx_orders, cancellationToken);
+            Handle(request, __keryx_p_orders, cancellationToken);
     }
 }

@@ -294,7 +294,7 @@ public class CodeWriterTests : HostTest
         await Assert.That(mediator).Contains("serviceProvider.GetService(typeof(int?)) is int __value3 ? (int?)__value3 : null");
         await Assert.That(handler).Contains("[global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute(typeof(global::System.Collections.Generic.Dictionary<,>))] global::Sample.IClock unbound,");
         await Assert.That(handler).Contains("            int? @class = null)\n");
-        await Assert.That(handler).Contains("            __keryx_class = @class;\n");
+        await Assert.That(handler).Contains("            this.__keryx_p_class = @class;\n");
         foreach (var text in (string[])[mediator, addKeryx, handler])
         {
             await Assert.That(text).DoesNotContain("? [");

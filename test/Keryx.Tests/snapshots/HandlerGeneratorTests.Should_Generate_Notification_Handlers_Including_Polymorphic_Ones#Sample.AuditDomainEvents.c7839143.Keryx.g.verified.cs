@@ -9,18 +9,18 @@ namespace Sample
     public partial class AuditDomainEvents
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IAuditLog __keryx_log;
+        private readonly global::Sample.IAuditLog __keryx_p_log;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public AuditDomainEvents(global::Sample.IAuditLog log)
         {
-            __keryx_log = log;
+            this.__keryx_p_log = log;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask InvokeAsync(global::Sample.IDomainEvent notification, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask(Handle(notification, __keryx_log));
+            new global::System.Threading.Tasks.ValueTask(Handle(notification, __keryx_p_log));
     }
 }

@@ -157,9 +157,11 @@ internal static class HandlerEmitter
             writer.Line(CodeWriter.GeneratedCodeAttribute);
             writer.Parameters(memberAccess + " " + className, [.. injected.Select(ConstructorParameter)]);
             writer.Open();
+            // The constructor's parameters keep the handler method's names, so one may be another's field name (a parameter named
+            // __keryx_p_clock next to one named clock): this. reaches the field past it (OQ-79).
             foreach (var parameter in injected)
             {
-                writer.Line($"{FieldName(parameter)} = {CSharpText.Identifier(parameter.Name)};");
+                writer.Line($"this.{FieldName(parameter)} = {CSharpText.Identifier(parameter.Name)};");
             }
 
             writer.Close();
@@ -282,7 +284,12 @@ internal static class HandlerEmitter
         return parameter.ServiceKey is { } key ? $"[global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute({key})] {text}" : text;
     }
 
-    private static string FieldName(ParameterModel parameter) => HandlerAnalysis.ReservedFieldPrefix + parameter.Name;
+    /// <summary>
+    ///     The field of an injected parameter, and the static entry's parameter for it: <see cref="HandlerAnalysis.InjectedFieldPrefix" /> and
+    ///     the parameter's name, which no other generated member can take (owner decision 50, OQ-79). The name is never a keyword, so it needs
+    ///     no <c>@</c>.
+    /// </summary>
+    private static string FieldName(ParameterModel parameter) => HandlerAnalysis.InjectedFieldPrefix + parameter.Name;
 
     /// <summary>A <c>typeof</c> operand cannot carry a nullable reference annotation.</summary>
     private static string TypeOfOperand(string type) => type.EndsWith("?", StringComparison.Ordinal) ? type[..^1] : type;

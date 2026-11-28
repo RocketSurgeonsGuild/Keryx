@@ -11,20 +11,20 @@ namespace Sample.Orders
         public partial record Cancel
         {
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-            private readonly global::System.IServiceProvider __keryx_services;
+            private readonly global::System.IServiceProvider __keryx_p_services;
 
             /// <summary>Creates the handler with the services its handler method injects.</summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
             public Cancel(global::System.IServiceProvider services)
             {
-                __keryx_services = services;
+                this.__keryx_p_services = services;
             }
 
             /// <summary>Runs the handler only. No behaviors run.</summary>
             [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
             public global::System.Threading.Tasks.ValueTask<global::Keryx.Unit> InvokeAsync(global::Sample.Orders.Orders.Cancel.Command request, global::System.Threading.CancellationToken cancellationToken)
             {
-                Handle(request, __keryx_services);
+                Handle(request, __keryx_p_services);
                 return new global::System.Threading.Tasks.ValueTask<global::Keryx.Unit>(global::Keryx.Unit.Value);
             }
         }

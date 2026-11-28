@@ -9,28 +9,28 @@ namespace Sample
     public partial class LookupHandler
     {
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IGreeter __keryx_greeter;
+        private readonly global::Sample.IGreeter __keryx_p_greeter;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IGreeter? __keryx_backup;
+        private readonly global::Sample.IGreeter? __keryx_p_backup;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.IClock? __keryx_clock;
+        private readonly global::Sample.IClock? __keryx_p_clock;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int __keryx_retries;
+        private readonly int __keryx_p_retries;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int? __keryx_limit;
+        private readonly int? __keryx_p_limit;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly global::Sample.Mode __keryx_mode;
+        private readonly global::Sample.Mode __keryx_p_mode;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly int __keryx_keyed;
+        private readonly int __keryx_p_keyed;
 
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        private readonly long? __keryx_required;
+        private readonly long? __keryx_p_required;
 
         /// <summary>Creates the handler with the services its handler method injects.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
@@ -44,27 +44,27 @@ namespace Sample
             [global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute(1)] int keyed = 2,
             long? required = null)
         {
-            __keryx_greeter = greeter;
-            __keryx_backup = backup;
-            __keryx_clock = clock;
-            __keryx_retries = retries;
-            __keryx_limit = limit;
-            __keryx_mode = mode;
-            __keryx_keyed = keyed;
-            __keryx_required = required;
+            this.__keryx_p_greeter = greeter;
+            this.__keryx_p_backup = backup;
+            this.__keryx_p_clock = clock;
+            this.__keryx_p_retries = retries;
+            this.__keryx_p_limit = limit;
+            this.__keryx_p_mode = mode;
+            this.__keryx_p_keyed = keyed;
+            this.__keryx_p_required = required;
         }
 
         /// <summary>Runs the handler only. No behaviors run.</summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
+            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_p_greeter, __keryx_p_backup, __keryx_p_clock, __keryx_p_retries, __keryx_p_limit, __keryx_p_mode, __keryx_p_keyed, __keryx_p_required));
 
         /// <summary>
         ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
         ///     context resolved, so they never construct this class. No behaviors run.
         /// </summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
-        internal static global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __keryx_InvokeAsync(global::Sample.Lookup request, global::Sample.IGreeter __keryx_greeter, global::Sample.IGreeter? __keryx_backup, global::Sample.IClock? __keryx_clock, int __keryx_retries, int? __keryx_limit, global::Sample.Mode __keryx_mode, int __keryx_keyed, long? __keryx_required, global::System.Threading.CancellationToken cancellationToken) =>
-            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
+        internal static global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __keryx_InvokeAsync(global::Sample.Lookup request, global::Sample.IGreeter __keryx_p_greeter, global::Sample.IGreeter? __keryx_p_backup, global::Sample.IClock? __keryx_p_clock, int __keryx_p_retries, int? __keryx_p_limit, global::Sample.Mode __keryx_p_mode, int __keryx_p_keyed, long? __keryx_p_required, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_p_greeter, __keryx_p_backup, __keryx_p_clock, __keryx_p_retries, __keryx_p_limit, __keryx_p_mode, __keryx_p_keyed, __keryx_p_required));
     }
 }

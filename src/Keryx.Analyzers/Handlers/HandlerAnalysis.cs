@@ -89,14 +89,27 @@ internal static class HandlerAnalysis
     public const string HandleName = "Handle";
     public const string HandleAsyncName = "HandleAsync";
     public const string InvokerName = "InvokeAsync";
-    public const string ReservedFieldPrefix = "__keryx_";
+
+    /// <summary>
+    ///     The prefix KRX015 reserves in handler classes: every name the handler generator adds to a handler class other than
+    ///     <see cref="InvokerName" /> starts with it.
+    /// </summary>
+    public const string ReservedMemberPrefix = "__keryx_";
+
+    /// <summary>
+    ///     The prefix of the field the handler generator adds for each injected parameter (<c>__keryx_p_&lt;parameterName&gt;</c>, owner
+    ///     decision 50). No other generated member starts with it: <see cref="InvokerName" /> has no prefix and the character after
+    ///     <see cref="ReservedMemberPrefix" /> in <see cref="StaticEntryName" /> is <c>I</c>, so no parameter name can make a field that
+    ///     collides with either (OQ-79).
+    /// </summary>
+    public const string InjectedFieldPrefix = ReservedMemberPrefix + "p_";
 
     /// <summary>
     ///     The static entry the handler generator adds to a host's own handler with injected parameters (owner decision 44): the invoker with
     ///     the injected services as parameters, which the host's pipelines call instead of constructing the class. Reserved by KRX015 through
-    ///     <see cref="ReservedFieldPrefix" />.
+    ///     <see cref="ReservedMemberPrefix" />.
     /// </summary>
-    public const string StaticEntryName = ReservedFieldPrefix + InvokerName;
+    public const string StaticEntryName = ReservedMemberPrefix + InvokerName;
 
     /// <summary>
     ///     Whether a method is a handler candidate (ADR 0001, Which methods are handler candidates). Every other method is ignored.
@@ -470,7 +483,7 @@ internal static class HandlerAnalysis
         foreach (var member in type.GetMembers())
         {
             if (member.IsImplicitlyDeclared
-             || ( member.Name != InvokerName && !member.Name.StartsWith(ReservedFieldPrefix, StringComparison.Ordinal) )
+             || ( member.Name != InvokerName && !member.Name.StartsWith(ReservedMemberPrefix, StringComparison.Ordinal) )
              || KeryxSymbols.IsKeryxGenerated(member))
             {
                 continue;
