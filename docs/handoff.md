@@ -535,8 +535,8 @@ The README's tables come from one full local run of the comparison suite under t
 nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
 2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
 scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT; decided:
-`MessageName<T>`, owner decision 36). The current tables are decision 37's full run (2026-11-27, at 3575a50, after decisions 34 to 36,
-recorded in the same entry): with a scope per request Keryx's `IMediator` rows allocate what its typed rows allocate, and under NativeAOT
+`MessageName<T>`, owner decision 36). Decision 37's full run (2026-11-27, at 3575a50, after decisions 34 to 36, recorded in the same
+entry) showed that with a scope per request Keryx's `IMediator` rows allocate what its typed rows allocate, and under NativeAOT
 the typed `Send` stays at 1.40 to 1.41 ns at every depth and the behavior rows allocate what they allocate under the JIT. It raised OQ-77:
 BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish` to one handler with the job (its pilot reads 0 ns and throws).
 Decided (owner decision 39): the runner's config gives that benchmark's NativeAOT job a fixed invocation count, 160,000,000 calls per
@@ -544,7 +544,13 @@ iteration, which skips the pilot (`Comparison/FixedInvocationCount.cs`, an order
 a single case; it keeps the case in its class's logical group, so it stays the baseline), while the JIT and Dry jobs and every other
 benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
 The direct call's `Publish` to 25, 50 and 100 handlers (decision 41) has the same shape and is not covered; whether it needs the fixed
-count is OQ-81 (open).
+count is OQ-81 (open; the third run's pilot measured all three). The current tables are that third full run (2026-11-28, at 3de1d21,
+after owner decisions 41 to 46; same entry), run class by class under the JIT and then NativeAOT with a guard that waits for a quiet
+machine and re-runs a class another build or benchmark overlapped (none did): with a scope per request Keryx's typed `Send` of `Ping`
+measures 29.9 ns and 192 B (the direct call 49.9 ns and 368 B), the behaviors 268 ns and 1,048 B, and a publish to 5 handlers 316 ns and
+816 B, below the direct call and ZeroAlloc.Mediator; the 25, 50 and 100 handler classes have their tables. It raised OQ-82 (open):
+under the JIT the typed `Send` with a yielding handler measured 1.11 to 1.47 times the direct call in every yielding class, reproduced,
+while `IMediator` did not.
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers neither handlers nor behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
@@ -552,7 +558,7 @@ wrapping the whole publish, examples with the message constraint, attaching per 
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the transient mediator over a
 scoped state; pipeline contexts call the host's own handlers through their static entries and construct only referenced handlers; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
-through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, decision 37's run at 3575a50). A short "what is left" note in
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, the third full run at 3de1d21). A short "what is left" note in
 `docs/whats-left.md`.
 
 **Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`

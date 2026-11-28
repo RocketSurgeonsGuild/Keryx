@@ -13,7 +13,8 @@ with 48 (2026-11-28: a transient mediator over a scoped state, one field per pip
 updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler registrations, a static entry for the host's own handlers,
 KRX025 for a disposable handler class; OQ-79); updated for owner decision 43, with 48 (2026-11-28: a context's handlers and behaviors
 share its services); updated for owner decision 41, with 48 (2026-11-28: publish to 25, 50 and 100 handlers in the benchmarks;
-OQ-80 and OQ-81).
+OQ-80 and OQ-81); updated for the third full benchmark run (2026-11-28, at 3de1d21, after the scope-cost rework: every README table
+refreshed, the fan-out tables added; OQ-81 measured, OQ-82 raised).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -358,16 +359,44 @@ synchronous existing benchmarks read the same bytes per call in every run, and t
 `RealWorldPublish5ScopePerRequest` `IMediator` row once, and four SQLite query rows, Keryx's generic `RealWorldPublishAsync1` among them)
 vary from run to run (by 15 to 120 B) within one tree, so the probe cannot tell a change there; the benchmark host's generated source is
 byte-identical. Keryx's fan-out rows allocate 2,112, 3,712 and 6,912 B per request scope (ZeroAlloc.Mediator 2,760, 5,160 and 9,960 B; the
-direct call 5,792, 12,360 and 26,280 B). No time was measured: the README's tables get the new columns from the next measured run. Build,
+direct call 5,792, 12,360 and 26,280 B). No time was measured: the README's tables get the new columns from the next measured run (done
+since: the third full
+benchmark run, below). Build,
 1,612 tests (one full run first failed an allocation test that passed on every re-run: OQ-80) and `--verify` pass; no snapshot changed.
 Whether BenchmarkDotNet's NativeAOT pilot can measure `PublishTo{25,50,100}.Baseline` is not checked (OQ-81). Details: open-questions,
 "Publish to 25, 50 and 100 handlers"; the reports are in the session scratchpad (`fanout/`).
 
+## Done: the third full benchmark run (2026-11-28, at 3de1d21)
+
+No code changed: every README Benchmarks table and its notes were refreshed from a full local run of the comparison suite at 3de1d21
+(after owner decisions 41 to 46), built from a clean `git archive` copy, with the README's settings, under the JIT (352 benchmarks,
+51 min 22 s of runs) and then NativeAOT (317, MediatR's 35 n/a, 69 min 53 s), after `--verify` passed in both builds (352; 317 and 35
+n/a). Each class ran on its own after 30 s with no other build, test or benchmark busy and was watched every 3 s; nothing overlapped, so
+no class was run again. The 25, 50 and 100 handler classes have their first tables (three per runtime view), and the notes on the
+scope-per-request rows describe what the rework changed against decision 37's run and ZeroAlloc.Mediator. With a scope per request
+(JIT, typed): `Ping` 29.9 ns and 192 B (55.1 ns and 448 B before; the direct call 49.9 ns and 368 B, ZeroAlloc.Mediator 50.0 ns and
+208 B), the behaviors 268 ns and 1,048 B (328 ns and 1,408 B; ZeroAlloc.Mediator 250 ns and 928 B, still ahead), the publish to 1 and 5
+handlers 144 and 316 ns with 560 B and 816 B (164 and 570 ns, 560 B and 1,336 B; ZeroAlloc.Mediator 126 and 364 ns), and 1,136, 2,240
+and 4,615 ns with 25, 50 and 100 handlers (ZeroAlloc.Mediator 1,687, 3,322 and 6,956 ns); the long-lived rows within the run-to-run
+spread. Under NativeAOT the pilot measured `PublishTo{25,50,100}.Baseline` (OQ-81's case did not occur). It raised OQ-82: under the JIT
+Keryx's typed `Send` with a yielding handler measured 1.11 to 1.47 times the direct call in all six yielding classes, reproduced in a
+re-run, while `IMediator` did not. A script checks that each of the README's 22 tables (202 rows) is one of the generated tables.
+Details: open-questions, "Full benchmark run" (third run); the reports are in the session scratchpad (`bench-final-3/jit`,
+`bench-final-3/aot`).
+
 ## Decisions for the owner
+
+**OQ-82** is open ([open-questions.md](adr/open-questions.md)): under the JIT, Keryx's typed `Send` with a yielding handler measured
+1,064 to 1,180 ns in the third full run, 1.11 to 1.47 times the direct call, in every yielding class and again in a re-run, while its
+`IMediator` rows and every other subject did not; decision 37's run showed it in one class only (`SendUnitYieldTask`: typed 1,202 ns,
+the direct call 907 ns; in the other five typed was below the direct call or within 3% of it), and NativeAOT does not; the proposal finds
+the commit by
+measuring the rework's commits interleaved and compares the typed path's code before and after.
 
 **OQ-81** is open ([open-questions.md](adr/open-questions.md)): `PublishTo{25,50,100}.Baseline` are direct calls to handlers that
 return `default`, like `PublishTo1.Baseline`, but decision 39's fixed invocation count covers `PublishTo1.Baseline` only, so a measured
-NativeAOT run may hit OQ-77's 0 ns pilot failure on them; the proposal extends `FixedInvocationCount` to those three cases.
+NativeAOT run could hit OQ-77's 0 ns pilot failure on them. The third full run measured all three with the pilot (first 16 calls 10 to
+284 ns per call), so the updated proposal leaves `FixedInvocationCount` as it is and closes the entry.
 
 **OQ-80** is open ([open-questions.md](adr/open-questions.md)): `HostAllocationTests.A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State`
 failed once in a full test run (60,008 B where 32,000 B is expected) and passed on every re-run; the proposal warms each measured region
@@ -417,48 +446,47 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   has an API for them. `--verify` checks their `Pong` and counts handler, behavior, validator, repository, query and log calls (238
   comparison benchmarks pass on net10.0 and net11.0), and the Dry job, which already runs every benchmark, covers them (a Dry run of
   `*RealWorld*` runs 104). Their per-library setup and n/a cells are in the ADR's Benchmarks section (decision 33, OQ-72). Measured in the
-  full runs of decisions 32 and 37 (the README's numbers are decision 37's).
-- **NativeAOT benchmark run** (owner decisions 29 and 31, 2026-11-27; open-questions, "NativeAOT benchmark run"): the comparison
-  suite runs with BenchmarkDotNet's NativeAOT toolchain (`--runtimes nativeaot10.0`, on its own: side by side with the JIT the
-  NativeAOT rows get no ratios) with the same scenarios and subjects. Built and run
-  under NativeAOT, MediatR 15 is n/a in every scenario (`AddMediatR` throws at startup with the suite's behaviors; without behaviors the
-  container cannot construct MediatR's `Mediator`), and every other subject runs every scenario it runs under the JIT;
-  `Comparison/NativeAot.cs` holds the reason, `Subjects` skips MediatR's containers there and the runner's config leaves its benchmarks
-  out of NativeAOT jobs. `--verify` runs in the suite published with NativeAOT (`-p:KeryxBenchmarksNativeAot=true`): 215 benchmarks
-  pass and 23 are listed n/a; its scenarios are listed (no assembly scan, no trim warnings), and a benchmark run fails when one is missing
-  from the list. No trim or AOT warning in Keryx's own code, none suppressed; the benchmark and subject projects build with the trim, AOT
-  and single-file analyzers. The Phase 4 prototype is JIT-only (left out of NativeAOT jobs: BenchmarkDotNet rejects its Linux
+  full runs of decisions 32 and 37 and in the third full run (2026-11-28, at 3de1d21, whose numbers the README shows); the 25, 50 and
+  100 handler classes of decision 41 were first measured in the third run.
+- **NativeAOT benchmark run** (owner decisions 29 and 31, 2026-11-27; open-questions, "NativeAOT benchmark run"): the comparison suite
+  runs with BenchmarkDotNet's NativeAOT toolchain (`--runtimes nativeaot10.0`, on its own: side by side with the JIT the NativeAOT rows get
+  no ratios) with the same scenarios and subjects. Built and run under NativeAOT, MediatR 15 is n/a in every scenario (`AddMediatR` throws
+  at startup with the suite's behaviors; without behaviors the container cannot construct MediatR's `Mediator`), and every other subject
+  runs every scenario it runs under the JIT; `Comparison/NativeAot.cs` holds the reason, `Subjects` skips MediatR's containers there and the
+  runner's config leaves its benchmarks out of NativeAOT jobs. `--verify` runs in the suite published with NativeAOT
+  (`-p:KeryxBenchmarksNativeAot=true`): 317 benchmarks pass and 35 are listed n/a since the fan-out classes of decision 41 (215 and 23 n/a
+  when the NativeAOT job was added); its scenarios are listed (no assembly scan, no trim warnings), and a benchmark run fails when one is
+  missing from the list. No trim or AOT warning in Keryx's own code, none suppressed; the benchmark and subject projects build with the
+  trim, AOT and single-file analyzers. The Phase 4 prototype is JIT-only (left out of NativeAOT jobs: BenchmarkDotNet rejects its Linux
   `DisassemblyDiagnoser` there). Local Dry runs of every benchmark pass under NativeAOT (242) and the JIT (271), and the NativeAOT job's
-  steps pass on Linux (linux-arm64 container: `--verify` 215 passed, 23 n/a; Dry run 242, exit 0). Measured in decision 37's
-  run (README, NativeAOT), without the probe (decision 34, OQ-73); one benchmark, the direct call's `Publish` to one handler, has a
-  fixed invocation count in its NativeAOT job because BenchmarkDotNet's pilot cannot measure it, set by the runner's config, so a full
-  NativeAOT run needs no manual step (decision 39, OQ-77).
-- **Performance contract against the comparison run** (README, Benchmarks; decision 37's run, 2026-11-27, at 3575a50): Keryx
-  allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1
-  and 5 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state machine); a
-  `Stream` with no behaviors allocates what the handler's iterator allocates, and with behaviors one iterator per stream behavior. The
-  one generated async path, `UnitAdapter.ToUnit`, is checked by `SendUnitYieldValueTask` and `SendUnitYieldTask`: typed and `IMediator`
-  both allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers come from one
-  machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before quoting them. The
-  tables include the follow-up: generic `Send` with a synchronous handler at 2.69 to 3.37 ns (2.44 to 2.74 ns in decision 32's run,
-  3.22 to 3.51 ns before the type patterns), three stream behaviors at 648 B (OQ-65), and the typed `Publish` at 0.44 and 0.48 ns
-  (OQ-70). The same allocations hold under NativeAOT, the real-world behavior rows included (the benchmark behaviors' type names added
-  96 B there in decision 32's run; read once per type since decision 36, OQ-75), except in the SQLite and async-handler rows, 16 B less
-  per query, the same change as the direct call's. With a scope per request, decision 37's run measured Keryx's typed overload at 80 B
-  more than the direct call for a plain `Ping` (the scoped `KeryxMediator`), and its `IMediator` rows allocating what the typed rows
-  allocate (decision 32's run, with the scoped forwarders decision 35 replaced, measured 360 B and 800 B more for the publishes; OQ-74).
-  Since owner decision 46, with a scope per request the typed overload and `IMediator` allocate 192 B for `Ping`, 176 B less than the
-  direct call's 368 B (ZeroAlloc.Mediator 208 B), because a scope that uses no pipeline context resolves no scope state; scopes that use
-  a context allocate 24 B more than in decision 37's run (1,432 B for the behaviors, 584 B and 1,360 B for the publishes to 1 and 5
-  handlers: the 96 B state replaces the 104 B scoped mediator, plus the 32 B transient mediator). Open-questions, "The mediator is
-  transient over a scoped state". Since owner decisions 42 and 44 (no handler registrations, static entries) those scopes allocate
-  1,048 B, 560 B and 880 B (1,032 B for the publish to 5 handlers with the notification behavior); open-questions, "Handlers are not
-  registered". Since owner decision 43 (shared services) the publish to 5 handlers allocates 816 B (960 B with the notification
-  behavior, 704 B for 1 handler with it); open-questions, "Handlers and behaviors share a context's services".
+  steps pass on Linux (linux-arm64 container: `--verify` 215 passed, 23 n/a; Dry run 242, exit 0); those Dry and Linux counts predate the
+  fan-out classes of decision 41, whose Dry job of `*Publish*` ran 190 (JIT) and 170 (NativeAOT) benchmarks. Measured in decision 37's run
+  and in the third full run (README, NativeAOT: 317 benchmarks, MediatR's 35 n/a), without the probe (decision 34, OQ-73); one benchmark,
+  the direct call's `Publish` to one handler, has a fixed invocation count in its NativeAOT job because BenchmarkDotNet's pilot cannot
+  measure it, set by the runner's config, so a full NativeAOT run needs no manual step (decision 39, OQ-77).
+- **Performance contract against the comparison run** (README, Benchmarks; the third full run, 2026-11-28, at 3de1d21): Keryx
+  allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1,
+  5, 25, 50 and 100 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state
+  machine); a `Stream` with no behaviors allocates what the handler's iterator allocates, and with behaviors one iterator per stream
+  behavior. The one generated async path, `UnitAdapter.ToUnit`, is checked by `SendUnitYieldValueTask` and `SendUnitYieldTask`: typed
+  and `IMediator` both allocate 96 B, the same as the handler awaited directly, so the adapter adds 0 B in steady state. The numbers
+  come from one machine (Apple M4 Max) with a 15-iteration job, not BenchmarkDotNet's default job; re-run on other hardware before
+  quoting them. Generic `Send` with a synchronous handler measures 2.44 to 2.68 ns (2.69 to 3.37 ns in decision 37's run, 3.22 to
+  3.51 ns before the type patterns), three stream behaviors allocate 648 B (OQ-65), and the typed `Publish` measures 0.50 and 0.33 ns
+  (OQ-70). The same allocations hold under NativeAOT, the real-world behavior and fan-out rows included, except in the SQLite and
+  async-handler rows, 16 B less per query, the same change as the direct call's. With a scope per request, the typed overload and
+  `IMediator` allocate 192 B for `Ping`, 176 B less than the direct call's 368 B (ZeroAlloc.Mediator 208 B), because a scope that uses
+  no pipeline context resolves no scope state (owner decision 46); scopes that use a context allocate 1,048 B for the behaviors (the
+  direct call 920 B, ZeroAlloc.Mediator 928 B) and 560 B and 816 B for the publishes to 1 and 5 handlers (the direct call 456 B and
+  1,232 B, ZeroAlloc.Mediator 456 B and 840 B), and 2,112, 3,712 and 6,912 B for 25, 50 and 100 handlers (ZeroAlloc.Mediator 2,760,
+  5,160 and 9,960 B), after owner decisions 42 to 44 (no handler registrations, static entries, shared context services). Decision 37's
+  run, before them, measured 448 B, 1,408 B, 560 B and 1,336 B. Open-questions, "Full benchmark run" (third run), and the entries of
+  those decisions. Under the JIT the typed overload's yielding rows measure slower than the direct call's in this run (OQ-82, open).
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
-  README's Publish table shows 0.01 ns (inlined) and 0.53 ns for 1 and 5 handlers, against Keryx typed at 0.44 ns and 0.48 ns; under
-  NativeAOT 0.04 ns (a fixed invocation count, decision 39, OQ-77; from the run that proved it, 0.06 ns in decision 37's run) and 0.67
-  ns against 0.68 ns both.
+  README's Publish table shows 0.01 ns (inlined) and 0.64 ns for 1 and 5 handlers, against Keryx typed at 0.50 ns and 0.33 ns; under
+  NativeAOT 0.07 ns (a fixed invocation count, decision 39, OQ-77) and 0.66 ns against 0.48 and 0.68 ns. With 25, 50 and 100 handlers
+  the direct call measures 0.55, 0.55 and 197 ns under the JIT (0.66, 0.66 and 160 ns under NativeAOT, measured by the pilot: OQ-81)
+  and Keryx typed 0.44, 56.6 and 272 ns (0.71, 0.71 and 277 ns).
 
 ## Before a first release
 
@@ -469,16 +497,14 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
-  decision 37's run at 3575a50; Keryx's scope-per-request cells predate decisions 46, 42, 44 and 43, whose numbers are in the README's
-  notes; NativeAOT was not measured for them; the 25, 50 and 100 handler classes of decision 41 have never been measured). That run
-  shows whether BenchmarkDotNet's NativeAOT pilot can measure `PublishTo{25,50,100}.Baseline`, or whether they need decision 39's fixed
-  invocation count as `PublishTo1.Baseline` does (OQ-81, open).
+  the third full run at 3de1d21, 2026-11-28). That run checks OQ-82 again (the typed `Send` with a yielding handler under the JIT) if it
+  is still open.
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
-  `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
-  generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified
-  suspect. The full runs of decisions 32 and 37 did not show it (`IMediator` 637.8 and 639.2 ns, typed 631.9 and 648.2 ns, direct call
-  632.5 and 645.8 ns), but neither was a before-and-after comparison. Check it on the release candidate and decide then whether it
-  needs work.
+  `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the generic
+  `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified suspect. The full
+  runs of decisions 32 and 37 and the third run did not show it (`IMediator` 637.8, 639.2 and 630.3 ns, typed 631.9, 648.2 and 629.5 ns,
+  direct call 632.5, 645.8 and 630.4 ns), but none was a before-and-after comparison. Check it on the release candidate and decide then
+  whether it needs work.
 - Build one `net10.0-android` app that references the packed Keryx (decision 25): `KeryxHostPropertyTests` evaluate the targets with
   `AndroidApplication` and `OutputType` set as the Android SDK leaves them, and the SDK's import order was checked in a preprocessed
   project (OQ-61), but no full Android app build with Keryx has run.

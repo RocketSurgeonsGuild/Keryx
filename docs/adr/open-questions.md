@@ -37,7 +37,8 @@ state" (owner decisions 46 and 47, 2026-11-28; it supersedes decision 35's one-m
 trade-off) and "Handlers are not registered" (owner decisions 42, 44 and 45, the same day) follow; OQ-78 was raised while implementing
 decision 47 and OQ-79 while implementing decision 44, both open. "Handlers and behaviors share a context's services" (owner decision
 43, the same day) follows, and "Publish to 25, 50 and 100 handlers" (owner decision 41, with decision 48's note, the same day) comes
-last; OQ-80 and OQ-81 were raised while implementing it, both open.
+last; OQ-80 and OQ-81 were raised while implementing it, both open. The full run after those decisions is recorded in "Full benchmark
+run" (third run, 2026-11-28); it measured OQ-81's cases and raised OQ-82, open.
 
 ## Open
 
@@ -118,6 +119,36 @@ included them, and nothing tests or guards against it: the Dry job runs one invo
   with a count about what its JIT pilot chooses (a multiple of 16), so a full NativeAOT run needs no manual step. Alternative: first run
   the pilot alone for those three cases under NativeAOT (`--filter '*Comparison.PublishTo{25,50,100}.Baseline' --runtimes nativeaot10.0`
   with the README's job) and extend the orderer only for the ones that fail. Needs a decision.
+- **Measured since** (2026-11-28, the full run after the scope-cost rework; "Full benchmark run", third run): under NativeAOT with the
+  README's job, `PublishTo25`, `PublishTo50` and `PublishTo100` each ran with the pilot and exited 0, every row measured. The pilot's
+  first 16 calls read 10.4, 18.2 and 284 ns per call for `PublishTo25`, `PublishTo50` and `PublishTo100.Baseline`, so it did not read
+  0 ns; the rows measured 0.66 ns, 0.66 ns and 160 ns (`PublishTo1.Baseline`, with its fixed count, 0.07 ns). So the alternative
+  above has been done and found no case that fails; the updated proposal is to leave `FixedInvocationCount` as it is (only
+  `PublishTo1.Baseline`) and close this entry. Still needs the owner's decision.
+
+### OQ-82: Keryx's typed `Send` with a yielding handler measures slower under the JIT (2026-11-28)
+
+The full run after the scope-cost rework ("Full benchmark run", third run, at 3de1d21) shows a pattern decision 37's run showed in one class
+only (below): under the JIT, Keryx's typed overload measured 1,064 to 1,180 ns in all six yielding classes (`SendYieldDepth0`, `1`, `3`,
+`8`, `SendUnitYieldValueTask`, `SendUnitYieldTask`), 1.11 to 1.47 times the direct call (796 to 966 ns), while its `IMediator` rows measured
+862 to 946 ns and every other subject 804 to 1,006 ns; the allocations are the same as the direct call's (112 to 113 B, 96 B). A re-run of
+`SendYieldDepth0`, `SendYieldDepth3` and `SendUnitYieldTask` on the quiet machine reproduced it: typed 1,259.8, 1,221.5 and 1,176.4 ns
+(standard deviations 110.8, 78.0 and 54.3 ns), `IMediator` 880.3, 837.8 and 878.0 ns, the direct call 929.8, 895.6 and 860.5 ns (the session
+scratchpad's `bench-final-3/jit/yield-check`). Decision 37's run at 3575a50 showed it in one class only (`SendUnitYieldTask`: typed 1,202
+ns, the direct call 907 ns, 1.33 times); in the other five typed was below the direct call or within 3% of it (`SendUnitYieldValueTask`:
+1,229 ns against 1,195 ns), and `IMediator` measured above typed in all six (typed 1,202 to 1,297 ns, the direct call 907 to 1,391 ns,
+`IMediator` 1,304 to 1,730 ns), so the evidence that the pattern is new to the rework rests on five classes; the NativeAOT run of 3de1d21
+does not show it (typed 771 to 839 ns, the direct call 676 to 895 ns). The commits between the two runs are the scope-cost rework (c759c9c,
+decision 46; c457b32, decisions 42, 44 and 45; 2c7d9dc, decision 43) and the fan-out benchmarks (3de1d21, which changed no code the yielding
+classes run). The time of these rows is a thread-pool hop of `Task.Yield()` and moves by a few hundred nanoseconds between runs, so this may
+be how the hop lands for the typed benchmark method rather than work Keryx adds, but it is the only row that moved in every class, twice,
+and the `IMediator` path that ends in the same pipeline did not.
+
+- **Interim:** nothing changes. The README reports it in the notes on reading the yielding rows; the release run checks it again.
+- **Proposal:** measure the three classes at c759c9c, c457b32 and 2c7d9dc (and 2c97e91, before the rework) interleaved on a quiet
+  machine to find the commit, then compare the typed `Send` path the yielding pipeline compiles to (generated source and a
+  `DOTNET_JitDisasm` listing of the benchmark method) before and after it, and fix it if the generated code is the cause; if it is not
+  (the same code, the hop alone), record that and close this. Needs a decision.
 
 ## Decided
 
@@ -2394,6 +2425,48 @@ and then NativeAOT, with the README's settings, from a clean `git archive` of 35
   yielding ones by a few hundred nanoseconds), the allocations not at all.
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+**Third run** (session step after owner decisions 41 to 48, 2026-11-28): the full comparison suite under the JIT and then NativeAOT,
+with the README's settings, from a clean `git archive` of 3de1d21 (HEAD: decision 46 is c759c9c, decisions 42, 44 and 45 c457b32,
+decision 43 2c7d9dc, decision 41 3de1d21), on the same machine, OS and SDK (BenchmarkDotNet's environment block is unchanged); every
+README table is refreshed from it, the fan-out classes of decision 41 get their tables, and the notes on the scope-per-request rows are
+rewritten for the rework. Done:
+
+- **`--verify` first:** 352 passed under the JIT; in the NativeAOT publish (27 trim and AOT warnings, as before, none in Keryx's or the
+  subjects' code), 317 passed and 35 n/a (MediatR).
+- **Guarded runs, class by class** (`bench-final-3/run.sh`): 42 classes under the JIT, then the same 42 under NativeAOT
+  (`--runtimes nativeaot10.0`, on its own). Before each class the script waited for three samples 10 s apart (30 s) with no
+  dotnet-related process busy (the IDE's language servers and the idle MCP tools left out of the sum), and while it ran a watcher sampled
+  every 3 s for any busy build, test or benchmark process outside the script's own process tree, to run the class again on a hit.
+  MSBuild node reuse, the MSBuild server and shared compilation were off for the benchmark builds. No class waited and the watcher
+  recorded nothing (`overlap.log` is empty), so every class ran once: JIT 352 benchmarks, 51 min 22 s of runs (06:30 to 07:43); NativeAOT
+  317 benchmarks, MediatR's 35 left out, 69 min 53 s (07:43 to 09:14); every run exit 0.
+- **OQ-81 measured:** the NativeAOT pilot measured `PublishTo25`, `PublishTo50` and `PublishTo100.Baseline` (first 16 calls 10.4, 18.2
+  and 284 ns per call; rows 0.66, 0.66 and 160 ns), so the classes needed no manual step; `PublishTo1.Baseline` ran with decision 39's
+  fixed count from the runner's config, 0.07 ns. OQ-81 stays open for the owner, with that result.
+- **Reports.** In the session scratchpad, `bench-final-3/jit` and `bench-final-3/aot` (`results` with the CSV, GitHub markdown and HTML
+  reports, the per-class BenchmarkDotNet logs and `run-<class>-1.log`), `status.txt`, the empty `overlap.log`, `verify.log` in each,
+  and `jit/yield-check` (below). The tables come from `bench-final-3/tables.py`, `bench-final-2/tables.py` with the fan-out groups added
+  (three tables per runtime view) and times of 10 µs and more written in microseconds; the bytes are again the exact `// GC:` lines.
+  `check_readme.py` checks that each of the README's 22 Benchmarks tables (202 rows) is one of the generated tables, row for row.
+- **What it shows of the rework** (JIT, typed overload, against decision 37's run): with a scope per request `Ping` 55.1 ns and 448 B to
+  29.9 ns and 192 B (the direct call 49.9 ns and 368 B, ZeroAlloc.Mediator 50.0 ns and 208 B); the behaviors 328 ns and 1,408 B to
+  268 ns and 1,048 B (ZeroAlloc.Mediator 250 ns and 928 B, still ahead); the publish to 1 and 5 handlers 164 and 570 ns to 144 and 316 ns,
+  560 B and 1,336 B to 560 B and 816 B (ZeroAlloc.Mediator 126 and 364 ns, 456 B and 840 B; the direct call 122 and 443 ns), and with the
+  notification behavior 251 and 672 ns to 220 and 392 ns. `IMediator` allocates what the typed overload allocates everywhere and
+  measures within 5 ns of it per request (34.2 ns for `Ping`, against 67.9 ns before). The long-lived rows did not move beyond the
+  run-to-run spread (`RealWorldBehaviors` 126 to 122 ns, the direct call 120 to 117 ns; generic `Send` 2.44 to 2.68 ns). Under NativeAOT
+  the same rows measure 54.2, 385, 225 and 421 ns typed (84.3, 445, 252 and 876 ns before), with the JIT's bytes.
+- **The fan-out classes** (first measured run): per request scope Keryx measures 1,136, 2,240 and 4,615 ns with 25, 50 and 100 handlers
+  (ZeroAlloc.Mediator 1,687, 3,322 and 6,956 ns; the direct call 1,981, 4,124 and 8,586 ns), with the bytes decision 41's probe measured
+  for every row; the sync publish to 100 handlers 272 ns (the direct call 197 ns, Mediator 340 to 381 ns); the async publishes within
+  10% of the direct call for every subject.
+- **Found:** Keryx's typed overload with a yielding handler measured 1.11 to 1.47 times the direct call in all six yielding classes
+  under the JIT, while `IMediator` did not, and a re-run of three of them reproduced it (`bench-final-3/jit/yield-check`); OQ-82, open.
+  Generic `Stream` at depth 0 does not show decision 22's slowdown (`IMediator` 630.3 ns, typed 629.5 ns, the direct call 630.4 ns).
+
+Folded into the README (Benchmarks: every table, the date, commit and run notes, the fan-out tables, the scope-per-request and NativeAOT
+notes), the ADR (Benchmarks: which run the tables are), the brief (Phase 8) and whats-left.md.
 
 ### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
 
