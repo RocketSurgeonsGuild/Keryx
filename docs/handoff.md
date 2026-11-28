@@ -544,7 +544,7 @@ iteration, which skips the pilot (`Comparison/FixedInvocationCount.cs`, an order
 a single case; it keeps the case in its class's logical group, so it stays the baseline), while the JIT and Dry jobs and every other
 benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
 The direct call's `Publish` to 25, 50 and 100 handlers (decision 41) has the same shape and is not covered; whether it needs the fixed
-count is OQ-81 (open; the third run's pilot measured all three). The current tables are that third full run (2026-11-28, at 3de1d21,
+count is OQ-81 (open; the third run's pilot measured all three). The current tables are that third full run (2026-11-28, at bdaf06f,
 after owner decisions 41 to 46; same entry), run class by class under the JIT and then NativeAOT with a guard that waits for a quiet
 machine and re-runs a class another build or benchmark overlapped (none did): with a scope per request Keryx's typed `Send` of `Ping`
 measures 29.9 ns and 192 B (the direct call 49.9 ns and 368 B), the behaviors 268 ns and 1,048 B, and a publish to 5 handlers 316 ns and
@@ -558,7 +558,7 @@ wrapping the whole publish, examples with the message constraint, attaching per 
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the transient mediator over a
 scoped state; pipeline contexts call the host's own handlers through their static entries and construct only referenced handlers; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
-through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, the third full run at 3de1d21). A short "what is left" note in
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, the third full run at bdaf06f). A short "what is left" note in
 `docs/whats-left.md`.
 
 **Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`

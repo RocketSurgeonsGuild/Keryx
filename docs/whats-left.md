@@ -13,7 +13,7 @@ with 48 (2026-11-28: a transient mediator over a scoped state, one field per pip
 updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler registrations, a static entry for the host's own handlers,
 KRX025 for a disposable handler class; OQ-79); updated for owner decision 43, with 48 (2026-11-28: a context's handlers and behaviors
 share its services); updated for owner decision 41, with 48 (2026-11-28: publish to 25, 50 and 100 handlers in the benchmarks;
-OQ-80 and OQ-81); updated for the third full benchmark run (2026-11-28, at 3de1d21, after the scope-cost rework: every README table
+OQ-80 and OQ-81); updated for the third full benchmark run (2026-11-28, at bdaf06f, after the scope-cost rework: every README table
 refreshed, the fan-out tables added; OQ-81 measured, OQ-82 raised).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
@@ -366,9 +366,9 @@ benchmark run, below). Build,
 Whether BenchmarkDotNet's NativeAOT pilot can measure `PublishTo{25,50,100}.Baseline` is not checked (OQ-81). Details: open-questions,
 "Publish to 25, 50 and 100 handlers"; the reports are in the session scratchpad (`fanout/`).
 
-## Done: the third full benchmark run (2026-11-28, at 3de1d21)
+## Done: the third full benchmark run (2026-11-28, at bdaf06f)
 
-No code changed: every README Benchmarks table and its notes were refreshed from a full local run of the comparison suite at 3de1d21
+No code changed: every README Benchmarks table and its notes were refreshed from a full local run of the comparison suite at bdaf06f
 (after owner decisions 41 to 46), built from a clean `git archive` copy, with the README's settings, under the JIT (352 benchmarks,
 51 min 22 s of runs) and then NativeAOT (317, MediatR's 35 n/a, 69 min 53 s), after `--verify` passed in both builds (352; 317 and 35
 n/a). Each class ran on its own after 30 s with no other build, test or benchmark busy and was watched every 3 s; nothing overlapped, so
@@ -446,7 +446,7 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   has an API for them. `--verify` checks their `Pong` and counts handler, behavior, validator, repository, query and log calls (238
   comparison benchmarks pass on net10.0 and net11.0), and the Dry job, which already runs every benchmark, covers them (a Dry run of
   `*RealWorld*` runs 104). Their per-library setup and n/a cells are in the ADR's Benchmarks section (decision 33, OQ-72). Measured in the
-  full runs of decisions 32 and 37 and in the third full run (2026-11-28, at 3de1d21, whose numbers the README shows); the 25, 50 and
+  full runs of decisions 32 and 37 and in the third full run (2026-11-28, at bdaf06f, whose numbers the README shows); the 25, 50 and
   100 handler classes of decision 41 were first measured in the third run.
 - **NativeAOT benchmark run** (owner decisions 29 and 31, 2026-11-27; open-questions, "NativeAOT benchmark run"): the comparison suite
   runs with BenchmarkDotNet's NativeAOT toolchain (`--runtimes nativeaot10.0`, on its own: side by side with the JIT the NativeAOT rows get
@@ -464,7 +464,7 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   and in the third full run (README, NativeAOT: 317 benchmarks, MediatR's 35 n/a), without the probe (decision 34, OQ-73); one benchmark,
   the direct call's `Publish` to one handler, has a fixed invocation count in its NativeAOT job because BenchmarkDotNet's pilot cannot
   measure it, set by the runner's config, so a full NativeAOT run needs no manual step (decision 39, OQ-77).
-- **Performance contract against the comparison run** (README, Benchmarks; the third full run, 2026-11-28, at 3de1d21): Keryx
+- **Performance contract against the comparison run** (README, Benchmarks; the third full run, 2026-11-28, at bdaf06f): Keryx
   allocates 0 B per `Send` with a synchronous handler at 0, 1, 3 and 8 behaviors (typed and generic) and per sequential `Publish` to 1,
   5, 25, 50 and 100 handlers; with a yielding `IRequest<T>` handler it allocates what the direct call allocates (the handler's state
   machine); a `Stream` with no behaviors allocates what the handler's iterator allocates, and with behaviors one iterator per stream
@@ -497,7 +497,7 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
-  the third full run at 3de1d21, 2026-11-28). That run checks OQ-82 again (the typed `Send` with a yielding handler under the JIT) if it
+  the third full run at bdaf06f, 2026-11-28). That run checks OQ-82 again (the typed `Send` with a yielding handler under the JIT) if it
   is still open.
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
   `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the generic

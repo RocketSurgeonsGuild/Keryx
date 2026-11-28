@@ -1707,7 +1707,7 @@ since owner decision 32 (2026-11-27), one full run of the comparison suite (`--f
 IterationTime=200ms, LaunchCount=1, WarmupCount=5) under the JIT and right after it under NativeAOT, built from a clean copy of the commit
 it measures, with no other build, test or benchmark running on the machine (a class that one overlaps is run again on its own); the
 README states the date, the commit and BenchmarkDotNet's environment block, shows the NativeAOT times beside the JIT times, and notes
-anything in the numbers that is not the library's. The current tables are the third full run (2026-11-28, at 3de1d21, after owner
+anything in the numbers that is not the library's. The current tables are the third full run (2026-11-28, at bdaf06f, after owner
 decisions 41 to 46: the transient mediator over a scoped state, no handler registrations, static entries and shared context services,
 and the 25, 50 and 100 handler classes), run class by class with a guard that waits for a quiet machine and re-runs a class another
 process overlapped (open-questions, "Full benchmark run"); neither the verification probe nor the log messages' type names is in them

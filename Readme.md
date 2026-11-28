@@ -536,7 +536,7 @@ generic method; n/a marks a scenario the library has no API for. How each librar
 
 Each cell is the mean time per call and the bytes allocated per call (exact: BenchmarkDotNet's reports round them to KB once a column
 reaches 1 KB, so they are taken from its log, total bytes over operations). One local run of the whole comparison suite on 2026-11-28, at
-commit `3de1d21` (built from a clean `git archive` of it), after the scope-cost rework: owner decision 46 (a transient mediator over a
+commit `bdaf06f` (built from a clean `git archive` of it), after the scope-cost rework: owner decision 46 (a transient mediator over a
 scoped state), decisions 42 and 44 (no handler registrations; the host's own handlers called through a static entry), decision 43 (a
 context's handlers and behaviors share its services) and decision 41 (the publishes to 25, 50 and 100 handlers). It ran first under the
 JIT and then under NativeAOT ([below](#nativeaot)), with the settings below, one class at a time: each class started only after 30 s with

@@ -128,7 +128,7 @@ included them, and nothing tests or guards against it: the Dry job runs one invo
 
 ### OQ-82: Keryx's typed `Send` with a yielding handler measures slower under the JIT (2026-11-28)
 
-The full run after the scope-cost rework ("Full benchmark run", third run, at 3de1d21) shows a pattern decision 37's run showed in one class
+The full run after the scope-cost rework ("Full benchmark run", third run, at bdaf06f) shows a pattern decision 37's run showed in one class
 only (below): under the JIT, Keryx's typed overload measured 1,064 to 1,180 ns in all six yielding classes (`SendYieldDepth0`, `1`, `3`,
 `8`, `SendUnitYieldValueTask`, `SendUnitYieldTask`), 1.11 to 1.47 times the direct call (796 to 966 ns), while its `IMediator` rows measured
 862 to 946 ns and every other subject 804 to 1,006 ns; the allocations are the same as the direct call's (112 to 113 B, 96 B). A re-run of
@@ -137,15 +137,15 @@ only (below): under the JIT, Keryx's typed overload measured 1,064 to 1,180 ns i
 scratchpad's `bench-final-3/jit/yield-check`). Decision 37's run at 3575a50 showed it in one class only (`SendUnitYieldTask`: typed 1,202
 ns, the direct call 907 ns, 1.33 times); in the other five typed was below the direct call or within 3% of it (`SendUnitYieldValueTask`:
 1,229 ns against 1,195 ns), and `IMediator` measured above typed in all six (typed 1,202 to 1,297 ns, the direct call 907 to 1,391 ns,
-`IMediator` 1,304 to 1,730 ns), so the evidence that the pattern is new to the rework rests on five classes; the NativeAOT run of 3de1d21
-does not show it (typed 771 to 839 ns, the direct call 676 to 895 ns). The commits between the two runs are the scope-cost rework (c759c9c,
-decision 46; c457b32, decisions 42, 44 and 45; 2c7d9dc, decision 43) and the fan-out benchmarks (3de1d21, which changed no code the yielding
+`IMediator` 1,304 to 1,730 ns), so the evidence that the pattern is new to the rework rests on five classes; the NativeAOT run of bdaf06f
+does not show it (typed 771 to 839 ns, the direct call 676 to 895 ns). The commits between the two runs are the scope-cost rework (737ffa7,
+decision 46; 4599b45, decisions 42, 44 and 45; 86794a7, decision 43) and the fan-out benchmarks (bdaf06f, which changed no code the yielding
 classes run). The time of these rows is a thread-pool hop of `Task.Yield()` and moves by a few hundred nanoseconds between runs, so this may
 be how the hop lands for the typed benchmark method rather than work Keryx adds, but it is the only row that moved in every class, twice,
 and the `IMediator` path that ends in the same pipeline did not.
 
 - **Interim:** nothing changes. The README reports it in the notes on reading the yielding rows; the release run checks it again.
-- **Proposal:** measure the three classes at c759c9c, c457b32 and 2c7d9dc (and 2c97e91, before the rework) interleaved on a quiet
+- **Proposal:** measure the three classes at 737ffa7, 4599b45 and 86794a7 (and 2c97e91, before the rework) interleaved on a quiet
   machine to find the commit, then compare the typed `Send` path the yielding pipeline compiles to (generated source and a
   `DOTNET_JitDisasm` listing of the benchmark method) before and after it, and fix it if the generated code is the cause; if it is not
   (the same code, the hop alone), record that and close this. Needs a decision.
@@ -2427,8 +2427,8 @@ and then NativeAOT, with the README's settings, from a clean `git archive` of 35
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
 
 **Third run** (session step after owner decisions 41 to 48, 2026-11-28): the full comparison suite under the JIT and then NativeAOT,
-with the README's settings, from a clean `git archive` of 3de1d21 (HEAD: decision 46 is c759c9c, decisions 42, 44 and 45 c457b32,
-decision 43 2c7d9dc, decision 41 3de1d21), on the same machine, OS and SDK (BenchmarkDotNet's environment block is unchanged); every
+with the README's settings, from a clean `git archive` of bdaf06f (HEAD: decision 46 is 737ffa7, decisions 42, 44 and 45 4599b45,
+decision 43 86794a7, decision 41 bdaf06f), on the same machine, OS and SDK (BenchmarkDotNet's environment block is unchanged); every
 README table is refreshed from it, the fan-out classes of decision 41 get their tables, and the notes on the scope-per-request rows are
 rewritten for the rework. Done:
 
@@ -3020,7 +3020,7 @@ Done:
   host's KRX034 "does not fit" form ("the class implements 'System.IDisposable', which a handler class may not (KRX025)") and leaves the
   handler out.
 - **Bytes, exact** (a `GC.GetAllocatedBytesForCurrentThread` probe over 10,000 calls after 200,000 warm-up calls, the smallest of ten
-  repeats, built from a clean `git archive` of c759c9c and from the working tree, `rework-scope/handlers/bytes-{before,after}.txt`;
+  repeats, built from a clean `git archive` of 737ffa7 and from the working tree, `rework-scope/handlers/bytes-{before,after}.txt`;
   BenchmarkDotNet's allocation column agrees). Per scope, typed and `IMediator` alike, before then after:
   `RealWorldBehaviorsScopePerRequest` 1,432 then 1,048 B (the report's target, exactly: the handler's scope entry goes, so the scope's
   resolved services stay within their first arrays, 360 B, and the 24 B handler object goes; the 40 B context holds the repository where
@@ -3035,7 +3035,7 @@ Done:
   `HostAllocationTests.An_Own_Handler_With_Services_Costs_A_Scope_What_A_Behavior_With_Them_Costs` pins the shape: over 1,000 scopes, a
   send whose own handler injects a scoped `Clock` allocates exactly what a send whose behavior injects it allocates.
 - **Time** (JIT, BenchmarkDotNet 0.15.8, Apple M4 Max, .NET 10.0.15, the README's job: IterationCount=15, IterationTime=200ms,
-  LaunchCount=1, WarmupCount=5; `before` from a clean `git archive` of c759c9c, `after` from a copy of the working tree, which was not
+  LaunchCount=1, WarmupCount=5; `before` from a clean `git archive` of 737ffa7, `after` from a copy of the working tree, which was not
   committed). Typed, then `IMediator`, before then after: `RealWorldBehaviorsScopePerRequest` 336.7 and 339.7 ns, then 266.1 and
   269.9 ns (the direct call 211.8 and 212.1 ns, ZeroAlloc.Mediator 249.3 and 247.4 ns; the re-run, below); `RealWorldPublish1ScopePerRequest`
   174.1 and 178.1 ns, then 142.6 and 146.5 ns (the direct call 122.5 ns, ZeroAlloc.Mediator 128.2 ns); `RealWorldPublish5ScopePerRequest`
@@ -3145,7 +3145,7 @@ Done:
   `ServiceProvider`, `ServiceN`, then the referenced handlers'. The context summaries name what they hold ("the services its handler and
   its behaviors inject"; a publish context's summary no longer names behaviors it does not have).
 - **Bytes, exact** (the `GC.GetAllocatedBytesForCurrentThread` probe of the previous step: 10,000 calls after 200,000 warm-up calls,
-  the smallest of ten repeats; built from a clean `git archive` of c457b32 and from a copy of the working tree with this step's code,
+  the smallest of ten repeats; built from a clean `git archive` of 4599b45 and from a copy of the working tree with this step's code,
   which was not committed; `rework-scope/shared/bytes-{before,after}.txt`; BenchmarkDotNet's allocation column agrees). Per scope, typed
   and `IMediator` alike, before then after: `RealWorldPublish5ScopePerRequest` 880 then 816 B (the five handlers' ten fields, a 96 B
   context, become two, 32 B: exactly the 816 B "Handlers are not registered" projected); `RealWorldPublishBehavior5ScopePerRequest`
@@ -3157,7 +3157,7 @@ Done:
   scopes: a send whose handler and behavior inject a scoped `Clock` allocates exactly what one whose handler alone injects it allocates,
   and a publish to two handlers that inject it exactly what a publish to one handler allocates (both failed before: 8 B per scope).
 - **Time** (JIT, BenchmarkDotNet 0.15.8, Apple M4 Max, .NET 10.0.15, the README's job: IterationCount=15, IterationTime=200ms,
-  LaunchCount=1, WarmupCount=5; `before` from the clean `git archive` of c457b32, `after` from the copy of the working tree). Typed,
+  LaunchCount=1, WarmupCount=5; `before` from the clean `git archive` of 4599b45, `after` from the copy of the working tree). Typed,
   then `IMediator`, before then after: `RealWorldPublish5ScopePerRequest` 397.3 and 398.1 ns, then 310.5 and 314.3 ns (errors 1 to 2
   ns; the direct call 451.5 and 444.1 ns, ZeroAlloc.Mediator 369.9 and 363.7 ns), and in three interleaved rounds (before, after, ...)
   typed 400.6, 392.8, 400.5 ns, then 306.7, 303.6, 305.5 ns (means 398.0 and 305.3 ns), `IMediator` 396.7, 395.9, 405.9 ns, then
@@ -3271,7 +3271,7 @@ assembly that holds only the fan-out notifications. What was done:
   NativeAOT (`--runtimes nativeaot10.0`), every one successful (`dry-jit.log`, `dry-aot.log`).
 - **The existing rows are unchanged.** Bytes per call (`GC.GetAllocatedBytesForCurrentThread` over 10,000 calls after 20,000 warm-up
   calls, the smallest of ten repeats) of every comparison benchmark that completes synchronously, from a clean `git archive` of HEAD
-  (2c7d9dc) and from the working tree, four runs of each (`bytes-before.txt`, `bytes-before-{2,3,4}.txt`, the same for `after`;
+  (86794a7) and from the working tree, four runs of each (`bytes-before.txt`, `bytes-before-{2,3,4}.txt`, the same for `after`;
   `compare_bytes.py` compares them): 183 of the 188 such rows of the existing classes read the same in all eight runs (the 50 yielding
   ones are not synchronous), every Keryx row among them but one. The other five are not stable from run to run within one tree, so the
   probe cannot tell a change there: ZeroAlloc.Mediator's `RealWorldPublish5ScopePerRequest` `IMediator` row read 960 B in the first
