@@ -1,0 +1,23 @@
+name: Close Milestone
+
+# When a release is published: its milestone gets exactly the pull requests since the previous release (and the issues
+# they close), anything still open moves on to the next version, and the milestone is closed. Prereleases are skipped.
+on:
+    release:
+        types:
+            - published
+
+permissions:
+    contents: write
+    issues: write
+    pull-requests: write
+
+concurrency:
+    group: release-milestones
+    cancel-in-progress: false
+
+jobs:
+    close_milestone:
+        uses: RocketSurgeonsGuild/actions/.github/workflows/close-milestone.yml@v0.4.0
+        secrets:
+            RSG_BOT_TOKEN: ${{ secrets.RSG_BOT_TOKEN }}

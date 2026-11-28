@@ -1,0 +1,130 @@
+name: Benchmarks
+
+# Builds the BenchmarkDotNet suite (test/Keryx.Benchmarks), checks that every comparison subject really runs each scenario's handlers and
+# behaviors (--verify), and runs every benchmark once with the Dry job, so a benchmark that no longer builds or throws fails the pull
+# request. The native-aot job does the same under NativeAOT: it publishes the suite with NativeAOT and runs --verify in that binary, then
+# runs every benchmark once with BenchmarkDotNet's NativeAOT toolchain, so AOT breakage fails the pull request too. Another job re-runs the
+# Phase 4 gate prototype on Linux with DisassemblyDiagnoser and uploads the disassembly. Numbers are never published from shared runners
+# (ADR 0001, Benchmarks); the README's results come from a local run.
+on:
+    push:
+        branches:
+            - main
+            - next
+    pull_request:
+        branches:
+            - main
+            - next
+    merge_group:
+        branches:
+            - main
+            - next
+
+permissions:
+    contents: read
+
+concurrency:
+    group: benchmarks-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    dry:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '0'
+            - name: 🛠️ Setup mise
+              uses: jdx/mise-action@v5
+              env:
+                  MISE_JOBS: '1'
+              with:
+                  install: true
+                  install_args: dotnet
+                  cache: true
+                  cache_save: false
+                  experimental: true
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+            - name: 🧬 Check the generated fan-out subjects
+              # The 25, 50 and 100 handler subjects and scenarios are written by one program (owner decision 41); fails when they differ.
+              run: dotnet run --file test/benchmark-subjects/GenerateFanOut.cs -- --check
+            - name: ⚙️ Build benchmarks
+              run: dotnet build test/Keryx.Benchmarks/Keryx.Benchmarks.csproj -c Release -f net10.0 --disable-build-servers
+            - name: 🔎 Verify comparison subjects
+              working-directory: test/Keryx.Benchmarks
+              run: dotnet run -c Release -f net10.0 --no-build -- --verify
+            - name: 🏃 Run benchmarks (Dry job)
+              working-directory: test/Keryx.Benchmarks
+              run: dotnet run -c Release -f net10.0 --no-build -- --filter '*' --job Dry --artifacts "$RUNNER_TEMP/benchmarks"
+    native-aot:
+        # The suite under NativeAOT (ADR 0001, Benchmarks; owner decisions 29 and 31). The publish treats the trim and AOT warnings of Keryx and
+        # the subjects as errors (Keryx.Benchmarks.csproj); --verify in the published binary checks every subject that runs under NativeAOT
+        # and lists the ones that are n/a (Comparison/NativeAot.cs), which the Dry run leaves out. The same filter leaves out the JIT-only
+        # pipeline prototype: on Linux its GateConfig adds DisassemblyDiagnoser, which BenchmarkDotNet rejects for a NativeAOT job.
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '0'
+            - name: 🛠️ Setup mise
+              uses: jdx/mise-action@v5
+              env:
+                  MISE_JOBS: '1'
+              with:
+                  install: true
+                  install_args: dotnet
+                  cache: true
+                  cache_save: false
+                  experimental: true
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+            - name: 🧰 Install the NativeAOT prerequisites
+              # The ILCompiler links the native binary with clang and needs zlib's headers.
+              run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+            - name: ⚙️ Build benchmarks
+              run: dotnet build test/Keryx.Benchmarks/Keryx.Benchmarks.csproj -c Release -f net10.0 --disable-build-servers
+            - name: 📦 Publish benchmarks with NativeAOT
+              run: >-
+                  dotnet publish test/Keryx.Benchmarks/Keryx.Benchmarks.csproj -c Release -f net10.0 --use-current-runtime
+                  -p:KeryxBenchmarksNativeAot=true --disable-build-servers -o "$RUNNER_TEMP/aot"
+            - name: 🔎 Verify comparison subjects under NativeAOT
+              run: '"$RUNNER_TEMP/aot/Keryx.Benchmarks" --verify'
+            - name: 🏃 Run benchmarks with NativeAOT (Dry job)
+              working-directory: test/Keryx.Benchmarks
+              run: >-
+                  dotnet run -c Release -f net10.0 --no-build -- --filter '*' --job Dry --runtimes nativeaot10.0
+                  --artifacts "$RUNNER_TEMP/benchmarks-aot"
+    prototype-disassembly:
+        # The Phase 4 gate's disassembly evidence (ADR 0001, Phase 4 gate; open-questions OQ-36): BenchmarkDotNet's DisassemblyDiagnoser runs
+        # only on Windows and Linux, so the pipeline prototype is re-run here, where PipelinePrototypeBenchmarks.GateConfig adds the diagnoser.
+        # The report (timings and the *-asm.md disassembly) is uploaded for review; the timings from a shared runner are not gate numbers.
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '0'
+            - name: 🛠️ Setup mise
+              uses: jdx/mise-action@v5
+              env:
+                  MISE_JOBS: '1'
+              with:
+                  install: true
+                  install_args: dotnet
+                  cache: true
+                  cache_save: false
+                  experimental: true
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+            - name: ⚙️ Build benchmarks
+              run: dotnet build test/Keryx.Benchmarks/Keryx.Benchmarks.csproj -c Release -f net10.0 --disable-build-servers
+            - name: 🔬 Run the pipeline prototype with DisassemblyDiagnoser
+              working-directory: test/Keryx.Benchmarks
+              run: dotnet run -c Release -f net10.0 --no-build -- --filter '*PipelinePrototype*' --artifacts "$RUNNER_TEMP/prototype"
+            - name: 📤 Upload disassembly report
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: pipeline-prototype-disassembly
+                  path: ${{ runner.temp }}/prototype/results/
+                  if-no-files-found: error

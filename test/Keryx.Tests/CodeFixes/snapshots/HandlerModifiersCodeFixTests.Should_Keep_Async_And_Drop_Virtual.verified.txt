@@ -1,0 +1,46 @@
+﻿{
+  Before: [
+    using System.Threading.Tasks;
+using Keryx;
+
+namespace Sample;
+
+public sealed record Query : IRequest<string>;
+
+public partial class QueryHandler
+{
+    // Handles the query.
+    protected internal virtual async Task<string> HandleAsync(Query request)
+    {
+        await Task.Yield();
+        return "pong";
+    }
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX002: Handler 'QueryHandler.HandleAsync(Query)' must be declared 'private static',
+      Title: Make the handler private static,
+      EquivalenceKey: Keryx.MakeHandlerPrivateStatic,
+      After: {
+        Input0.cs:
+using System.Threading.Tasks;
+using Keryx;
+
+namespace Sample;
+
+public sealed record Query : IRequest<string>;
+
+public partial class QueryHandler
+{
+    // Handles the query.
+    private static async Task<string> HandleAsync(Query request)
+    {
+        await Task.Yield();
+        return "pong";
+    }
+}
+      }
+    }
+  ]
+}

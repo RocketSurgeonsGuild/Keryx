@@ -1,0 +1,8 @@
+<Project>
+    <!--
+        NuGet imports buildTransitive/ instead of build/ when a package ships both, for direct and transitive consumers alike. The analyzers
+        reach a project that gets Keryx only through another package or project, so it needs the same LangVersion default, KeryxHost and
+        compiler-visible properties as a direct consumer.
+    -->
+    <Import Project="..\build\$(MSBuildThisFile)" />
+</Project>

@@ -10,7 +10,8 @@ single phase from this file plus the ADR.
 1. [docs/adr/0001-keryx-mediator.md](adr/0001-keryx-mediator.md): the authoritative design. If this brief and the ADR disagree, the ADR
    wins.
 2. [CONTEXT.md](../CONTEXT.md): the glossary. Use its terms.
-3. [docs/adr/open-questions.md](adr/open-questions.md): undecided points and their interim behavior.
+3. [docs/adr/open-questions.md](adr/open-questions.md): decided points and their history, and the open ones with their interim
+   behavior. Add new questions under Open with an interim behavior.
 
 If the ADR is ambiguous, or you believe part of it is wrong, do not deviate silently. Add an entry to `open-questions.md` with the
 question, the interim behavior you are using and a proposal, continue with the safest option, and say so in your phase summary.
@@ -18,20 +19,50 @@ question, the interim behavior you are using and a proposal, continue with the s
 ## Summary of the design
 
 - Library name **Keryx**; namespace `Keryx`; generated-code-only types in `Keryx.Internal`; diagnostics `KRX001`+.
-- One NuGet package `Keryx`: `Keryx.dll` (`netstandard2.0;net10.0;net11.0`) plus `Keryx.Analyzers.dll` and
-  `Keryx.Analyzers.CodeFixes.dll` (both `netstandard2.0`) and `System.Text.Json.dll` under `analyzers/dotnet/cs`.
+- One NuGet package `Keryx`: `Keryx.dll` (`netstandard2.0;net10.0;net11.0`) plus `Keryx.Analyzers.dll` (`netstandard2.0`; generators,
+  analyzers and code fixes in one assembly) and `System.Text.Json.dll` under `analyzers/dotnet/cs`. `Keryx.dll` depends on
+  `Microsoft.Extensions.DependencyInjection.Abstractions` (10.0.x for `net10.0`, 8.0.x for `netstandard2.0`); `net11.0` gets it from the
+  shared framework, so that dependency group is empty (OQ-56).
+  `build/Keryx.props` defaults `LangVersion` to `latest`; Keryx needs C# 14 or later in every project that references it (KRX022, OQ-52);
+  `netstandard2.0` targets stay supported.
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
-  half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
-  attribute.
-- `[assembly: KeryxHost]` (net10.0+) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
-  exact-type dispatch with `Unsafe.As`, and an internal `AddKeryx()` that registers everything with generated factory lambdas.
-- Behaviors: per target, per assembly, global; ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore`, type name.
-  Registered and called as closed concrete types. Pipelines are flat link structs over a per-scope pipeline context.
-- Streams: fused hook iterator, items travel outward; `IStreamWrapBehavior` splits fusion.
+  half: a constructor for injected dependencies (a field `__keryx_p_<parameterName>` for each, a prefix no other generated member uses,
+  so any parameter name compiles; owner decision 50, OQ-79), a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]`
+  manifest attribute; in a host, a handler with injected parameters also gets `internal static __keryx_InvokeAsync`, the invoker with
+  the services as parameters, which the host's pipelines call (owner decision 44). A handler class that implements `IDisposable` or
+  `IAsyncDisposable` is KRX025 (owner decision 45). A handler class named like a generated member (`InvokeAsync`, a `__keryx_` name)
+  fails with CS0542 in generated code, OQ-83 (open); one that inherits an accessible member with such a name gets CS0108 there, which
+  KRX015 (own members only) does not report, OQ-84 (open).
+- A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
+  net10.0 or later, OQ-61 and OQ-62) gets an internal transient `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
+  exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers the mediator with generated factory
+  lambdas (nothing for handlers or behaviors: a pipeline context resolves the services its handlers and behaviors inject, each once,
+  shared by all of them, owner decision 43, calls the host's own handler's static entry with them, and constructs a referenced handler
+  with `new` over them, owner decision 42); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
+  mediator over the scope (`sp => new KeryxMediator(sp)`), and the pipeline contexts live in a scoped `KeryxMediator.__KeryxScopeState`
+  that every mediator of the scope shares, resolved by the first call that needs a context, one `object?` field per pipeline with a
+  context (owner decisions 46 and 47, superseding decision 35's one mediator per scope; the size-bounded layout decision 47 asked for
+  measured slower on the long-lived path and is OQ-78, open). Mediator identity is per resolve, contexts are per scope. A singleton that
+  injects a mediator passes `ValidateOnBuild` and fails at its first pipeline context under `ValidateScopes`: a trade-off accepted and
+  documented, as MediatR's is, with no generator warning (owner decision 38, OQ-76, changed in shape by decision 46).
+- Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
+  kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
+  kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
+  ordered by `Phase` (with `Caching = 450`), `Order`, `RunsAfter`/`RunsBefore` (`typeof` form only, naming the class), type name. No
+  behavior instance exists: pipelines are flat link structs over a per-scope pipeline context that holds the handler and the behaviors'
+  injected services, each distinct service (type and key) once, numbered by a stable sort (OQ-64), and the unkeyed `IServiceProvider` in
+  its own `ServiceProvider` field (OQ-63); a pipeline that resolves nothing has no context (OQ-65). Generated code is written as text
+  through an indented writer, `CodeWriter` (OQ-71).
+- Streams: a `[StreamBehavior]` wraps the stream (Immediate.Handlers `StreamingBehavior` model with a struct `IStreamNext<TItem>` link:
+  get the inner stream from `next`, re-yield it with `await foreach`). There are no hook behaviors.
 - Notifications: zero or more handlers, polymorphic, `[HandlerOrder]`, sequential by default or `[PublishStrategy(Parallel)]`, run all
-  then `AggregateException`, per-publish and per-handler behaviors.
-- Cross-assembly: the host reads `[KeryxHandler]`/`[GlobalBehavior]` types and request types from references with
-  `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache.
+  then `AggregateException`, notification behaviors (`[NotificationBehavior]`, once per publish, also with zero handlers); handlers are
+  called directly, without per-handler pipelines, and `[Behavior]` on a notification handler method is KRX042.
+- Cross-assembly: the host reads `[KeryxHandler]` types, global behavior classes and request types from references with
+  `Specular.Scanning.Sources`, caching the projected manifest per MVID in Specular's ScanCache. A request's handler lives in the
+  request's own assembly (KRX001 everywhere, hosts included; KRX023 for a handler of another assembly's request); notifications may be
+  handled anywhere. The host-only assembly attributes outside a host are KRX043. `KeryxContracts` and `ExternallyHandled` were removed in
+  the second rework; their designs are in `docs/future-requirements.md`.
 
 ## Repository layout
 
@@ -47,14 +78,20 @@ Directory.Packages.props        CPM, every package pinned exactly
 NuGet.config, GitVersion.yml, GitReleaseManager.yaml, .editorconfig, LICENSE, Readme.md
 .config/mise.toml, .config/hk.pkl
 build/Build.cs                  ModularPipelines file-based build, `mise run build`
-.github/workflows/              hand-written (build, lint, release-drafting), modelled on Specular's
+.github/workflows/              hand-written (build, lint, release-drafting, aot, benchmarks), modelled on Specular's
 Keryx.slnx
-src/Keryx/                      Keryx.dll + packaging; packs the analyzers via ProjectReference OutputItemType=Analyzer
-src/Keryx/build/Keryx.props      CompilerVisibleProperty RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion, packed to build/
-src/Keryx.Analyzers/            generators + DiagnosticAnalyzers (Microsoft.CodeAnalysis.CSharp only), AnalyzerReleases.*.md
-src/Keryx.Analyzers.CodeFixes/  CodeFixProviders (Workspaces)
+src/Keryx/                      Keryx.dll + packaging; packs Keryx.Analyzers (its GetKeryxPackageFiles target) into analyzers/dotnet/cs
+src/Keryx/build/Keryx.props      LangVersion default (latest), CompilerVisibleProperty KeryxHost;RootNamespace;
+                                TargetFrameworkIdentifier;TargetFrameworkVersion, packed to build/
+src/Keryx/build/Keryx.targets    KeryxHost default (Exe/WinExe, IsTestProject or AndroidApplication, and .NETCoreApp 10.0 or later:
+                                true, else false; the project's value wins), the Specular.Scanning scan cache wiring;
+                                buildTransitive/ and buildMultiTargeting/ import build/
+src/Keryx.Analyzers/            generators + DiagnosticAnalyzers + CodeFixProviders (CodeFixes/; Workspaces, RS1038 suppressed),
+                                AnalyzerReleases.*.md
 test/Keryx.Tests/               TUnit, TUnit.Assertions.Should, Verify.TUnit, Rocket.Surgery.Extensions.Testing.SourceGenerators
-test/Keryx.Benchmarks/          BenchmarkDotNet; Prototype/ for the Phase 4 spike; comparison libraries in their own projects
+test/Keryx.Benchmarks/          BenchmarkDotNet; Prototype/ for the Phase 4 gate prototype, Comparison/ for the comparison suite
+test/benchmark-subjects/        one small project per compared library (Keryx host, baseline, Mediator, MediatR, ...), and one
+                                fan-out project per library (Keryx.Benchmarks.FanOut.*) that GenerateFanOut.cs writes
 samples/hosts/, samples/libraries/
 docs/adr/, CONTEXT.md
 ```
@@ -67,30 +104,75 @@ Do not copy Specular's docs site, multi-Roslyn `*.supports` projects, Uno/MAUI/B
   the package is referenced). No `Compilation`, `ISymbol`, `SyntaxNode` or `Location` in cached models. Every step has a tracking name.
 - Emit generated sources with `RegisterSourceOutput`, never `RegisterImplementationSourceOutput`.
 - The analyzers never reference `Keryx.dll`. Keryx types are found by metadata name through one `KnownTypeNames` class, covered by a test.
+- Code fixes live in `Keryx.Analyzers` (its `CodeFixes` folder). Never touch a code-fix type, or any Workspaces type, from a generator or
+  analyzer code path: the command-line compiler does not ship Workspaces (ADR, Package and assemblies).
+- Read `[BehaviorOrder]`, `[RunsAfter]`, `[RunsBefore]` and `[GlobalBehavior]` from the behavior class and its behavior methods through
+  one helper: a method's attribute overrides the class's for that method's kind, and `typeof(X)` names the class (ADR, Ordering).
+- Behaviors are never instantiated and never registered in DI. The generated pipeline context resolves each behavior method's injected
+  services (with the handler parameter rules) in its constructor, and links call the static method with explicit type arguments.
 - Two generators: `HandlerGenerator` (every project; never reports diagnostics, silently skips malformed input) and `HostGenerator`
-  (only with `[assembly: KeryxHost]`; reports the host-only rules, carrying an equatable `LocationInfo` instead of `Location`).
+  (only when `build_property.KeryxHost` is `true`; reports the host-only rules, carrying an equatable `LocationInfo` instead of `Location`).
   Per-assembly rules come from `DiagnosticAnalyzer`s; KRX001, same-assembly KRX005 and in-source KRX008 are compilation-end diagnostics
-  (tagged `CompilationEnd`).
+  (tagged `CompilationEnd`). Both generators emit nothing when the parse options are below C# 14
+  (`KeryxSymbols.MinimumLanguageVersion`), so KRX022 is the only error such a project sees.
 - Generated code is deterministic, starts with `// <auto-generated/>`, enables nullable, uses `global::` names, and is AOT and trimming
   safe. `[GeneratedCode("Keryx", version)]` goes on generated members of user partial types, never on the partial declaration; type level
-  only on types Keryx owns. Hint names are the sanitised fully qualified metadata name of the handler class plus `.Keryx.g.cs` (ADR,
-  Incremental generation rules). No runtime reflection anywhere, including DI activation.
+  only on types Keryx owns. Hint names are the sanitised fully qualified metadata name of the handler class, a hash of the exact name,
+  and `.Keryx.g.cs` (ADR, Incremental generation rules). No runtime reflection anywhere, including DI activation.
+- Generated sources are written as text through `CodeWriter` (`src/Keryx.Analyzers/CodeWriter.cs`; owner decision 21, OQ-71, which
+  replaced the `SyntaxFactory` emitters of decision 5 for generator time), in every generator, only inside `RegisterSourceOutput`. The
+  models carry strings (`global::` type names, C# expressions for default values and service keys, escaped identifiers and literals); the
+  emitters write them as they are and build each expression as a string, with no parsing. The writer owns the layout: the header
+  (`// <auto-generated/>`, `#nullable enable`, the obsolete-type `#pragma`, which suppresses nothing else), four spaces per level, `\n`
+  line endings, `Member` for the blank line between members that are not both plain fields, `CloseStatement` for the blank line after a
+  statement that ends with a block, `Arrow` for the break after `=>`, `Parameters` for one constructor parameter per line, `Switch` and
+  `Section`, `Directive` for the `#nullable` islands of oblivious fits (OQ-58) at column 0; no stray `;` after a type declaration. A new
+  construct uses these; `CodeWriterTests` pins each layout rule, and the snapshots pin the rest. On the large host of OQ-71 the host and
+  handler generators take 51 ms and 29 ms (warm compiler server), against 58 ms and 33 ms for the text emitters before decision 5 and
+  97 ms and 46 ms for the `SyntaxFactory` emitters, measured the same way.
 - Warnings are errors everywhere. Fix warnings; suppress only with a justification comment.
 - Performance: meet the **Performance contract** in the ADR. Prove it with allocation tests (`GC.GetAllocatedBytesForCurrentThread` over a
-  synchronous region after warm-up) and BenchmarkDotNet `[MemoryDiagnoser]` numbers.
+  synchronous region after warm-up; tests of `async` behaviors compile the test host optimized) and BenchmarkDotNet `[MemoryDiagnoser]`
+  numbers.
 - Tests: generator output as Verify snapshots; analyzer and code-fix tests through `Rocket.Surgery.Extensions.Testing.SourceGenerators`;
-  runtime behavior tests compile and run generated code.
+  runtime behavior tests compile and run generated code. Test compilations use C# 14 or later. Every test compilation goes through the
+  testing library (decided 2026-11-26), the way Dovetail and Specular use it: the shared `GeneratorTestContextBuilder` in a load context
+  of the test's own; referenced libraries built with the library itself (`CompileLibraryAsync`, each with a distinct project name, then
+  `AddCompilationReferences`), loaded into that context, where a host resolves them by name; compilation options through its builder
+  (`WithNullableContext`, `WithAllowUnsafe`, `WithOptimizationLevel`, `WithDiagnosticOption`, and `dotnet_diagnostic.*.severity` as
+  global or per-file options); `build_property.*` options through named builder helpers (`BuildProperties`); incremental tests through
+  `WithIncrementalTracking()` and `RerunAsync`; `UseParameters` for every snapshotted argument row; one snapshot shape per kind of
+  output (host-generator output is `{ Mediator, AddKeryx }` through `HostTest.VerifyHost`, handler-generator, analyzer and code-fix
+  results are `Verify(result)`). Only `KnownTypeNamesTests` builds a Roslyn compilation by hand.
 
 ## Git workflow
 
 - The ADR, this brief, `CONTEXT.md` and `open-questions.md` are the initial commit on `main`, pushed to
   `git@github.com:RocketSurgeonsGuild/Keryx.git`.
 - All phases happen on one feature branch, one commit per phase, each commit passing `mise run build` (build + tests). Commits go through
-  the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit.
-- After Phase 0, push the branch and open a **draft** PR to `main`, so CI runs on every later phase. Mark it ready after Phase 8. Never
-  merge it.
-- Continue from one phase to the next without waiting. Stop only if the Phase 4 gate fails.
+  the hk hook; never `--no-verify`. Formatting changes from the hook belong in the phase commit. The hook's `dotnet-format` step runs
+  `dotnet format whitespace` only (decided 2026-11-26): the style and analyzer passes rewrote code on commit, and the build's analyzers
+  (warnings as errors) enforce style instead.
+- After Phase 0, push the branch and open a **draft** PR to `main`, so CI runs on every later phase. Mark it ready for review after the
+  last phase (Phase 8); that step is left to the owner. Never merge it.
+- Continue from one phase to the next without waiting. A failed Phase 4 gate does not stop work (decided 2026-11-26): record the numbers,
+  commit Phase 4 and continue.
 - After each phase, give a short summary: what was built, test status, decisions made, entries added to `open-questions.md`.
+
+Phases 0 to 8 were first built with interface-based behaviors. The design review of 2026-11-26 replaced them with static behaviors, and
+that rework landed as two further commits on the branch (7d2fd01: the C# 14 floor, the DI abstractions dependency, `ExternallyHandled`
+and KRX043; f54dc49: static behaviors, hook and per-handler behaviors removed). The owner's second rework followed, one commit per step:
+d8ad015 (requests handled in their own assembly, KRX023; `KeryxContracts` and `ExternallyHandled` removed; the sample order requests moved
+next to their handlers; whitespace-only pre-commit formatting), 5afb535 (the `KeryxHost` MSBuild property replaces `KeryxHostAttribute`),
+4b0658f (every test compilation through the testing library 11.0.2; jump-table dispatch tests), eca51b5 (one context field per shared
+service) and 1fddbdd (`SyntaxFactory` emitters, switch-statement dispatch, primary-constructor links); the follow-up (2e8e4e1, 6e7465a,
+bd2029b, 38c8f74) sealed the requests, dropped the contexts of pipelines that resolve nothing and built the syntax's whitespace in, and
+the owner's decisions of 2026-11-27 then returned the emitters to text (100bfe1: `CodeWriter`, OQ-71; OQ-69 accepted) and dropped the
+contexts of publish pipelines that resolve nothing (febb1a6, OQ-70), keep the generic `Stream` depth-0 slowdown on the release list
+(decision 22), default `KeryxHost` only for .NET 10 executables, test projects and Android apps (7a94d0d, OQ-61 and OQ-62), limit
+`ExcludeHandler` to notification handlers and drop the host's cross-assembly KRX005 (98bcacd: KRX039, OQ-59 and OQ-60), and hold the
+unkeyed `IServiceProvider` in its own context field and number shared services by a stable sort (4df2f3d, OQ-63 and OQ-64). The phases
+below describe the resulting design as what each phase builds.
 
 ## Phases
 
@@ -101,7 +183,7 @@ parameters, attached behaviors) that Phase 7 can fill from manifests without rew
 
 Solution, all projects (empty), Directory.Build/Packages props, global.json, mise/hk config, `build/Build.cs`, GitHub workflows, `.editorconfig`,
 `AnalyzerReleases.Shipped.md`/`Unshipped.md`. `mise run build` succeeds with one trivial test per test project. Packing produces a `Keryx`
-package with the analyzer assemblies in `analyzers/dotnet/cs`.
+package with the analyzer assembly in `analyzers/dotnet/cs`.
 
 **Done when:** clean clone → `mise run build` passes locally; the draft PR's CI passes.
 
@@ -111,66 +193,257 @@ Every public type in the ADR's Core types, Behaviors, Ordering, Notifications an
 (`KeryxHandlerAttribute`, `KeryxManifestAttribute`, `HandlerKind`, `UnitAdapter`), for `netstandard2.0;net10.0;net11.0`. XML docs on
 every public member. `UnitAdapter.ToUnit` allocates nothing when the source has already completed.
 
+- **Behaviors.** The link interfaces `INext<T>`, `INext` and `IStreamNext<T>`, the `Phase` enum, and the three kind attributes
+  `RequestBehaviorAttribute`, `StreamBehaviorAttribute` and `NotificationBehaviorAttribute`. There are no behavior interfaces and no
+  per-handler notification kind. `next` is a struct type argument constrained to a link interface, never a delegate: typed next
+  delegates were rejected (owner decision 4 of the second rework; ADR, Alternatives considered) because a delegate call is indirect and
+  not inlined, and a delegate bound to a pipeline context is allocated per scope. `GlobalBehavior`, `BehaviorOrder`, `RunsAfter` and
+  `RunsBefore` target classes and methods; `RunsAfter`/`RunsBefore` have only the `typeof` form (a static class cannot be a type
+  argument).
+- **Host attributes.** `ExcludeBehavior` and `ExcludeHandler` (notification handlers only; a request or stream request handler is KRX039,
+  owner decision 23, Phase 7). There is no `KeryxContracts` or `ExternallyHandled`
+  (removed in the second rework, 2026-11-26; see `docs/future-requirements.md`), and no `KeryxHost` attribute: a host is the `KeryxHost`
+  MSBuild property (Phase 3).
+- **Package.** `Keryx.csproj` references `Microsoft.Extensions.DependencyInjection.Abstractions` per TFM (10.0.x for `net10.0`, 11.0.x
+  for `net11.0`, 8.0.x for `netstandard2.0`), pinned in `Directory.Packages.props` (OQ-8). The .NET 11 shared framework carries the
+  assembly, so the SDK's package pruning drops the reference for `net11.0` and nothing keeps it (OQ-56). The comment in
+  `src/Keryx/build/Keryx.props` gives the C# 14 floor as the reason for the `LangVersion` default.
+
 **Done when:** the abstractions compile for all three TFMs; unit tests cover `Unit` equality and `UnitAdapter` (including a zero-allocation
-test on net10+); the `KnownTypeNames` test exists (it may start with an empty list).
+test on net10+); the public API snapshot lists the three kind attributes and no behavior interface, `KeryxContractsAttribute`,
+`ExternallyHandledAttribute`, `KeryxHostAttribute`, generic `RunsAfter<T>`/`RunsBefore<T>`, `PublishBehaviorAttribute` or
+`NotificationHandlerBehaviorAttribute`; the `KnownTypeNames` test passes; the packed `Keryx` package lists
+`Microsoft.Extensions.DependencyInjection.Abstractions` in the `net10.0` and `netstandard2.0` dependency groups with the versions
+above, and its `net11.0` dependency group is empty (OQ-56); a target in `Keryx.csproj` checks that in the packed nuspec after every pack.
 
 ### Phase 2: handlers, diagnostics, code fixes
 
 Handler-candidate selection, handler partial generation (constructor, `InvokeAsync`, return adaptation, keyed/default parameter copying,
-static invoker, `[KeryxHandler]` and `[assembly: KeryxManifest(FormatVersion = 1)]`). Analyzer rules KRX001–KRX007, KRX011–KRX018 and
-KRX021, and the shape checks for notification handlers (KRX040, KRX041). Code fixes for KRX001 (both actions), KRX002, KRX004 and KRX014.
+static invoker, `[KeryxHandler]` and `[assembly: KeryxManifest(FormatVersion = 1)]`). Analyzer rules KRX001–KRX007, KRX011–KRX018,
+KRX021, KRX022, KRX023 and KRX024, and the shape checks for notification handlers (KRX040, KRX041). KRX001 applies in every assembly, hosts
+included; KRX023 (a handler of a request or stream request declared in another assembly, decided in the second rework) is reported on
+the handler's request parameter, and the generators skip that handler like any handler error. KRX024 (owner decision 14 of the second
+rework) is reported by `MessageTypeAnalyzer` on a request or stream request class or record that is neither sealed nor abstract (or
+closed: the `closed` modifier's text on the declaring syntax, `IsClosedTypeAttribute` in metadata, Roslyn 5.0 APIs only), in libraries and
+hosts; a handler of an abstract or closed request base is KRX003. Roslyn does not return `IsClosedTypeAttribute` for a metadata type, so
+a closed base from a referenced assembly is treated, and named in KRX003, as abstract (OQ-69, decided: accepted). KRX022 (language version below C# 14, OQ-52) is
+reported once per compilation from the parse options; with it, the handler generator emits nothing for that project (no manifest, no
+partials), so the only error the user sees is KRX022. Code fixes for KRX001 (add a handler stub, also in a host), KRX002, KRX004, KRX014 and KRX024 (make the type `sealed`, keeping
+`partial` and the other modifiers), in `src/Keryx.Analyzers/CodeFixes`.
 
 **Done when:** snapshot tests cover every handler shape (nested/top-level, static/instance, every return type, keyed and default
-parameters, notifications including polymorphic parameters); every diagnostic has a positive and a negative test; every code fix has a
-before/after test; the incremental test (ADR, Incremental generation rules) passes for the handler pipeline.
+parameters, notifications including polymorphic parameters); every diagnostic has a positive and a negative test (KRX022: C# 13 is
+reported, C# 14 and `latest` are not, in a `netstandard2.0` project as well); every code fix has a before/after test; the incremental test
+(ADR, Incremental generation rules) passes for the handler pipeline.
 
 ### Phase 3: host, request/response, no behaviors
 
-`[assembly: KeryxHost]`, KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped, lazy pipeline
-contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic `Send`
-with exact-type dispatch, `Unsafe.As` result reinterpretation, `FrozenDictionary` above the threshold, `KeryxHandlerNotFoundException`,
-`AddKeryx()` with factory registrations (including value-type and keyed optional parameters), host namespace from `RootNamespace` with
-the sanitised assembly-name fallback, KRX030 for the host's own request types. Same-assembly handlers only.
+The `KeryxHost` MSBuild property (ADR, Opting in): `build/Keryx.targets` defaults it after the project body and the target framework
+inference (`true` for `OutputType` `Exe`/`WinExe`, `IsTestProject` or `AndroidApplication` when `TargetFrameworkIdentifier` is
+`.NETCoreApp` and `TargetFrameworkVersion` is 10.0 or later, else `false`, owner decisions 25 and 26, OQ-61 and OQ-62; a value the project
+sets wins, so KRX031 means an explicit `true` below `net10.0`), `build/Keryx.props` makes it a
+`CompilerVisibleProperty`, `buildTransitive/` imports `build/` for transitive consumers, and every generator and analyzer reads
+`build_property.KeryxHost` (unset is not a host; tests set it with the `WithKeryxHost()` builder helper). Host diagnostics without a source
+location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (transient,
+over a scoped state whose lazy pipeline contexts are created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic
+`Send` with exact-type dispatch (a switch statement with a type pattern per sealed request type, `case global::X r: return
+__Dispatch0<TResponse>(r, cancellationToken);`, ending `default: throw __HandlerNotFound(request.GetType());`, and above the threshold a switch on
+the index of `request.GetType()`; switch statements with one `return` per section, never switch expressions, which lose the arms' tail
+calls, owner decision 16 and OQ-67; a struct request's section has no designation, `case global::S: return __Dispatch1<TResponse>(request,
+cancellationToken);`, and its arm takes `IRequest<TResponse>` and unboxes, so `Send` holds no struct local and every arm stays a tail call;
+a request or stream request type that is not sealed, reachable only with KRX024 suppressed, is never composed: no section, no typed overload,
+so sending it throws not-found, owner decision 18 and OQ-68; typed overloads of sealed requests have no runtime type check), `Unsafe.As` result reinterpretation, `FrozenDictionary` above
+the threshold, `KeryxHandlerNotFoundException`, `AddKeryx()` with factory registrations for the mediator, and pipeline contexts that
+resolve each handler's injected parameters (including value-type and keyed optional parameters; no handler registrations since owner
+decision 42), host namespace from `RootNamespace` with the sanitised assembly-name fallback. The host's own request types are KRX001's (the
+analyzer runs in hosts too), so the host generator does not collect them; KRX030 is Phase 7's, for referenced request types. Same-assembly
+handlers only. Like the handler generator, `HostGenerator` emits nothing when the parse options are below C# 14, so KRX022 stays the only
+error a host with an old `LangVersion` sees.
 
 **Done when:** runtime tests send through typed and generic paths (value-type and reference-type responses, `IRequest`, struct requests);
 allocation tests show 0 B after warm-up for synchronous handlers (class requests on both paths; struct requests on the typed path); a
 concurrency test covers concurrent first use in one scope; a micro-benchmark compares lazy pipeline contexts against
-`GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15).
+`GetRequiredService` per call and sets the dispatch threshold (record the numbers in `open-questions.md` OQ-15); generic `Send` is
+tested on both sides of the threshold (decided 2026-11-26): the generated shape (type compares at the threshold, an index lookup
+governing a `switch` above it), the compiled IL (a `switch` opcode above the threshold and none at or below it, read with
+System.Reflection.Metadata), every request dispatched to its own handler above it, and a type derived from a handled request, with no
+handler of its own, not dispatched to the base handler, as an unknown type is not (for notifications; a request or stream request type
+that is not sealed, the only one a derived type can come from, is not dispatched at all: `KeryxHandlerNotFoundException` for it while its
+sealed siblings still dispatch); Verify snapshots of the generated mediator per kind at and one above the
+threshold; the JIT code of the generic `Send`, `Stream` and `Publish<T>` (`DOTNET_JitDisasm`, `Keryx.Benchmarks --verify`) keeps every
+arm's tail call and tests each sealed type with one method-table compare; a host with
+`LangVersion` 13 reports KRX022 and generates no host sources; MSBuild evaluation tests (`BuildFiles/KeryxHostPropertyTests`, the
+package's files imported from `obj/*.nuget.g.props` and `.nuget.g.targets` as restore does) cover the `KeryxHost` defaults through
+`build/` and `buildTransitive/` (executables and test projects on `net8.0`, `net48`, `net10.0` and `net11.0`, Android apps on
+`net10.0-android` and `net8.0-android` with `AndroidApplication` set as the Android SDK leaves it, each inner build and the outer build of
+a `net8.0;net10.0` test project), the project's own value, and the compiler-visible property; `dotnet pack`
+ships `build/`, `buildMultiTargeting/` and `buildTransitive/` (the `_KeryxCheckPackedBuildFiles` target in `Keryx.csproj` fails the pack
+otherwise).
 
 ### Phase 4: behaviors
 
-First, the gate: a **hand-written** prototype of a depth-1/3/8 struct pipeline (flat links, concrete behavior calls) in
-`test/Keryx.Benchmarks/Prototype`, measured against the ADR's Phase 4 gate criteria. If it fails, stop: commit the prototype and numbers,
-report, and wait for a decision. Do not switch to the hook fallback on your own.
+First, the gate: a **hand-written** prototype of a depth-1/3/8 struct pipeline (flat links over a pipeline context, static behavior
+methods called directly) in `test/Keryx.Benchmarks/Prototype`, measured against the ADR's Phase 4 gate criteria. Where
+`DisassemblyDiagnoser` does not run (macOS), judge criterion 2 from `Keryx.Benchmarks --prototype-disasm` with `DOTNET_JitDisasm` (OQ-36);
+the Linux benchmarks job (Phase 8) adds the `DisassemblyDiagnoser` output. If the gate fails, do not stop (decided 2026-11-26): record the
+measured numbers and the disassembly findings in `open-questions.md`, report them in the phase summary, and carry on with the struct-based
+pipeline as designed. Do not switch to the hook fallback on your own.
 
-If it passes: behavior shapes (KRX019, KRX020), three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` from the host's own
-compilation), constraint evaluation (ADR, Matching), KRX009, KRX042, ordering with KRX008, `ExcludeBehavior`, KRX035, KRX036 for
-`ExcludeBehavior`, closed concrete registrations and generated flat link structs for request/response pipelines.
+Then request behaviors, as the ADR's Behaviors, Ordering and Performance contract sections describe them:
 
-**Done when:** snapshot tests for pipelines of depth 0–8; ordering tests for every sort rule and every KRX008 case; constraint tests for
-each constraint kind; allocation tests at depths 1, 3 and 8 show 0 B; gate numbers recorded in the phase summary.
+- **Discovery and shapes.** A behavior is a non-generic `static` class with kind attributes, declaring one `static` `Handle`/`HandleAsync`
+  behavior method per kind, fully open or fully closed, with the message, `next` and an optional `CancellationToken` found by type and every
+  other parameter injected. A method's kind follows from its signature (`next` constraint and message type). An open method's message
+  type parameter must be constrained to the kind's message interface (`TRequest : IRequest<TResponse>`, `TRequest : IStreamRequest<TItem>`,
+  `TNotification : INotification`), directly or through an interface that derives from it (`TRequest : ICommand<TResponse>`,
+  `TNotification : IDomainEvent`; OQ-57); a constraint to an unrelated interface is KRX019. The response or item type parameter may be
+  written annotated, `TResponse?` (`TItem?`), in `next`, the return type and the message constraint (OQ-58). KRX019 is the
+  static-behavior shape rule (ADR, Behavior methods). KRX013 and KRX018 cover behavior method parameters; KRX016 covers behavior classes and methods (public outside a host, at
+  least `internal` and not file-local in a host). KRX020 is retired the way KRX010 was (no descriptor, analyzer or release entry). The
+  `AnalyzerReleases.Unshipped.md` descriptions of KRX019 and KRX042 match the ADR's rows.
+- **Scopes and matching.** Three scopes (per target, `[assembly: Behavior]`, `[GlobalBehavior]` on the class or on a behavior method, from
+  the host's own compilation). `typeof(X)` names the class and resolves to its method of the target's kind; constraints are checked on the
+  method's type parameters after substitution (`IMethodSymbol.Construct` does not validate them), with the nullability of their type
+  arguments; closed methods match exactly, with nullable annotations in `next` and the return type (ADR, Matching). An open method that writes `TResponse?` has the
+  annotated type substituted there, and `next` and the return type must carry exactly the target's response with its nullability: it fits
+  an annotated, oblivious or value type response and not a non-annotated reference one; `struct`-constrained, it fits only a nullable
+  value type (OQ-58). A fit through an oblivious response is called with nullable warnings disabled, so generated code never warns.
+  KRX009 for an attached behavior that does not fit its target. KRX042 for `[Behavior]` or
+  `[GlobalBehavior]` where it has no effect, including `[GlobalBehavior]` on a class without a kind attribute or on a method that is not a
+  behavior method.
+- **Ordering.** `Phase`, `Order`, `typeof` `RunsAfter`/`RunsBefore` edges and the class name, read through the one helper (a method's
+  `[BehaviorOrder]`, `[RunsAfter]`/`[RunsBefore]` list and `[GlobalBehavior]` override the class's for that kind). KRX008 is reported once
+  per pair of behavior classes, and once per kind where a method overrides the class's ordering.
+- **Host control.** `ExcludeBehavior` removes a class from pipelines of every kind; KRX035 lists every applied global, once per class and
+  kind it makes global (OQ-57); KRX036 for an
+  `ExcludeBehavior` that names nothing in any pipeline.
+- **Generation.** Flat link structs for request/response pipelines. The pipeline context resolves each behavior method's injected services
+  (keyed and optional forms included) in its constructor and holds them beside the handler; links call the static method with explicit type
+  arguments and the arguments in declared order. `AddKeryx()` registers no behaviors. Links follow owner decision 11 of the second rework
+  (ADR, Generated pipeline shape): one non-generic `readonly struct` per position with a primary constructor
+  (`LinkK(__PipelineN pipeline, TRequest request)`, `notification` for a publish pipeline), an expression-bodied `InvokeAsync`, a
+  target-typed `new(...)` at every behavior call and at the entry (`TNext` stays an explicit type argument), a one-line `<summary>` naming
+  where `next` goes, and `global::` names without `using` aliases. Owner decision 16 (OQ-65): only a pipeline that resolves something has
+  a context. A request or stream pipeline whose handler's invoker is static and whose behaviors inject nothing, and a publish pipeline
+  whose handlers' invokers are all static (or that has no handlers) and whose behaviors inject nothing (owner decision 20, OQ-70), have no
+  context field, no `__CreatePipelineN` and no `Volatile.Read` at the entry, and their links are nested in a `private static class` of the
+  same name. Every link takes only the parameters it reads or passes on
+  (`(pipeline, request)`, `(request)`, or nothing for the last link of a publish pipeline without handlers, called as `new()`), so no link
+  raises CS9113 and the mediator's header suppresses nothing but the obsolete-type warnings. The publish strategy of a publish pipeline
+  without a context is static, in that class (Phase 6). The gate prototype is written the same way and `--prototype-disasm` must still show
+  0 B and every link inlined.
+- **Shared services** (owner decisions 9 and 43; ADR, Injected parameters). Every pipeline context (request, stream, publish)
+  resolves each distinct service (type and key) once, into one field, whatever the number of behavior and handler parameters that inject
+  it: its behavior methods, the host's own handlers (through their static entries) and the referenced handlers it constructs share it. The
+  fields are `Service0`, `Service1`, ... numbered by a stable ordinal sort of (service type, then key: none first, then the key's literal
+  text), so any edit that keeps the set of services keeps every name (owner decision 28, OQ-64). The model computes this
+  (`PipelineBehaviors.ShareServices`: the request or stream handler model's `ContextServices` and the publish composition's
+  `NotificationPipeline.Services`, with each behavior's and handler's `ServiceSlots` indexing into them); the emitter only writes it. A
+  required consumer makes the service required for all; when every consumer is optional it is resolved once into a nullable field and
+  each call site applies its own default. A service only referenced handlers' constructors take is a constructor local, not a field
+  (`ContextServiceModel.Held`). A transient shared by several behavior methods or handlers is one instance per scope and pipeline, a
+  notification's handlers included. The unkeyed `IServiceProvider` is not a numbered service (owner decision 27, OQ-63): the context holds
+  the provider it is built with in its own `ServiceProvider` field (never resolved; the model's `ContextServiceProvider`, slot
+  `PipelineBehaviors.ServiceProviderSlot`) when a behavior method or one of the host's own handlers (through its static entry) injects it;
+  a referenced handler's constructor receives the context's constructor provider directly; otherwise there is no such field. A keyed `IServiceProvider` is an ordinary keyed service; `IServiceScope` has no special case.
+
+**Done when:**
+
+- snapshot tests for request pipelines of depth 0–8 show static calls with explicit type arguments, injected services held by the pipeline
+  context, and no behavior registrations in `AddKeryx()`;
+- KRX019 has a positive test for each shape case (class not `static`, generic class, kind attribute without a method, two methods of one
+  kind, partially open method, extra type parameter, `next` without the `struct` constraint, wrong return type, closed method whose `next`
+  does not carry the request's response, a method whose `next` constraint and message type belong to different kinds, and an open method of
+  each kind whose message type parameter lacks the kind's message constraint or is constrained to an unrelated interface) and negative
+  tests (one class with all three kinds; `Handle` and `HandleAsync` side by side; an open method of each kind with the message constraint
+  plus further constraints; a closed method, which needs no message constraint); a message constraint through a derived interface of
+  each kind is accepted, matched to the targets of that interface only, and its generated code compiles and runs (OQ-57); an open method
+  that writes `TResponse?` (`TItem?`) is not KRX019 and has snapshot and compile-and-run tests for `string?`, an oblivious `string`, `int`
+  and `int?`, with the non-annotated `string` case skipped as a global behavior and KRX009 as an attached one, for requests and streams
+  (OQ-58), and partially annotated methods (only the message constraint, only `next` and the return type, `class`-constrained) and
+  closed methods with an annotated `next` or return type compile without warnings for every fit; KRX013, KRX016 and KRX018 have positive and negative tests on behavior methods; KRX020 is not reported
+  anywhere;
+- KRX009, KRX035 (including a global behavior marked only on a method, and one class global for three kinds listed once per kind), KRX036 for `ExcludeBehavior` and KRX042 (the `[GlobalBehavior]`
+  cases) have positive and negative tests, and `[assembly: Behavior(typeof(X))]` naming a non-behavior reports nothing;
+- matching tests cover open and closed methods of every kind, each constraint kind and nullable annotations; ordering tests cover every
+  sort rule and every KRX008 case with `typeof` edges, a method-level `[BehaviorOrder]` and `[RunsAfter]` overriding the class's for one
+  kind, a two-kind class whose method overrides `[RunsAfter]` (KRX008 reported per kind), and `[GlobalBehavior]` on a method only;
+  `ExcludeBehavior` removes a class from pipelines of every kind;
+- allocation tests show 0 B per `Send` at depths 1, 3 and 8 (typed and generic), with behaviors that take injected services (and the
+  scope's `IServiceProvider`) and with
+  `async` behaviors whose work completes synchronously, on an optimized (Release) test host;
+- `PipelineGeneratorTests.Should_Give_No_Context_To_A_Pipeline_That_Resolves_Nothing` snapshots request, stream and publish pipelines
+  that resolve nothing (no context, links in a static class) beside ones that resolve a service, with every link taking only what it
+  reads or passes on, and the host compiles without warnings with no CS9113 suppression (OQ-65);
+- `Behaviors/SharedServiceTests`: a snapshot of request, stream and publish pipelines whose four behaviors each inject `IClock` shows one
+  field per context; keyed and unkeyed services of one type stay separate; a required consumer makes a service required for optional
+  consumers too; consumers that are all optional keep their own defaults (generated code and at run time); every behavior of a pipeline
+  receives the same instance of a transient, and every `IServiceProvider` (required or optional, of request, stream and publish behaviors
+  and of request and notification handlers) receives the scope's provider; a snapshot of request, stream and publish pipelines whose
+  behaviors inject only `IServiceProvider` shows one `ServiceProvider` field per context and no `ServiceN`, a keyed `IServiceProvider` is
+  a numbered keyed service beside it, and a handler's context field holds the scope's provider (OQ-63); services are numbered by type and key,
+  not first use, and adding a behavior that injects services the pipeline already shares, in any order, leaves the pipeline's context
+  services (model and fields) unchanged (OQ-64);
+- the gate's three criteria are recorded in the phase summary and in `open-questions.md`. A failed gate does not block this line: if
+  criterion 1 (0 B at depths 1, 3 and 8) failed, follow `open-questions.md` OQ-22 for the 0 B allocation tests.
 
 ### Phase 5: streaming
 
-Stream dispatch (typed and generic), no-behavior pass-through, fused `IStreamBehavior` iterator with the ADR's hook semantics, token
-linking rules, `IStreamWrapBehavior` with fusion splitting, synchronous validation of null and unknown requests.
+Stream dispatch (typed and generic), no-behavior pass-through (the handler's enumerable returned as is), `[StreamBehavior]` behavior
+methods that wrap the stream, called directly through flat `IStreamNext<TItem>` link structs (`StreamLinkK`) with their injected services
+read from the pipeline context (each distinct service once, shared as Phase 4's "Shared services" describes), the token rules (two tokens linked once, at the outermost element), synchronous validation of null and
+unknown requests. Stream behaviors use the same scopes, matching, ordering and diagnostics as request behaviors. There are no hook
+behaviors and no fused segments.
 
-**Done when:** tests cover hook order, item dropping, early dispose, exceptions from the handler and from hooks, cancellation through both
-tokens, and wrap behaviors at the start, middle and end; allocation tests show 0 extra with no behaviors, one iterator per fused hook
-segment per `Stream` call, exactly one linked `CancellationTokenSource` when two distinct cancellable tokens are supplied (and none
-otherwise), and 0 per item.
+**Done when:**
+
+- runtime tests cover stream behaviors that re-yield, filter, map, call `next` twice and do not call it, exceptions from the handler and
+  from stream behaviors, a synchronous throw from an outermost non-iterator stream behavior (it comes from the `Stream()` call itself),
+  and cancellation through both tokens with a stream behavior outermost;
+- KRX019 tests cover the stream-kind shape cases (Phase 4 list);
+- scope tests (per target, `[assembly: Behavior]`, `[GlobalBehavior]`) and constraint-matching tests for open stream behavior methods,
+  substituted with `TRequest`/`TItem`, and ordering tests by `Phase`, `Order` and `RunsAfter`/`RunsBefore`;
+- generator snapshot tests of stream pipelines at depths 0, 1, 3 and 8: the `StreamLinkK` structs and each behavior method called
+  directly with explicit type arguments;
+- allocation tests show 0 extra with no behaviors, one iterator per stream behavior per `Stream` call, and 0 per item; the two-token test
+  asserts exactly one linked `CancellationTokenSource` in total with a stream behavior outermost when two distinct cancellable tokens are
+  supplied, and none when one token is `default` or the two are equal;
+- generic `Stream` is tested on both sides of the dispatch threshold, as generic `Send` is (Phase 3): the generated shape and the
+  compiled IL at the threshold and one above, every stream request streaming from its own handler above it, and an unknown type, or a
+  stream request type that is not sealed (KRX024 suppressed, so the host does not compose it; OQ-68), throwing
+  `KeryxHandlerNotFoundException` when `Stream` is called while its sealed siblings still stream.
 
 ### Phase 6: notifications
 
-Publish dispatch (typed and generic), handler lists with polymorphic expansion and `[HandlerOrder]`, sequential and parallel strategies,
-run-all-then-`AggregateException` (also for one failure and on cancellation), `INotificationBehavior` (per publish, also with zero
-handlers) and `INotificationHandlerBehavior` (per handler) with all three scopes, boxing-free generic `Publish` for struct notifications,
-KRX037. Parallel publish exactly as the ADR's Publish strategy section defines it. Follow `open-questions.md` interim behavior for OQ-3,
-OQ-4, OQ-5, OQ-17 and OQ-18.
+Publish dispatch (typed and generic; generic `Publish` keeps exact-type `when` guards, `case var _ when notificationType ==
+typeof(X):`, ending `default: return default;`, because notification types need not be sealed and a type pattern would send an unknown
+derived notification to its base type's pipeline), handler lists with polymorphic expansion and `[HandlerOrder]`, sequential and parallel strategies,
+run-all-then-`AggregateException` (also for one failure and on cancellation), boxing-free generic `Publish` for struct notifications,
+KRX037. Parallel publish exactly as the ADR's Publish strategy section defines it. `open-questions.md` OQ-3, OQ-4, OQ-5, OQ-17 and OQ-18
+record the decisions this phase follows.
 
-**Done when:** tests cover zero/one/many handlers, polymorphic handlers, ordering, both strategies, failures in several handlers,
-cancellation, and both behavior kinds; allocation tests show 0 B for a sequential publish and for a parallel publish with synchronous
-handlers.
+`[NotificationBehavior]` wraps the whole publish once, also with zero handlers, uses `INext` and returns `ValueTask`; it is attached with
+`[Behavior]` on the notification type, `[assembly: Behavior]` in the notification type's assembly or `[GlobalBehavior]`, and its
+`TNotification` is the concrete published type; the publish pipeline context shares its behaviors' injected services as Phase 4's "Shared
+services" describes. Handlers in a publish are called directly under both strategies: there are no per-handler pipelines or links. The
+publish strategy (`RunHandlers`, and `RunHandlersAsync` for the sequential strategy) is a method of the pipeline context; a publish pipeline
+that resolves nothing (every handler's invoker static, nothing injected; owner decision 20, OQ-70) has no context, and its strategy is
+`static` in `private static class __NotificationN`, called as `__NotificationN.RunHandlers(notification, cancellationToken)` from the entry
+or the last link. The handler generator writes no `Behaviors` for a notification handler, and the analyzer reports KRX042 for `[Behavior]`
+on a notification handler method.
+
+**Done when:** tests cover zero/one/many handlers, polymorphic handlers, ordering, both strategies, failures in several handlers and
+cancellation; notification behavior tests cover all three scopes, zero handlers, both strategies, an exception propagating unwrapped and a
+synchronous throw from the outermost behavior; an `[assembly: Behavior]` naming a `[NotificationBehavior]` applies in the notification
+type's assembly, and in an assembly that declares notification handlers but not the notification type it changes no publish pipeline;
+KRX042 has positive tests for `[Behavior]` on a notification handler method (exact-type and polymorphic), and it changes no generated
+code; snapshot tests of publish pipelines at depths 0, 1, 3 and 8 show the handlers called directly under both strategies, and snapshots
+of a publish pipeline that resolves nothing (sequential and parallel, with and without behaviors) show no context and a static strategy;
+allocation tests show 0 B for a sequential publish (with behaviors that take injected services) and for a parallel publish with
+synchronous handlers, with and without a context;
+generic `Publish<TNotification>` is tested on both sides of the dispatch threshold, as generic `Send` is (Phase 3): the generated shape and
+the compiled IL at the threshold and one above, every notification type reaching its own handlers above it, and an unknown type or a type
+derived from a handled notification type (unknown to the host) running nothing.
 
 ### Phase 7: cross-assembly discovery
 
@@ -178,22 +451,129 @@ Reference `Specular.Scanning.Sources` 0.4.3-beta.2 (exact, `PrivateAssets=all`) 
 `System.Collections.Immutable` as it requires; ship `System.Text.Json.dll` beside the analyzer; let Specular's pack helper add its cache
 targets to the package. One `context.Scan<KeryxReferenceModel>("Keryx", requests, transform)` call over the three scans in the ADR
 (an `IncrementalValuesProvider<ScanRequest>`, results read by position); projection cached in ScanCache with a source-generated
-`JsonSerializerContext` and the `ProjectionDataVersion` constant. Merge own and referenced handlers into the Phase 3 model. Host rules
-KRX005 (cross-assembly), KRX030 (referenced types, skipping types declared in another host), KRX032, KRX033, KRX034, `ExcludeHandler`
-with KRX036 for `ExcludeHandler`. Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/`
-(a contracts library with `[assembly: KeryxContracts]` and a handler library with handlers, a global behavior and notification
-handlers). CI job: publish the sample host with `PublishAot=true`, fail on IL2xxx/IL3xxx, run it.
+`JsonSerializerContext` and the `ProjectionDataVersion` constant, bumped whenever the projection changes. Merge own and referenced handlers
+into the Phase 3 model.
+
+- The scan finds global behavior classes whose `[GlobalBehavior]` is on the class or only on a behavior method; KRX035 lists both.
+- Host rules KRX030 for referenced request types, including those declared in another host (OQ-16), KRX032,
+  KRX033, and KRX034, which also covers the injected parameter types of a referenced behavior method (OQ-47), per kind: KRX034 names the
+  behavior method and its kind, and the class stays in the pipelines of the kinds whose methods resolve (OQ-57). `ExcludeHandler` for referenced notification handlers, with KRX036 for one that removes nothing.
+- A request's handler lives in the request's own assembly (second rework): KRX030 is a safety net for referenced request types (an
+  internal handler of a referenced host, a library built with KRX001 suppressed); a host's handler of a referenced request is KRX023.
+  `ExcludeHandler` names only notification handlers: naming a request or stream request handler, referenced or the host's own, is the
+  host error KRX039 on the attribute, and the handler stays (owner decision 23, OQ-59); tests swap a request handler's behavior through
+  its injected services. The host has no cross-assembly KRX005 (owner decision 24, OQ-60): KRX005 is the analyzer's rule within one
+  assembly, and two manifests naming handlers of one request (possible only by hand) leave the request undispatched.
+  There is no `ExternallyHandled`. Outside a host, `ExcludeHandler` and `ExcludeBehavior` have no effect and the analyzer reports
+  warning KRX043 on each (OQ-54). KRX023, KRX039 and KRX043 have descriptors, help links and `AnalyzerReleases.Unshipped.md` entries,
+  and the `AnalyzerReleases.Unshipped.md` descriptions of KRX005, KRX034 and KRX036 match the ADR's rows.
+- A referenced request or stream request type that is not sealed (its library suppressed KRX024) is the host error KRX038, without a
+  location, naming the type and its assembly; the host composes no part of it (no dispatch section, no typed overload; sending it throws
+  `KeryxHandlerNotFoundException`), and it counts as handled, so there is no KRX030 on top. The host's own type that is not sealed is its
+  KRX024, not KRX038, and is not composed either (owner decision 18, OQ-68).
+- A `[Behavior]` on a referenced notification type that does not fit the type as the host resolves it is KRX009 without a location,
+  naming the notification type and the behavior; the behavior is skipped and the rest of the publish pipeline kept
+  (OQ-55).
+- Samples: `samples/hosts/` (an ASP.NET Core or console host) and `samples/libraries/` (a contracts library with the order
+  notifications, targeting `netstandard2.0`, and a handler library with the order requests next to their handlers, a global static
+  behavior and notification handlers). Every open behavior method in the samples constrains its message type parameter; `samples/hosts/README.md` and
+  `samples/libraries/README.md` name the static behavior classes. CI job: publish the sample host with `PublishAot=true`, fail on
+  IL2xxx/IL3xxx, run it.
 
 **Done when:** the samples build and run end to end; tests cover a host with project and metadata references, a missing reference
-(KRX034), a newer format version (KRX032), a Keryx reference without a manifest (KRX033), duplicate handlers (KRX005), exclusion
-(including KRX036 for `ExcludeHandler`), and a test host that references an app host;
-the incremental test shows downstream steps cached after an unrelated edit and `Modified` after a manifest change; the AOT job passes.
+(KRX034), a missing injected parameter type of a referenced behavior method (KRX034; a two-kind class whose other kind still runs and is
+the only kind KRX035 lists, as a global, attached and `[assembly: Behavior]` behavior, reported once), a referenced global behavior that writes `TResponse?` (fits and runs for the same targets as in source), a newer format version (KRX032), a Keryx reference
+without a manifest (KRX033), duplicate handlers inside one referenced assembly (no host diagnostic, not dispatched), exclusion of a
+referenced notification handler (including one whose types the host cannot resolve, and KRX036 for `ExcludeHandler`), KRX039 for a
+referenced or own request and stream request handler named in `ExcludeHandler` (the handler still dispatched; a referenced one the host
+cannot resolve is KRX034), a referenced global behavior marked only on a method, KRX023 for a host's handler of a referenced request
+(also when the host names the referenced handler in `ExcludeHandler`, then beside KRX039), KRX030
+for a referenced request without a handler, KRX038 for a referenced request and stream request type that is not sealed (not for the
+host's own type, an abstract or closed base, a sealed type or a notification; at run time not dispatched while a sealed sibling is),
+KRX043 for `ExcludeHandler` and `ExcludeBehavior` in a library (and not in a host), host
+KRX009 for a
+`[Behavior]` on a referenced notification type that no longer fits (the other publish behaviors still run; a fitting one reports nothing),
+and a test host that references an app host (KRX030 for an app request whose handler is internal, nothing for one whose handler is
+public); the incremental test shows downstream steps cached after an unrelated edit and `Modified` after a manifest change, and a
+`ProjectionDataVersion` bump invalidates the cache; the AOT job passes.
 
 ### Phase 8: benchmarks, README, notes
 
 The benchmark suite in the ADR's Benchmarks section (baseline, Keryx, Mediator 3.0.2 scoped and singleton, MediatR 15.x without a key,
-Immediate.Handlers 4.4.0, ZeroAlloc.Mediator 7.0.1), each library in its own project. README: install, minimum SDK (.NET 10), handler
-rules, behaviors, streaming, notifications, hosts, contracts assemblies, testing handlers through `InvokeAsync`, diagnostics table with
-help links, benchmark results from a local run with machine details. A short "what is left" note in `docs/`.
+Immediate.Handlers 4.4.0, ZeroAlloc.Mediator 7.0.1), each library in its own project under `test/benchmark-subjects`. The Keryx subject
+uses static behavior methods with the message constraint; there is no hook-behavior stream variant (OQ-51). Beside the depth scenarios,
+real-world `Ping` -> `Pong` scenarios (owner decision 30): a plain handler from the long-lived scope and with a scope per request (create
+the scope, resolve the entry point, send, dispose, inside the measured method), a logging behavior (Microsoft.Extensions.Logging to an
+in-memory provider that formats every message, bounded) and a validation behavior (a hand-written `IValidator<TRequest>`) around a handler
+with a scoped repository, from the long-lived scope and per request, and a handler running a parameterized query against an in-memory
+Microsoft.Data.Sqlite database seeded once per process; and (decision 30d) `Pinged` notifications to 1 and 5 handlers (a repository
+lookup and a log message each) published per request scope, again with the logging behavior as a notification behavior (Keryx only: the
+other libraries' behaviors wrap requests only), to handlers that await the SQLite query published sequentially, and with each library's
+parallel strategy (Keryx `PublishStrategy.Parallel`, Mediator and MediatR `TaskWhenAllPublisher`, ZeroAlloc.Mediator
+`[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same
+publishes go to 25, 50 and 100 handlers too (owner decision 41: `PublishTo{25,50,100}`, `RealWorldPublish{25,50,100}ScopePerRequest`,
+`RealWorldPublishBehavior{25,50,100}ScopePerRequest`, `RealWorldPublishAsync{25,50,100}`, `RealWorldPublishParallel{25,50,100}`), from
+fan-out projects of their own, one per library and configuration (`test/benchmark-subjects/Keryx.Benchmarks.FanOut.*`, so no other
+subject's generated code or scope state changes; OQ-78), whose code and benchmark classes `test/benchmark-subjects/GenerateFanOut.cs`
+writes from one list (`dotnet run --file test/benchmark-subjects/GenerateFanOut.cs`; CI runs it with `-- --check`); `Subjects` builds
+their containers only for those classes (`FanOutBenchmark`), and ZeroAlloc.Mediator's comes in under the extern alias `ZeroAllocFanOut`
+(open-questions, "Publish to 25, 50 and 100 handlers"). The same bodies
+in every subject, 104 real-world benchmarks that `--verify` counts (352 comparison benchmarks in all with the fan-out ones), the setup confirmed by the owner (decision 33, OQ-72) and written in
+the ADR's Benchmarks section ("Real-world setup rules"); every logging behavior and the baseline read the message type's name once per type
+through `MessageName<T>` in `Keryx.Benchmarks.Common` (decision 36, OQ-75). The comparison suite also runs with
+BenchmarkDotNet's NativeAOT toolchain (owner decisions 29 and 31, `--runtimes nativeaot10.0`): a subject that cannot run there is n/a with
+the reason found by building and running it (MediatR 15, in every scenario; `Comparison/NativeAot.cs`), and `--verify` runs in the
+benchmark project published with NativeAOT (`-p:KeryxBenchmarksNativeAot=true`), with no trim or AOT warning in Keryx's own code and none
+suppressed (open-questions, "NativeAOT benchmark run"). The verification probe is compiled out of the builds BenchmarkDotNet makes
+(decision 34, OQ-73): `Program.cs` sets `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds, under which
+`Probe.Enabled` is a `const` `false` and `Probe.Hit()` is empty; `--verify` builds without it. Every comparison benchmark's
+`[GlobalSetup]` throws unless `Probe.IsCompiledOut()`, so a benchmark build with the probe fails the run (the CI Dry jobs enforce it;
+`--inProcess` runs the runner's probe-on build and fails too; `--verify` calls `CreateSubjects()` instead). The benchmarks workflow runs the suite with
+`--verify` and `--job Dry`, a NativeAOT job publishes it with NativeAOT, runs `--verify` in that binary and runs it with
+`--job Dry --runtimes nativeaot10.0` (the Phase 4 prototype is JIT-only and left out there; run `--runtimes nativeaot10.0` on its own, since
+side by side with the JIT the NativeAOT rows get no ratios), and a Linux job runs `--filter *PipelinePrototype*` with `DisassemblyDiagnoser`
+(OQ-36), whose output is the CI evidence for gate criterion 2.
+The README's tables come from one full local run of the comparison suite under the JIT and right after it under NativeAOT
+(owner decision 32: IterationCount=15, IterationTime=200ms, LaunchCount=1, WarmupCount=5, built from a clean copy of the measured commit,
+nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
+2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
+scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT; decided:
+`MessageName<T>`, owner decision 36). Decision 37's full run (2026-11-27, at 3575a50, after decisions 34 to 36, recorded in the same
+entry) showed that with a scope per request Keryx's `IMediator` rows allocate what its typed rows allocate, and under NativeAOT
+the typed `Send` stays at 1.40 to 1.41 ns at every depth and the behavior rows allocate what they allocate under the JIT. It raised OQ-77:
+BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish` to one handler with the job (its pilot reads 0 ns and throws).
+Decided (owner decision 39): the runner's config gives that benchmark's NativeAOT job a fixed invocation count, 160,000,000 calls per
+iteration, which skips the pilot (`Comparison/FixedInvocationCount.cs`, an orderer, the one place BenchmarkDotNet lets the config change
+a single case; it keeps the case in its class's logical group, so it stays the baseline), while the JIT and Dry jobs and every other
+benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
+The direct call's `Publish` to 25, 50 and 100 handlers (decision 41) has the same shape and is not covered; whether it needs the fixed
+count is OQ-81 (open; the third run's pilot measured all three). The current tables are that third full run (2026-11-28, at bdaf06f,
+after owner decisions 41 to 46; same entry), run class by class under the JIT and then NativeAOT with a guard that waits for a quiet
+machine and re-runs a class another build or benchmark overlapped (none did): with a scope per request Keryx's typed `Send` of `Ping`
+measures 29.9 ns and 192 B (the direct call 49.9 ns and 368 B), the behaviors 268 ns and 1,048 B, and a publish to 5 handlers 316 ns and
+816 B, below the direct call and ZeroAlloc.Mediator; the 25, 50 and 100 handler classes have their tables. It raised OQ-82 (open):
+under the JIT the typed `Send` with a yielding handler measured 1.11 to 1.47 times the direct call in every yielding class, reproduced,
+while `IMediator` did not.
 
-**Done when:** benchmarks run locally and in CI with `--job Dry`; the README is complete; the PR is marked ready for review.
+README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
+C# 14, handler rules, quick start (`AddKeryx()` registers neither handlers nor behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
+wrapping the whole publish, examples with the message constraint, attaching per target on a request or stream handler method or on the
+notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the transient mediator over a
+scoped state; pipeline contexts call the host's own handlers through their static entries and construct only referenced handlers; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
+KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, the third full run at bdaf06f). A short "what is left" note in
+`docs/whats-left.md`.
+
+**Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`
+passes in both builds; the Linux `PipelinePrototype`
+job runs, and its output (the static behavior method and `next.InvokeAsync` called directly) is recorded with the gate result in
+`open-questions.md`; the README is complete, its tables come from a local run, and every hit of a grep of `Readme.md` for the removed
+names (`PipelineBehavior`, `IStreamHookBehavior`, `PublishBehavior`, `NotificationHandlerBehavior`, per-handler, per-publish,
+`RunsAfter<`, hook) is checked against the ADR; `git grep` in `src/`, `test/` (including `test/benchmark-subjects`) and `samples/` finds no
+`IRequestPipelineBehavior`, `IStreamHookBehavior`, `INotificationPipelineBehavior`, `INotificationHandlerPipelineBehavior`,
+`NotificationHandlerBehavior`, `PublishBehavior` or generic `RunsAfter<T>`/`RunsBefore<T>` (the other libraries' subjects keep those
+libraries' own `IPipelineBehavior` and `IStreamPipelineBehavior`), and no hook-behavior code, test or benchmark variant is left; the
+`AnalyzerReleases.Unshipped.md` descriptions match the README's diagnostics table and the ADR; `docs/whats-left.md` is current, and its
+before-release list keeps the comparison re-run on the release candidate, including the generic `Stream` depth-0 row that measured 20 to
+60 ns slower after the type patterns (owner decision 22: tracked for the release, not investigated now); `mise run build` passes and the
+draft PR's CI is green. Marking the PR ready for review is left to the owner.

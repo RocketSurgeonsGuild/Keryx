@@ -1,0 +1,6 @@
+<Project>
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)../'))" />
+    <ItemGroup Condition="'$(MSBuildProjectName)' != 'Keryx.Benchmarks.Common'">
+        <ProjectReference Include="$(MSBuildThisFileDirectory)Keryx.Benchmarks.Common/Keryx.Benchmarks.Common.csproj" />
+    </ItemGroup>
+</Project>

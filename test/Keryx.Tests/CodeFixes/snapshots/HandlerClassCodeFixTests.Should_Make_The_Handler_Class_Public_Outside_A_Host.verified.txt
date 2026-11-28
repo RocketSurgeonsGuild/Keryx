@@ -1,0 +1,82 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample;
+
+public sealed record Command : IRequest<int>;
+
+partial class CommandHandler
+{
+    private static int Handle(Command request) => 1;
+}
+
+internal static partial class Container
+{
+    public static partial class Nested
+    {
+        private static int Handle(Command request) => 1;
+    }
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX004: 'CommandHandler' must be public, because this assembly is not a host and a host uses its handler classes,
+      Title: Make 'CommandHandler' public,
+      EquivalenceKey: Keryx.MakePublic,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+public sealed record Command : IRequest<int>;
+
+public partial class CommandHandler
+{
+    private static int Handle(Command request) => 1;
+}
+
+internal static partial class Container
+{
+    public static partial class Nested
+    {
+        private static int Handle(Command request) => 1;
+    }
+}
+      },
+      Remaining: [
+        KRX004: 'Container' must be public, because it contains a handler class, this assembly is not a host and a host uses its handler classes
+      ]
+    },
+    {
+      Diagnostic: KRX004: 'Container' must be public, because it contains a handler class, this assembly is not a host and a host uses its handler classes,
+      Title: Make 'Container' public,
+      EquivalenceKey: Keryx.MakePublic,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+public sealed record Command : IRequest<int>;
+
+partial class CommandHandler
+{
+    private static int Handle(Command request) => 1;
+}
+
+public static partial class Container
+{
+    public static partial class Nested
+    {
+        private static int Handle(Command request) => 1;
+    }
+}
+      },
+      Remaining: [
+        KRX004: 'CommandHandler' must be public, because this assembly is not a host and a host uses its handler classes
+      ]
+    }
+  ]
+}

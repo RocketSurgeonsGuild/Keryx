@@ -14,6 +14,8 @@
 [Rr]elease/
 x64/
 /artifacts/
+# BenchmarkDotNet results (test/Keryx.Benchmarks): local runs only, never committed.
+BenchmarkDotNet.Artifacts/
 /coverage/
 bld/
 [Bb]in/

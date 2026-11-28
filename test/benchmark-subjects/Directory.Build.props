@@ -1,0 +1,19 @@
+<Project>
+    <!--
+        The libraries the comparison benchmarks (test/Keryx.Benchmarks, Comparison/) measure: one small class library per mediator, each with
+        the same requests, handlers and pass-through behaviors written the way that library expects (ADR 0001, Benchmarks). Common holds what
+        they share: the verification probe, the stream source and the real-world scenarios' services (Pong, logging, validator contract,
+        repository, SQLite database, the notification handlers' body). The Keryx.Benchmarks.FanOut.* projects hold the notifications with 25,
+        50 and 100 handlers, one per library, written by GenerateFanOut.cs (owner decision 41).
+    -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <!-- The suite also runs under NativeAOT (owner decision 29): the subjects' code is checked for trim and AOT problems as it builds. -->
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+        <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    </PropertyGroup>
+</Project>

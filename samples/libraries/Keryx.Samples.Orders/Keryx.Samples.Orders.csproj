@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        A handler library: the order requests and their handlers, a global behavior every host that references this library applies, a
+        behavior attached to one handler, and handlers of the Keryx.Samples.Contracts notifications (one of them polymorphic). Not a host: its handlers reach a host through
+        their manifest (ADR 0001, Cross-assembly discovery).
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../Keryx.Samples.Contracts/Keryx.Samples.Contracts.csproj" />
+    </ItemGroup>
+</Project>

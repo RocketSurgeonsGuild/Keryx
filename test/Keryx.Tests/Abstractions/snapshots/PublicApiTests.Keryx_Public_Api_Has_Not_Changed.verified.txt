@@ -1,0 +1,161 @@
+﻿namespace Keryx
+{
+    [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class | System.AttributeTargets.Struct | System.AttributeTargets.Method, AllowMultiple=true)]
+    public sealed class BehaviorAttribute : System.Attribute
+    {
+        public BehaviorAttribute(System.Type behaviorType) { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method)]
+    public sealed class BehaviorOrderAttribute : System.Attribute
+    {
+        public BehaviorOrderAttribute(Keryx.Phase phase) { }
+        public int Order { get; init; }
+        public Keryx.Phase Phase { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=true)]
+    public sealed class ExcludeBehaviorAttribute : System.Attribute
+    {
+        public ExcludeBehaviorAttribute(System.Type behaviorType) { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple=true)]
+    public sealed class ExcludeHandlerAttribute : System.Attribute
+    {
+        public ExcludeHandlerAttribute(System.Type handlerType) { }
+        public System.Type HandlerType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method)]
+    public sealed class GlobalBehaviorAttribute : System.Attribute
+    {
+        public GlobalBehaviorAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Method)]
+    public sealed class HandlerOrderAttribute : System.Attribute
+    {
+        public HandlerOrderAttribute(int order) { }
+        public int Order { get; }
+    }
+    public interface IMediator : Keryx.IPublisher, Keryx.ISender { }
+    public interface INext
+    {
+        System.Threading.Tasks.ValueTask InvokeAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface INext<TResponse>
+    {
+        System.Threading.Tasks.ValueTask<TResponse> InvokeAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface INotification { }
+    public interface IPublisher
+    {
+        System.Threading.Tasks.ValueTask Publish<TNotification>(TNotification notification, System.Threading.CancellationToken cancellationToken = default)
+            where TNotification : Keryx.INotification;
+    }
+    public interface IRequest : Keryx.IRequest<Keryx.Unit> { }
+    public interface IRequest<TResponse> { }
+    public interface ISender
+    {
+        System.Threading.Tasks.ValueTask<TResponse> Send<TResponse>(Keryx.IRequest<TResponse> request, System.Threading.CancellationToken cancellationToken = default);
+        System.Collections.Generic.IAsyncEnumerable<TItem> Stream<TItem>(Keryx.IStreamRequest<TItem> request, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IStreamNext<TItem>
+    {
+        System.Collections.Generic.IAsyncEnumerable<TItem> InvokeAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IStreamRequest<TItem> { }
+    public sealed class KeryxHandlerNotFoundException : System.InvalidOperationException
+    {
+        public KeryxHandlerNotFoundException(System.Type requestType) { }
+        public System.Type RequestType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class NotificationBehaviorAttribute : System.Attribute
+    {
+        public NotificationBehaviorAttribute() { }
+    }
+    public enum Phase
+    {
+        Outermost = 0,
+        Observability = 100,
+        Security = 200,
+        Validation = 300,
+        Default = 400,
+        Caching = 450,
+        Transaction = 500,
+        Innermost = 600,
+    }
+    public enum PublishStrategy
+    {
+        Sequential = 0,
+        Parallel = 1,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Struct)]
+    public sealed class PublishStrategyAttribute : System.Attribute
+    {
+        public PublishStrategyAttribute(Keryx.PublishStrategy strategy) { }
+        public Keryx.PublishStrategy Strategy { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class RequestBehaviorAttribute : System.Attribute
+    {
+        public RequestBehaviorAttribute() { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple=true)]
+    public sealed class RunsAfterAttribute : System.Attribute
+    {
+        public RunsAfterAttribute(System.Type behaviorType) { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple=true)]
+    public sealed class RunsBeforeAttribute : System.Attribute
+    {
+        public RunsBeforeAttribute(System.Type behaviorType) { }
+        public System.Type BehaviorType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class StreamBehaviorAttribute : System.Attribute
+    {
+        public StreamBehaviorAttribute() { }
+    }
+    public readonly struct Unit : System.IComparable<Keryx.Unit>, System.IEquatable<Keryx.Unit>
+    {
+        public static readonly Keryx.Unit Value;
+        public int CompareTo(Keryx.Unit other) { }
+        public bool Equals(Keryx.Unit other) { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public override string ToString() { }
+        public static bool operator !=(Keryx.Unit left, Keryx.Unit right) { }
+        public static bool operator ==(Keryx.Unit left, Keryx.Unit right) { }
+    }
+}
+namespace Keryx.Internal
+{
+    public enum HandlerKind
+    {
+        Request = 0,
+        Stream = 1,
+        Notification = 2,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class KeryxHandlerAttribute : System.Attribute
+    {
+        public KeryxHandlerAttribute(System.Type targetType, Keryx.Internal.HandlerKind kind) { }
+        public System.Type[] Behaviors { get; init; }
+        public Keryx.Internal.HandlerKind Kind { get; }
+        public int Order { get; init; }
+        public bool StaticInvoker { get; init; }
+        public System.Type TargetType { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Assembly)]
+    public sealed class KeryxManifestAttribute : System.Attribute
+    {
+        public KeryxManifestAttribute() { }
+        public int FormatVersion { get; init; }
+    }
+    public static class UnitAdapter
+    {
+        public static System.Threading.Tasks.ValueTask<Keryx.Unit> ToUnit(System.Threading.Tasks.Task source) { }
+        public static System.Threading.Tasks.ValueTask<Keryx.Unit> ToUnit(System.Threading.Tasks.ValueTask source) { }
+    }
+}

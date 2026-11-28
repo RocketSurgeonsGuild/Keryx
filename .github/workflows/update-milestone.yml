@@ -1,0 +1,25 @@
+name: Update Milestone
+
+# Files a pull request into main under the pending version milestone while it is open or once it merges, and takes it
+# back out if it closes without merging. The logic lives in RocketSurgeonsGuild/actions (release-milestones).
+on:
+    pull_request_target:
+        types:
+            - opened
+            - reopened
+            - synchronize
+            - closed
+
+permissions:
+    contents: read
+    issues: write
+    pull-requests: write
+
+# A newer event for the same pull request replaces this one.
+concurrency:
+    group: update-milestone-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    update_milestone:
+        uses: RocketSurgeonsGuild/actions/.github/workflows/update-milestone.yml@v0.4.0

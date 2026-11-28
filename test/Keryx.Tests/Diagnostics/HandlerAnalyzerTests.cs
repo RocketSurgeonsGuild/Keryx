@@ -1,0 +1,843 @@
+using Keryx.Analyzers;
+using Keryx.Analyzers.Diagnostics;
+using Keryx.Analyzers.Hosts;
+using Microsoft.CodeAnalysis;
+
+namespace Keryx.Tests.Diagnostics;
+
+/// <summary>
+///     KRX002-KRX007 (KRX003 for request bases, abstract and closed), KRX012 (handler classes), KRX013-KRX018, KRX023, KRX025 and KRX040, each
+///     with a positive and a negative case.
+/// </summary>
+[Timeout(ModuleInitializer.TestTimeout)]
+public class HandlerAnalyzerTests : AnalyzerTest
+{
+    private const string Ping = "public sealed record Ping : IRequest<string>;\n";
+
+    [Test]
+    public async Task A_Valid_Handler_Reports_Nothing(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            public interface IService { }
+
+            public partial class PingHandler
+            {
+                static PingHandler() { }
+
+                private static ValueTask<string> Handle(CancellationToken ct, Ping request, IService service) => new("pong");
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public static ValueTask<string> Handle(Ping request) => new(\"\");")]
+    [Arguments("private ValueTask<string> Handle(Ping request) => new(\"\");")]
+    [Arguments("internal static ValueTask<string> HandleAsync(Ping request) => new(\"\");")]
+    public async Task KRX002_Handler_Not_Private_Static(string handler, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + $"public partial class PingHandler {{ {handler} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX002"]);
+        await Assert.That(diagnostics[0].Properties["Reason"]).IsEqualTo("Modifiers");
+    }
+
+    [Test]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static int Handle(Ping request) => 1;")]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static ValueTask Handle(Ping request) => default;")]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static void Handle(Ping request) { }")]
+    [Arguments("public sealed record Ping : IRequest;", "private static async void Handle(Ping request) { await Task.Yield(); }")]
+    [Arguments("public sealed record Ping : IStreamRequest<int>;", "private static IEnumerable<int> Handle(Ping request) => [];")]
+    [Arguments("public sealed record Ping : INotification;", "private static int Handle(Ping request) => 1;")]
+    [Arguments("public sealed record Ping : INotification;", "private static void Handle(Ping request) { }")]
+    public async Task KRX002_Wrong_Return_Type(string request, string handler, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>($"{request}\npublic static partial class PingHandler {{ {handler} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX002"]);
+        await Assert.That(diagnostics[0].Properties["Reason"]).IsEqualTo("ReturnType");
+    }
+
+    [Test]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static ValueTask<string> Handle(Ping request) => default;")]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static Task<string> Handle(Ping request) => Task.FromResult(\"\");")]
+    [Arguments("public sealed record Ping : IRequest<string>;", "private static string Handle(Ping request) => \"\";")]
+    [Arguments("public sealed record Ping : IRequest;", "private static ValueTask Handle(Ping request) => default;")]
+    [Arguments("public sealed record Ping : IRequest;", "private static Task Handle(Ping request) => Task.CompletedTask;")]
+    [Arguments("public sealed record Ping : IRequest;", "private static void Handle(Ping request) { }")]
+    [Arguments("public sealed record Ping : IRequest;", "private static Task<Unit> Handle(Ping request) => Task.FromResult(Unit.Value);")]
+    [Arguments("public sealed record Ping : IRequest<Unit>;", "private static ValueTask Handle(Ping request) => default;")]
+    [Arguments("public sealed record Ping : IRequest<Unit>;", "private static Task Handle(Ping request) => Task.CompletedTask;")]
+    [Arguments("public sealed record Ping : IRequest<Unit>;", "private static void Handle(Ping request) { }")]
+    [Arguments("public sealed record Ping : IRequest<Unit>;", "private static Unit Handle(Ping request) => Unit.Value;")]
+    [Arguments("public sealed record Ping : IStreamRequest<int>;", "private static IAsyncEnumerable<int> Handle(Ping request) => null!;")]
+    [Arguments("public sealed record Ping : INotification;", "private static ValueTask Handle(Ping request) => default;")]
+    [Arguments("public sealed record Ping : INotification;", "private static Task Handle(Ping request) => Task.CompletedTask;")]
+    public async Task KRX002_Allowed_Return_Types(string request, string handler, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>($"{request}\npublic static partial class PingHandler {{ {handler} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public static partial class Ping { public sealed record Query : IRequest<int>; private static int Handle() => 1; }")]
+    [Arguments("public sealed record A : IRequest<int>; public sealed record B : IRequest<int>; public static partial class H { private static int Handle(A a, B b) => 1; }")]
+    [Arguments("public static partial class H { private static int Handle(IRequest<int> request) => 1; }")]
+    [Arguments("public abstract record Base : IRequest<int>; public static partial class H { private static int Handle(Base request) => 1; }")]
+    [Arguments("public interface IQuery : IRequest<int> { } public static partial class H { private static int Handle(IQuery request) => 1; }")]
+    public async Task KRX003_No_Single_Concrete_Request_Parameter(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX003"]);
+    }
+
+    [Test]
+    [Arguments("public abstract record Base : IRequest<int>;", "Base", "the abstract type 'Base'")]
+    [Arguments("public abstract class Query<T> : IRequest<T> { }", "Query<int>", "the abstract type 'Query<int>'")]
+    [Arguments("public closed record Base : IRequest<int>;", "Base", "the closed type 'Base'")]
+    [Arguments("public interface IQuery : IRequest<int> { }", "IQuery", "the interface 'IQuery'")]
+    public async Task KRX003_Handler_Of_A_Request_Base(string declaration, string parameter, string what, CancellationToken cancellationToken)
+    {
+        // A request base is never dispatched: each sealed case has its own handler (KRX024). 'closed' needs C# 15 (preview).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            TestSources.ClosedTypeAttribute + declaration + $" public static partial class H {{ private static int Handle({parameter} request) => 1; }}",
+            cancellationToken,
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo([$"Handler 'H.Handle({parameter})' must take a sealed request type, not {what}; each sealed request type has its own handler"]);
+    }
+
+    [Test]
+    [Arguments("public abstract record Items : IStreamRequest<int>;", "the abstract type 'Items'")]
+    [Arguments("public closed record Items : IStreamRequest<int>;", "the closed type 'Items'")]
+    public async Task KRX003_Handler_Of_A_Stream_Request_Base(string declaration, string what, CancellationToken cancellationToken)
+    {
+        // Stream request bases follow the request rule: each sealed stream request type has its own handler. 'closed' needs C# 15 (preview).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            TestSources.ClosedTypeAttribute + declaration + " public static partial class H { private static IAsyncEnumerable<int> Handle(Items request) => null!; }",
+            cancellationToken,
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo([$"Handler 'H.Handle(Items)' must take a sealed request type, not {what}; each sealed request type has its own handler"]);
+    }
+
+    [Test]
+    public async Task KRX003_Handler_Of_A_Closed_Request_Base_From_A_Referenced_Assembly(CancellationToken cancellationToken)
+    {
+        // A closed type in metadata is abstract, so it is a request base like an abstract one: the handler that takes it is KRX003, not
+        // KRX023 (which is about requests). Roslyn does not return the IsClosedTypeAttribute of a metadata type from GetAttributes, so the
+        // message cannot tell it from an abstract type (OQ-69).
+        var shapes = await CompileLibraryAsync(
+            "Shapes",
+            TestSources.ClosedTypeAttribute
+          + """
+            namespace Shapes
+            {
+                public closed record Shape : Keryx.IRequest<int>;
+                public sealed record Circle(int Radius) : Shape;
+                public static partial class CircleHandler { private static int Handle(Circle request) => request.Radius; }
+            }
+            """,
+            cancellationToken,
+            languageVersion: Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview
+        );
+        var result = await Builder.AddCompilationReferences(shapes)
+                                  .WithLanguageVersion(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview)
+                                  .WithAnalyzer<HandlerAnalyzer>()
+                                  .AddSources(Usings + "public static partial class H { private static int Handle(Shapes.Shape request) => 1; }")
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX003"]);
+        await Assert.That(Messages(diagnostics, "KRX003"))
+                    .IsEquivalentTo(["Handler 'H.Handle(Shape)' must take a sealed request type, not the abstract type 'Shape'; each sealed request type has its own handler"]);
+    }
+
+    [Test]
+    [Arguments("public interface IEvent : INotification { } public static partial class H { private static ValueTask Handle(IEvent e) => default; }")]
+    [Arguments("public static partial class H { private static ValueTask Handle(INotification e) => default; }")]
+    [Arguments("public abstract record Event : INotification; public static partial class H { private static ValueTask Handle(Event e) => default; }")]
+    public async Task KRX003_Polymorphic_Notification_Parameters_Are_Allowed(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    public async Task KRX004_Handler_Class_Or_Containing_Type_Not_Partial(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            public static class Outer
+            {
+                public class Inner
+                {
+                    private static string Handle(Ping request) => "";
+                }
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004", "KRX004"]);
+        await Assert.That(diagnostics.All(static d => d.Properties.ContainsKey("AddPartial"))).IsTrue();
+    }
+
+    [Test]
+    public async Task KRX004_Handler_Class_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            public static partial class Outer
+            {
+                internal static partial class Inner
+                {
+                    private static string Handle(Ping request) => "";
+                }
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
+        await Assert.That(diagnostics[0].Properties.ContainsKey("MakePublic")).IsTrue();
+    }
+
+    [Test]
+    public async Task KRX004_Internal_Handler_Class_Is_Fine_In_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            internal static partial class Outer
+            {
+                internal static partial class Inner
+                {
+                    private static string Handle(Ping request) => "";
+                }
+
+                protected internal static partial class ProtectedInternal
+                {
+                    private static string Handle(Ping request) => "";
+                }
+            }
+            """,
+            cancellationToken,
+            host: true
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("internal static partial class Outer { private static partial class H { private static string Handle(Ping request) => \"\"; } }")]
+    [Arguments("public partial class Outer { protected static partial class H { private static string Handle(Ping request) => \"\"; } }")]
+    [Arguments("public partial class Outer { private protected static partial class H { private static string Handle(Ping request) => \"\"; } }")]
+    [Arguments("public partial class Outer { private partial class Middle { internal static partial class H { private static string Handle(Ping request) => \"\"; } } }")]
+    public async Task KRX004_Private_Or_Protected_Handler_Class_In_A_Host(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken, host: true);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
+        await Assert.That(diagnostics[0].Properties.ContainsKey("MakePublic")).IsTrue();
+    }
+
+    [Test]
+    public async Task KRX004_Private_Handler_Class_Outside_A_Host_Is_Reported_Once(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "public partial class Outer { private static partial class H { private static string Handle(Ping request) => \"\"; } }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
+    }
+
+    [Test]
+    [Arguments("public partial struct H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial record struct H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial interface H { private static string Handle(Ping request) => \"\"; }")]
+    public async Task KRX004_Handler_Class_Is_Not_A_Class(string handler, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + handler, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
+    }
+
+    [Test]
+    [Arguments("file partial class H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("file static partial class Outer { internal static partial class H { private static string Handle(Ping request) => \"\"; } }")]
+    public async Task KRX004_File_Local_Type_In_The_Containing_Chain(string handler, CancellationToken cancellationToken)
+    {
+        // In a host, so only the file-local rule applies (outside a host the type is also not public).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + handler, cancellationToken, host: true);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX004"]);
+        await Assert.That(Messages(diagnostics, "KRX004").Single()).Contains("cannot be file-local");
+    }
+
+    [Test]
+    public async Task KRX006_Class_With_Two_Handlers(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            public sealed record Pong : IRequest<string>;
+
+            public static partial class Handlers
+            {
+                private static string Handle(Ping request) => "";
+                private static string HandleAsync(Pong request) => "";
+
+                public static partial class Nested
+                {
+                    private static string Handle(Pong request) => "";
+                }
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX006", "KRX006"]);
+    }
+
+    [Test]
+    public async Task KRX006_Helpers_Named_Handle_Are_Not_Handlers(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + """
+            public interface IHandle { void Handle(Ping request); }
+
+            public partial class PingHandler : IHandle
+            {
+                private static string Handle(Ping request) => "";
+                private static void Handle(string text) { }
+                private static void Handle<T>(T value) { }
+                void IHandle.Handle(Ping request) { }
+            }
+
+            public class Implicit : IHandle
+            {
+                public void Handle(Ping request) { }
+            }
+            """,
+            cancellationToken
+        );
+
+        await Assert.That(diagnostics.Select(static d => d.ToString())).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public abstract class A { protected abstract string Handle(Ping request); }")]
+    [Arguments("public abstract class A { public abstract ValueTask<string> HandleAsync(Ping request); }")]
+    [Arguments("public interface IA { string Handle(Ping request); }")]
+    public async Task Abstract_Handle_Methods_Are_Not_Handlers(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(diagnostics.Select(static d => d.ToString())).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public partial class H { public H() { } private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial record H(int Value) { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial class H(int value) { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public abstract class Base { protected Base(int value) { } } public partial class H : Base { private static string Handle(Ping request, IServiceProvider services) => \"\"; }")]
+    public async Task KRX007_Constructor(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX007"]);
+    }
+
+    [Test]
+    [Arguments("public abstract class Base { protected Base() { } } public partial class H : Base { private static string Handle(Ping request, IServiceProvider services) => \"\"; }")]
+    [Arguments("public abstract class Base { protected Base(int value = 0) { } } public partial class H : Base { private static string Handle(Ping request, IServiceProvider services) => \"\"; }")]
+    [Arguments("public abstract class Base { protected Base(int value) { } } public partial class H : Base { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial record H { private static string Handle(Ping request, IServiceProvider services) => \"\"; }")]
+    public async Task KRX007_Allowed_Constructors_And_Base_Types(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(
+        "public abstract partial class H { private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it is abstract"
+    )]
+    [Arguments(
+        "public partial class H { public required string Name { get; init; } private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it has required members ('Name') that the generated constructor does not set"
+    )]
+    [Arguments(
+        "public abstract class Base { public required int Count; } public partial class H : Base { private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+        "'H' has injected parameters, so a host constructs it, but it has required members ('Count') that the generated constructor does not set"
+    )]
+    public async Task KRX007_A_Constructed_Handler_Class_Is_Abstract_Or_Has_Required_Members(string source, string message, CancellationToken cancellationToken)
+    {
+        // OQ-34: the host's generated factory constructs the class with `new`, which CS0144/CS9035 would reject in generated code.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX007"]);
+        await Assert.That(Messages(diagnostics, "KRX007")).IsEquivalentTo([message]);
+    }
+
+    [Test]
+    [Arguments("public abstract partial class H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial class H { public required string Name { get; init; } private static string Handle(Ping request) => \"\"; }")]
+    public async Task KRX007_A_Static_Invoker_Is_Never_Constructed(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public partial class H<T> { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public partial class Outer<T> { public partial class H { private static string Handle(Ping request) => \"\"; } }")]
+    public async Task KRX012_Generic_Handler_Class(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX012"]);
+    }
+
+    [Test]
+    [Arguments("ref int value")]
+    [Arguments("in int value")]
+    [Arguments("out int value")]
+    [Arguments("params int[] values")]
+    [Arguments("CancellationToken first, CancellationToken second")]
+    [Arguments("ReadOnlySpan<char> span")]
+    [Arguments("TypedReference reference")]
+    public async Task KRX013_Parameter_Kind(string parameters, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + $"public partial class H {{ {Handler(parameters)} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX013"]);
+    }
+
+    [Test]
+    [Arguments("ref int value")]
+    [Arguments("in int value")]
+    [Arguments("out int value")]
+    [Arguments("params int[] values")]
+    [Arguments("ReadOnlySpan<char> span")]
+    public async Task KRX013_Parameter_Kind_In_A_Static_Class_Is_Not_Also_KRX014(string parameters, CancellationToken cancellationToken)
+    {
+        // An invalid parameter is not an injected service, so the static class does not also get KRX014 (and its "remove static" fix).
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + $"public static partial class H {{ {Handler(parameters)} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX013"]);
+    }
+
+    [Test]
+    [Arguments("int* pointer")]
+    [Arguments("delegate*<int, int> function")]
+    public async Task KRX013_Pointer_Parameter(string parameter, CancellationToken cancellationToken)
+    {
+        var result = await Builder.WithAllowUnsafe()
+                                  .WithNullableContext(NullableContextOptions.Enable)
+                                  .WithAnalyzer<HandlerAnalyzer>()
+                                  .AddSources(Usings + Ping + $"public partial class H {{ private static unsafe string Handle(Ping request, {parameter}) => \"\"; }}")
+                                  .Build()
+                                  .GenerateAsync(cancellationToken);
+
+        await Assert.That(Ids(result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics)).IsEquivalentTo(["KRX013"]);
+        // The generator skips the handler, so the generated code cannot fail to compile (CS0214, CS8345).
+        await Assert.That(result.Results[typeof(HandlerGenerator)].SyntaxTrees.Select(static t => Path.GetFileName(t.FilePath))).IsEquivalentTo(["KeryxManifest.g.cs"]);
+        await Assert.That(result.Results[typeof(HandlerGenerator)].Diagnostics).IsEmpty();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error && d.Id != "KRX013")).IsEmpty();
+    }
+
+    [Test]
+    public async Task KRX013_Parameter_Messages(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "public partial class H { private static string Handle(Ping request, ReadOnlySpan<char> span, IServiceProvider services) => \"\"; }",
+            cancellationToken
+        );
+
+        await Assert.That(Messages(diagnostics, "KRX013"))
+                    .IsEquivalentTo(["Handler parameter 'span' is a ref struct; an injected service is stored in a field of the handler class"]);
+    }
+
+    private static string Handler(string parameters) =>
+        $"private static string Handle(Ping request, {parameters}) {{ {( parameters.StartsWith("out", StringComparison.Ordinal) ? "value = 0; " : "" )}return \"\"; }}";
+
+    [Test]
+    public async Task KRX014_Static_Handler_Class_With_Injected_Parameters(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "public static partial class H { private static string Handle(Ping request, IServiceProvider services) => \"\"; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX014"]);
+    }
+
+    [Test]
+    public async Task KRX014_Static_Handler_Class_Without_Injected_Parameters(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "public static partial class H { private static string Handle(Ping request, CancellationToken ct) => \"\"; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public void InvokeAsync() { }")]
+    [Arguments("private int __keryx_value;")]
+    [Arguments("public int InvokeAsync { get; set; }")]
+    public async Task KRX015_Reserved_Member(string member, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + $"public partial class H {{ {member} private static string Handle(Ping request, IServiceProvider services) => \"\"; }}",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX015"]);
+    }
+
+    /// <summary>
+    ///     KRX015 is about members: an injected parameter may take any name, the generated members' own included, because its field is
+    ///     <c>__keryx_p_&lt;parameterName&gt;</c>, which no other generated member takes (owner decision 50, OQ-79), in a library and a host.
+    /// </summary>
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task KRX015_Not_Reported_For_Injected_Parameter_Names(bool host, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping
+          + "public partial class H { private static string Handle(Ping request, IServiceProvider InvokeAsync, IServiceProvider __keryx_InvokeAsync,"
+          + " IServiceProvider __keryx_p_InvokeAsync, IServiceProvider cancellationToken, IServiceProvider @class, CancellationToken ct) => \"\"; }",
+            cancellationToken,
+            host: host
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    public async Task KRX016_Injected_Type_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "internal interface IHidden { } public partial class H { private static string Handle(Ping request, IHidden hidden) => \"\"; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
+    }
+
+    [Test]
+    public async Task KRX016_Polymorphic_Notification_Type_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            "internal interface IHiddenEvent : INotification { } public static partial class H { private static ValueTask Handle(IHiddenEvent e) => default; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
+    }
+
+    [Test]
+    public async Task KRX016_Attached_Behavior_Not_Public_Outside_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping
+          + "[RequestBehavior] internal static class Hidden { public static ValueTask<string> Handle<TNext>(Ping r, TNext n) where TNext : struct, INext<string> => n.InvokeAsync(default); }"
+          + " public static partial class H { [Behavior(typeof(Hidden))] private static string Handle(Ping request) => \"\"; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
+    }
+
+    [Test]
+    public async Task KRX016_Internal_Types_Are_Fine_In_A_Host(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "internal interface IHidden { } public partial class H { private static string Handle(Ping request, IHidden hidden) => \"\"; }",
+            cancellationToken,
+            host: true
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(
+        "internal static partial class H { private sealed record Secret : IRequest<int>; private static int Handle(Secret request) => 1; }",
+        "'H.Secret' must be at least internal, because the handler 'H.Handle(H.Secret)' takes it and the host's generated mediator and AddKeryx(), outside the handler class, use it"
+    )]
+    [Arguments(
+        "public sealed record Q : IRequest<int>; internal partial class H { private interface IHidden { } private static int Handle(Q request, IHidden hidden) => 1; }",
+        "'H.IHidden' must be at least internal, because the handler injects it through parameter 'hidden' and the host's generated mediator and AddKeryx(), outside the handler class, use it"
+    )]
+    public async Task KRX016_Signature_Type_Narrower_Than_Internal_In_A_Host(string source, string message, CancellationToken cancellationToken)
+    {
+        // OQ-24: the host skips such a handler, so the analyzer must say why.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(source, cancellationToken, host: true);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX016"]);
+        await Assert.That(Messages(diagnostics, "KRX016")).IsEquivalentTo([message]);
+    }
+
+    [Test]
+    [Arguments("private static ValueTask<string?> Handle(Ping request) => default;")]
+    [Arguments("private static string? Handle(Ping request) => null;")]
+    public async Task KRX017_Nullability_Only_Difference(string handler, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + $"public static partial class H {{ {handler} }}", cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX017"]);
+        await Assert.That(Messages(diagnostics, "KRX017"))
+                    .IsEquivalentTo(["Handler 'H.Handle(Ping)' returns 'string?', but request 'Ping' responds with 'string'"]);
+    }
+
+    [Test]
+    public async Task KRX017_Oblivious_Nullability_Matches(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + "#nullable disable\npublic static partial class H { private static ValueTask<string> Handle(Ping request) => default; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("[FromKeyedServices] IServiceProvider services")]
+    [Arguments("[FromKeyedServices(new[] { 1, 2 })] IServiceProvider services")]
+    public async Task KRX018_Key_Is_Not_A_Constant(string parameter, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + $"public partial class H {{ private static string Handle(Ping request, {parameter}) => \"\"; }}",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX018"]);
+    }
+
+    [Test]
+    [Arguments("[FromKeyedServices(\"key\")] IServiceProvider services")]
+    [Arguments("[FromKeyedServices(42)] IServiceProvider services")]
+    [Arguments("[FromKeyedServices(typeof(Ping))] IServiceProvider services")]
+    public async Task KRX018_Constant_Keys(string parameter, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            Ping + $"public partial class H {{ private static string Handle(Ping request, {parameter}) => \"\"; }}",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    /// <summary>A library that declares a request, a stream request and a notification, for KRX023 (no handlers: KRX001 is its own).</summary>
+    private const string MessagesLibrary = """
+        namespace Messages;
+        public sealed record Ping : Keryx.IRequest<string>;
+        public sealed record Numbers : Keryx.IStreamRequest<int>;
+        public sealed record Happened : Keryx.INotification;
+        """;
+
+    [Test]
+    [Arguments(false, "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    [Arguments(false, "private static async IAsyncEnumerable<int> Handle(Messages.Numbers request) { yield return 1; await Task.Yield(); }", "Numbers")]
+    [Arguments(true, "private static string Handle(Messages.Ping request) => \"\";", "Ping")]
+    public async Task KRX023_Handler_Of_A_Request_Declared_In_Another_Assembly(
+        bool host,
+        string handler,
+        string request,
+        CancellationToken cancellationToken
+    )
+    {
+        // A library and a host alike: a request's handler lives in the request's own assembly (decision 2026-11-26, KeryxContracts removed).
+        var result = await ( host ? Builder.WithKeryxHost() : Builder )
+                          .AddCompilationReferences(await CompileLibraryAsync("Messages", MessagesLibrary, cancellationToken))
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + "public static partial class H { " + handler + " }")
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX023"]);
+        await Assert.That(Messages(diagnostics, "KRX023"))
+                    .IsEquivalentTo(
+                         [
+                             $"Handler 'H.Handle({request})' handles '{request}', which is declared in assembly 'Messages'; a request or stream request is handled in the assembly that declares it",
+                         ]
+                     );
+        var diagnostic = diagnostics.Single();
+        await Assert.That(diagnostic.Severity).IsEqualTo(Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
+        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("request");
+        await Assert.That(diagnostic.Descriptor.HelpLinkUri).IsEqualTo(Descriptors.HelpLinkBase + "krx023");
+        // The handler generator skips the handler, as it does for every handler error: no partial, so no manifest entry either.
+        await Assert.That(result.Results.Values.SelectMany(static r => r.SyntaxTrees).Where(static t => t.ToString().Contains("class H", StringComparison.Ordinal))).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public sealed record Ping : IRequest<string>; public static partial class H { private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public static partial class H { private static ValueTask Handle(Messages.Happened notification) => default; }")]
+    [Arguments("public sealed record Local : Messages.IBase; public static partial class H { private static string Handle(Local request) => \"\"; }")]
+    public async Task KRX023_Own_Requests_And_Notifications_From_Anywhere(string source, CancellationToken cancellationToken)
+    {
+        // Notifications are unaffected: a handler of a notification declared in another assembly is fine. A request declared here is fine
+        // even when its request interface comes from another assembly.
+        var result = await Builder
+                          .AddCompilationReferences(await CompileLibraryAsync("Messages", MessagesLibrary + "public interface IBase : Keryx.IRequest<string> { }", cancellationToken))
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + source)
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+
+        await Assert.That(Ids(result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(false, "public partial class H : IDisposable { public void Dispose() { } private static string Handle(Ping request) => \"\"; }", "System.IDisposable")]
+    [Arguments(false, "public partial class H : IAsyncDisposable { public ValueTask DisposeAsync() => default; private static string Handle(Ping request, IServiceProvider services) => \"\"; }", "System.IAsyncDisposable")]
+    [Arguments(false, "public abstract class Owner : IDisposable { public void Dispose() { } } public partial class H : Owner { private static string Handle(Ping request) => \"\"; }", "System.IDisposable")]
+    [Arguments(false, "public interface IResource : IAsyncDisposable { } public partial class H : IResource { public ValueTask DisposeAsync() => default; private static ValueTask Handle(Rang notification) => default; }", "System.IAsyncDisposable")]
+    [Arguments(true, "public partial class H : IDisposable { public void Dispose() { } private static string Handle(Ping request, IServiceProvider services) => \"\"; }", "System.IDisposable")]
+    public async Task KRX025_Disposable_Handler_Class(bool host, string source, string disposable, CancellationToken cancellationToken)
+    {
+        // Directly, through a base class or through another interface, with and without injected parameters, in a library and in a host:
+        // Keryx never disposes a handler object (owner decision 45).
+        var result = await ( host ? Builder.WithGenerator<HostGenerator>().WithKeryxHost() : Builder )
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + Ping + "public sealed record Rang : INotification;\n" + source)
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX025"]);
+        await Assert.That(Messages(diagnostics, "KRX025"))
+                    .IsEquivalentTo(
+                         [$"Handler class 'H' implements '{disposable}'; a handler class is stateless and is never disposed, so inject the disposable service instead"]
+                     );
+        var diagnostic = diagnostics.Single();
+        await Assert.That(diagnostic.Severity).IsEqualTo(DiagnosticSeverity.Error);
+        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("H");
+        await Assert.That(diagnostic.Descriptor.HelpLinkUri).IsEqualTo(Descriptors.HelpLinkBase + "krx025");
+        // The handler generator skips the handler, as it does for every handler error: no partial, so no manifest entry either.
+        await Assert.That(result.Results.Values.SelectMany(static r => r.SyntaxTrees).Where(static t => t.ToString().Contains("partial class H", StringComparison.Ordinal))).IsEmpty();
+        if (!host)
+        {
+            return;
+        }
+
+        // In a host the composer leaves the skipped handler out as well: KRX025 is the only error, so the generated code compiles (a
+        // mediator that still called H's static entry, which was not generated, would fail with CS0117), and nothing dispatches Ping or
+        // reaches H.
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id)).IsEquivalentTo(["KRX025"]);
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).DoesNotContain("global::H");
+        await Assert.That(mediator).DoesNotContain("global::Ping");
+    }
+
+    [Test]
+    [Arguments("public partial class H { private static string Handle(Ping request, IDisposable resource, IAsyncDisposable other) => \"\"; }")]
+    [Arguments("public sealed class Resource : IDisposable { public void Dispose() { } } public partial class H { private static string Handle(Ping request, Resource resource) => \"\"; }")]
+    [Arguments("public static partial class H { private static string Handle(Ping request) => \"\"; } public sealed class Helper : IDisposable { public void Dispose() { } }")]
+    public async Task KRX025_Disposable_Services_Are_Fine(string source, CancellationToken cancellationToken)
+    {
+        // Injecting a disposable service is what KRX025 asks for: the container that created it disposes it.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("public static partial class H { [HandlerOrder(1)] private static string Handle(Ping request) => \"\"; }")]
+    [Arguments("public static class Helpers { [HandlerOrder(1)] public static void Run() { } }")]
+    public async Task KRX040_HandlerOrder_Not_On_A_Notification_Handler(string source, CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX040"]);
+    }
+
+    [Test]
+    public async Task KRX040_HandlerOrder_On_A_Notification_Handler(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            "public sealed record Placed : INotification; public static partial class H { [HandlerOrder(1)] private static ValueTask Handle(Placed e) => default; }",
+            cancellationToken
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    public async Task Reports_Nothing_Below_CSharp_14(CancellationToken cancellationToken)
+    {
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(
+            "public sealed class Ping : IRequest<string> { } public class H { public string Handle(Ping request) => \"\"; }",
+            cancellationToken,
+            Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp13
+        );
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
+    public async Task Reports_Every_Rule_With_Its_Message(CancellationToken cancellationToken)
+    {
+        var result = await Builder
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(
+                               Usings + """
+                               namespace Sample;
+
+                               public sealed record Ping : IRequest<string>;
+                               public sealed record Pong : IRequest<string>;
+                               public interface IService { }
+                               internal interface IHidden { }
+
+                               public static class NotPartial
+                               {
+                                   internal partial class Handler
+                                   {
+                                       public Handler() { }
+                                       public void InvokeAsync() { }
+                                       public string Handle(Ping request, ref int value, IHidden hidden, [FromKeyedServices] IService service) => "";
+                                   }
+                               }
+
+                               public static partial class Twice
+                               {
+                                   [HandlerOrder(1)]
+                                   private static ValueTask<string?> Handle(Pong request, IService service) => default;
+                                   private static int HandleAsync(Pong request, CancellationToken a, CancellationToken b) => 1;
+                               }
+
+                               public partial class Disposable : IDisposable
+                               {
+                                   public void Dispose() { }
+                                   private static string Handle(Ping request) => "";
+                               }
+                               """
+                           )
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+
+        await Verify(Sorted(result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics));
+    }
+}

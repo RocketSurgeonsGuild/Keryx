@@ -1,0 +1,33 @@
+[tools]
+dotnet = [
+  { version = "11.0.100" },
+  # The net10.0 test runtime: tests run each target framework on its own major (test/Directory.Build.props).
+  { version = "10.0.15", runtime = "dotnet" },
+]
+hk = "2.13.0"
+pkl = "0.33.1"
+actionlint = "1.7.12"
+biome = "2.5.2"
+tombi = "1.11.3"
+oxfmt = "0.75.0"
+
+"dotnet:gitversion.tool" = "6.6.0"
+"dotnet:dotnet-reportgenerator-globaltool" = "5.5.3"
+"dotnet:jetbrains.resharper.globaltools" = "2025.3.3"
+"dotnet:dotnet-coverage" = "18.5.1"
+"dotnet:dotnet-outdated-tool" = "4.7.0"
+"dotnet:verify.tool" = "0.7.0"
+"dotnet:gitreleasemanager.tool" = "0.20.0"
+
+[tasks]
+build = { run = "dotnet run build/Build.cs", description = "Restore, build, test and pack through the ModularPipelines build (build/Build.cs)" }
+
+[settings]
+experimental = true
+prereleases = true
+# dotnet-install comes from dot.net, which times out now and then on CI runners: more and longer attempts than the default 3 x 30s.
+http_retries = 6
+http_timeout = "90s"
+
+[env]
+HK_MISE = 1

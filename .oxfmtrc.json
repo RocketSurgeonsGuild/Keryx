@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+  "tabWidth": 4,
+  "singleQuote": true,
+  "ignorePatterns": ["**/*.verified.*", "**/*.received.*", ".claude/", ".copilot/", "**/AnalyzerReleases.*.md", "README.md", "Readme.md", "**/*.min.css", "**/*.min.js"],
+  "overrides": [
+    {
+      "files": ["*.mdx"],
+      "options": {
+        "singleQuote": false
+      }
+    }
+  ]
+}

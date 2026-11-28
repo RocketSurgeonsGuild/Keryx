@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        Keryx, as a host so its generated KeryxMediator and AddKeryx() are in this assembly. Both are internal, so the benchmark runner sees
+        them through InternalsVisibleTo. Keryx is wired up as a package consumer gets it, like the samples (samples/Directory.Build.targets).
+        A class library is not a host by default (build/Keryx.targets), so it says so with KeryxHost.
+    -->
+    <PropertyGroup>
+        <KeryxHost>true</KeryxHost>
+    </PropertyGroup>
+    <!-- Padding.cs: more than DispatchThreshold request, stream request and notification types, for the above-threshold dispatch runs. -->
+    <PropertyGroup Condition="'$(KeryxDispatchPadding)' == 'true'">
+        <DefineConstants>$(DefineConstants);KERYX_DISPATCH_PADDING</DefineConstants>
+    </PropertyGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="Keryx.Benchmarks" />
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <ProjectReference Include="../../../src/Keryx/Keryx.csproj" />
+        <ProjectReference Include="../../../src/Keryx.Analyzers/Keryx.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <PackageReference Include="Specular.Scanning.Sources" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+    </ItemGroup>
+    <Import Project="../../../src/Keryx/build/Keryx.props" />
+    <Import
+        Project="$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets"
+        Condition="'$(_SpecularScanningCacheImported)' != 'true' and '$(PkgSpecular_Scanning_Sources)' != '' and Exists('$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets')"
+    />
+    <Import Project="../../../src/Keryx/build/Keryx.targets" />
+</Project>

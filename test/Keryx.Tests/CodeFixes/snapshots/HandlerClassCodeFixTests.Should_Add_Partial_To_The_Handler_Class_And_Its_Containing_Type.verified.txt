@@ -1,0 +1,67 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample;
+
+public static class Orders
+{
+    public class Create
+    {
+        public sealed record Command : IRequest<int>;
+
+        private static int Handle(Command request) => 1;
+    }
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX004: 'Orders' must be partial, because it contains a handler class Keryx generates into,
+      Title: Make 'Orders' partial,
+      EquivalenceKey: Keryx.AddPartial,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+public static partial class Orders
+{
+    public class Create
+    {
+        public sealed record Command : IRequest<int>;
+
+        private static int Handle(Command request) => 1;
+    }
+}
+      },
+      Remaining: [
+        KRX004: 'Orders.Create' must be partial, because Keryx generates the other half of this handler class
+      ]
+    },
+    {
+      Diagnostic: KRX004: 'Orders.Create' must be partial, because Keryx generates the other half of this handler class,
+      Title: Make 'Create' partial,
+      EquivalenceKey: Keryx.AddPartial,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+public static class Orders
+{
+    public partial class Create
+    {
+        public sealed record Command : IRequest<int>;
+
+        private static int Handle(Command request) => 1;
+    }
+}
+      },
+      Remaining: [
+        KRX004: 'Orders' must be partial, because it contains a handler class Keryx generates into
+      ]
+    }
+  ]
+}

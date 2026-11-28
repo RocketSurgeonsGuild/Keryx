@@ -1,0 +1,33 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample
+{
+    public sealed record ListNames : IStreamRequest<string>;
+
+    public sealed class ListNamesHandler { }
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX001: Request type 'ListNames' has no handler in this assembly,
+      Title: Add a handler for 'ListNames',
+      EquivalenceKey: Keryx.AddHandlerStub,
+      After: {
+        ListNamesHandler2.cs:
+using System;
+using System.Collections.Generic;
+using System.Threading;
+
+namespace Sample
+{
+    public partial class ListNamesHandler2
+    {
+        private static IAsyncEnumerable<string> Handle(ListNames request, CancellationToken ct) => throw new NotImplementedException();
+    }
+}
+      }
+    }
+  ]
+}

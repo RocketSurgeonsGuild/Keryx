@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The hand-written direct-call baseline: the subjects' handler bodies, called directly. The real-world scenarios' baseline is a
+        hand-written service resolved from DI that does the same work as each library's behaviors and handler (RealWorld.cs).
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

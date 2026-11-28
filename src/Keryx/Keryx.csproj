@@ -1,0 +1,108 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net10.0;net11.0</TargetFrameworks>
+        <!-- ArgumentNullException.ThrowIfNull on netstandard2.0. -->
+        <PolyArgumentExceptions>true</PolyArgumentExceptions>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">true</IsAotCompatible>
+        <PackageTags>$(PackageTags);dependency-injection;microsoft-extensions</PackageTags>
+        <PackageDescription>A source-generated mediator: handlers are plain private static methods, and a Roslyn generator emits all dispatch and pipeline code at compile time. No reflection, Native AOT and trimming safe.</PackageDescription>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Polyfill" PrivateAssets="all" />
+        <!--
+            Generated host code uses IServiceCollection, IServiceProvider and the keyed-service APIs. The version follows the target framework
+            (Directory.Packages.props, OQ-8).
+        -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="System.Threading.Tasks.Extensions" />
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+    </ItemGroup>
+    <!--
+        The generators, analyzers and code fixes (one assembly, Keryx.Analyzers) ship inside this package (analyzers/dotnet/cs), so a
+        project that references Keryx runs them. Built before this project; never referenced as an assembly.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\Keryx.Analyzers\Keryx.Analyzers.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="build/*.*" Pack="true" PackagePath="build" />
+        <None Include="buildMultiTargeting/*.*" Pack="true" PackagePath="buildMultiTargeting" />
+        <None Include="buildTransitive/*.*" Pack="true" PackagePath="buildTransitive" />
+    </ItemGroup>
+
+    <!--
+        Checks the packed dependency groups (OQ-8, OQ-56): net10.0 lists Microsoft.Extensions.DependencyInjection.Abstractions 10.0.x,
+        netstandard2.0 lists 8.0.x, and net11.0 lists nothing, because the .NET 11 shared framework carries the assembly and package pruning
+        drops the reference. Fails the pack if a later SDK prunes differently or a workaround brings the net11.0 dependency back.
+    -->
+    <Target Name="_KeryxCheckPackedDependencies" AfterTargets="GenerateNuspec" DependsOnTargets="_GetOutputItemsFromPack">
+        <PropertyGroup>
+            <_KeryxNuspec>@(_OutputPackItems->WithMetadataValue('Extension', '.nuspec')->Distinct())</_KeryxNuspec>
+            <_KeryxNuspec>$(_KeryxNuspec.Split(';')[0])</_KeryxNuspec>
+            <_KeryxDependencyGroup>//*[local-name()='dependencies']/*[local-name()='group']</_KeryxDependencyGroup>
+            <_KeryxAbstractions>*[local-name()='dependency'][@id='Microsoft.Extensions.DependencyInjection.Abstractions']/@version</_KeryxAbstractions>
+        </PropertyGroup>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net10.0']/$(_KeryxAbstractions)">
+            <Output TaskParameter="Result" PropertyName="_KeryxNet10Version" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='.NETStandard2.0']/$(_KeryxAbstractions)">
+            <Output TaskParameter="Result" PropertyName="_KeryxNetStandardVersion" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net11.0']/@targetFramework">
+            <Output TaskParameter="Result" PropertyName="_KeryxNet11Group" />
+        </XmlPeek>
+        <XmlPeek XmlInputPath="$(_KeryxNuspec)" Query="$(_KeryxDependencyGroup)[@targetFramework='net11.0']/*[local-name()='dependency']/@id">
+            <Output TaskParameter="Result" ItemName="_KeryxNet11Dependency" />
+        </XmlPeek>
+        <Error Condition="'$(_KeryxNuspec)' == '' Or !Exists('$(_KeryxNuspec)')" Text="Keryx package check: no nuspec found after GenerateNuspec." />
+        <Error Condition="!$(_KeryxNet10Version.StartsWith('10.0.'))"
+               Text="Keryx package check: the net10.0 dependency group must list Microsoft.Extensions.DependencyInjection.Abstractions 10.0.x (found '$(_KeryxNet10Version)') in $(_KeryxNuspec) (OQ-8)." />
+        <Error Condition="!$(_KeryxNetStandardVersion.StartsWith('8.0.'))"
+               Text="Keryx package check: the netstandard2.0 dependency group must list Microsoft.Extensions.DependencyInjection.Abstractions 8.0.x (found '$(_KeryxNetStandardVersion)') in $(_KeryxNuspec) (OQ-8)." />
+        <Error Condition="'$(_KeryxNet11Group)' != 'net11.0' Or '@(_KeryxNet11Dependency)' != ''"
+               Text="Keryx package check: the net11.0 dependency group must exist and be empty (found '@(_KeryxNet11Dependency)') in $(_KeryxNuspec) (OQ-56)." />
+    </Target>
+
+    <!--
+        Checks that the package ships its MSBuild files in all three folders ("A host is an MSBuild property"): build/ for direct consumers,
+        buildMultiTargeting/ for the outer build of a multi-targeting project, and buildTransitive/, the only thing that gives a project
+        that gets Keryx transitively the KeryxHost and LangVersion defaults. Fails the pack if an item above is dropped or packed elsewhere.
+    -->
+    <Target Name="_KeryxCheckPackedBuildFiles" AfterTargets="GenerateNuspec" DependsOnTargets="_GetOutputItemsFromPack">
+        <PropertyGroup>
+            <_KeryxBuildFilesNuspec>@(_OutputPackItems->WithMetadataValue('Extension', '.nuspec')->Distinct())</_KeryxBuildFilesNuspec>
+            <_KeryxBuildFilesNuspec>$(_KeryxBuildFilesNuspec.Split(';')[0])</_KeryxBuildFilesNuspec>
+        </PropertyGroup>
+        <ItemGroup>
+            <_KeryxRequiredBuildFile Include="build/Keryx.props;build/Keryx.targets" />
+            <_KeryxRequiredBuildFile Include="buildMultiTargeting/Keryx.props;buildMultiTargeting/Keryx.targets" />
+            <_KeryxRequiredBuildFile Include="buildTransitive/Keryx.props;buildTransitive/Keryx.targets" />
+        </ItemGroup>
+        <XmlPeek XmlInputPath="$(_KeryxBuildFilesNuspec)" Query="//*[local-name()='files']/*[local-name()='file']/@target">
+            <Output TaskParameter="Result" ItemName="_KeryxPackedFileTarget" />
+        </XmlPeek>
+        <PropertyGroup>
+            <_KeryxPackedFileTargets>;@(_KeryxPackedFileTarget);</_KeryxPackedFileTargets>
+            <_KeryxPackedFileTargets>$(_KeryxPackedFileTargets.Replace('\', '/'))</_KeryxPackedFileTargets>
+        </PropertyGroup>
+        <Error Condition="'$(_KeryxBuildFilesNuspec)' == '' Or !Exists('$(_KeryxBuildFilesNuspec)')" Text="Keryx package check: no nuspec found after GenerateNuspec." />
+        <Error Condition="!$(_KeryxPackedFileTargets.Contains(';%(_KeryxRequiredBuildFile.Identity);'))"
+               Text="Keryx package check: %(_KeryxRequiredBuildFile.Identity) is not packed in $(_KeryxBuildFilesNuspec) (A host is an MSBuild property)." />
+    </Target>
+
+    <!--
+        Adds Keryx.Analyzers.dll (and the System.Text.Json the generator loads on .NET Framework compiler hosts) to analyzers/dotnet/cs,
+        and the Specular.Scanning scan cache wiring that build/Keryx.targets imports to build/. The analyzer project names its own files
+        (GetKeryxPackageFiles), so their output paths live in one place.
+    -->
+    <Target Name="_KeryxAddAnalyzerPackageFiles" BeforeTargets="_GetPackageFiles">
+        <MSBuild Projects="..\Keryx.Analyzers\Keryx.Analyzers.csproj" Targets="GetKeryxPackageFiles" Properties="Configuration=$(Configuration)">
+            <Output TaskParameter="TargetOutputs" ItemName="_KeryxAnalyzerPackageFile" />
+        </MSBuild>
+        <ItemGroup>
+            <None Include="@(_KeryxAnalyzerPackageFile)" Pack="true" PackagePath="%(_KeryxAnalyzerPackageFile.PackagePath)" Visible="false" />
+        </ItemGroup>
+    </Target>
+</Project>

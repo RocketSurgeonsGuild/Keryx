@@ -1,0 +1,1372 @@
+using System.Collections.Immutable;
+using System.Globalization;
+using System.Text;
+using Keryx.Analyzers.Behaviors;
+using Keryx.Analyzers.Handlers;
+using Microsoft.CodeAnalysis.Text;
+using Specular.Scanning;
+
+namespace Keryx.Analyzers.Hosts;
+
+/// <summary>
+///     Writes the host's generated types (ADR 0001, Generated host), as text through a <see cref="CodeWriter" />: the transient
+///     <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request and stream
+///     request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for the pipelines
+///     that resolve something, kept per scope in a scoped state (owner decision 46), and flat link structs that take only
+///     what they read or pass on (ADR 0001, Generated pipeline shape), and
+///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c>, which registers the mediator and the scope state only. Behaviors are static: links
+///     call their behavior methods directly, and the pipeline contexts resolve their injected services. Handlers are not registered either
+///     (owner decisions 42 and 44): a context resolves the services the host's own handler injects and calls its static entry, and constructs
+///     a referenced handler with <c>new</c>.
+/// </summary>
+internal static partial class HostEmitter
+{
+    public const string MediatorHintName = "KeryxMediator.Keryx.g.cs";
+    public const string ServiceCollectionExtensionsHintName = "KeryxServiceCollectionExtensions.Keryx.g.cs";
+
+    /// <summary>
+    ///     Above this many request types, generic <c>Send</c> looks the runtime type up in a <c>FrozenDictionary&lt;Type, int&gt;</c> and switches
+    ///     on the index; up to it, it compares the runtime type with each request type in turn (ADR 0001, Generic entry points). Set from
+    ///     <c>DispatchBenchmarks</c> (OQ-15): the lookup costs about 4.5 ns whatever the count, the chain about 0.13 ns per compare, so at 32
+    ///     types the chain's worst case is within 1 ns of the lookup and its average is faster.
+    /// </summary>
+    public const int DispatchThreshold = 32;
+
+    private const string ValueTask = "global::System.Threading.Tasks.ValueTask";
+    private const string CancellationToken = "global::System.Threading.CancellationToken";
+    private const string ServiceProvider = "global::System.IServiceProvider";
+    private const string Unsafe = "global::System.Runtime.CompilerServices.Unsafe";
+    private const string ThrowIfNull = "global::System.ArgumentNullException.ThrowIfNull";
+    private const string ServiceProviderExtensions = "global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions";
+    private const string KeyedServiceProviderExtensions = "global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions";
+    private const string KeyedServiceProvider = "global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider";
+    private const string ServiceCollection = "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
+    private const string DescriptorExtensions = "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
+
+    /// <summary>The name of the scope's service provider in generated factories and pipeline contexts.</summary>
+    private const string ServiceProviderName = "serviceProvider";
+
+    /// <summary>The name of the pipeline context, as a local at the entry of a pipeline and as a parameter of its links.</summary>
+    private const string PipelineName = "pipeline";
+
+    /// <summary>The parameters every pipeline method, typed overload and link ends with, after the message.</summary>
+    private const string TokenParameter = CancellationToken + " cancellationToken";
+
+    /// <summary>The token parameter of a public entry point, which defaults.</summary>
+    private const string OptionalTokenParameter = TokenParameter + " = default";
+
+    public static SourceText Mediator(HostSettings settings, HostComposition composition)
+    {
+        var requests = composition.Requests;
+        var streams = composition.Streams;
+        var notifications = composition.Notifications.Where(static n => n.IsActive).ToImmutableArray();
+
+        // About 2.5 KB of text per pipeline with a few behaviors, so the builder rarely grows.
+        var writer = new CodeWriter(capacity: 8192 + 2560 * ( requests.Length + streams.Length + composition.Notifications.Length ));
+        // The scope state's fields: one per pipeline with a context, requests, then streams, then notifications.
+        var contextFields = new List<string>();
+        contextFields.AddRange(Enumerable.Range(0, requests.Length).Where(i => HasContext(requests[i])).Select(ContextField));
+        contextFields.AddRange(Enumerable.Range(0, streams.Length).Where(i => HasContext(streams[i])).Select(StreamContextField));
+        contextFields.AddRange(Enumerable.Range(0, notifications.Length).Where(i => HasContext(notifications[i])).Select(NotificationContextField));
+        writer.Namespace(settings.Namespace);
+        writer.Member();
+        writer.Documentation(
+            contextFields.Count > 0
+                ?
+                [
+                    "<summary>",
+                    "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
+                    "    notification through its pipeline to its handlers. Transient and small: it holds the scope's provider and, from its first call",
+                    "    that needs a pipeline context, the scope state, which every mediator of the scope shares and which keeps each pipeline context,",
+                    "    created once per scope on first use, so nothing is resolved or allocated per call after that. Registered by",
+                    "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
+                    "</summary>",
+                ]
+                :
+                [
+                    "<summary>",
+                    "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
+                    "    notification through its pipeline to its handlers. Transient and small: it holds the scope's provider, and no pipeline of this",
+                    "    host has a context, so nothing is resolved or allocated per call. Registered by",
+                    "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
+                    "</summary>",
+                ]
+        );
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal sealed partial class KeryxMediator : global::Keryx.IMediator");
+        writer.Open();
+
+        writer.Member(plainField: true);
+        writer.Line($"private readonly {ServiceProvider} __serviceProvider;");
+        if (contextFields.Count > 0)
+        {
+            writer.Member(plainField: true);
+            writer.Line($"private {ScopeStateName}? {ScopeStateField};");
+        }
+
+        writer.Member();
+        writer.Documentation(
+            "<summary>Creates a mediator over a scope.</summary>",
+            contextFields.Count > 0
+                ? $"<param name=\"{ServiceProviderName}\">The scope's service provider. The scope state and the pipeline contexts are resolved from it.</param>"
+                : $"<param name=\"{ServiceProviderName}\">The scope's service provider.</param>"
+        );
+        writer.Line($"public KeryxMediator({ServiceProvider} {ServiceProviderName})");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}({ServiceProviderName});");
+        writer.Line($"__serviceProvider = {ServiceProviderName};");
+        writer.Close();
+
+        for (var i = 0; i < requests.Length; i++)
+        {
+            WriteTypedSend(writer, requests[i].Handler, i);
+        }
+
+        WriteGenericSend(writer, requests.Select(static p => p.Handler).ToImmutableArray());
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            WriteTypedStream(writer, streams[i].Handler, i);
+        }
+
+        WriteGenericStream(writer, streams.Select(static p => p.Handler).ToImmutableArray());
+        WritePublish(writer, composition.Notifications, notifications);
+
+        for (var i = 0; i < requests.Length; i++)
+        {
+            WriteCore(writer, requests[i], i);
+        }
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            WriteStreamCore(writer, streams[i], i);
+        }
+
+        for (var i = 0; i < notifications.Length; i++)
+        {
+            WritePublishCore(writer, notifications[i], i);
+        }
+
+        if (notifications.Any(static n => n.Notification.Parallel && !n.Handlers.IsEmpty))
+        {
+            WriteWhenAllHandlers(writer);
+        }
+
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow("private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType)", "new(requestType)");
+
+        if (contextFields.Count > 0)
+        {
+            WriteResolveState(writer);
+            WriteScopeState(writer, contextFields);
+        }
+
+        for (var i = 0; i < requests.Length; i++)
+        {
+            if (HasContext(requests[i]) || !requests[i].Behaviors.IsEmpty)
+            {
+                WriteContext(writer, requests[i], i);
+            }
+        }
+
+        for (var i = 0; i < streams.Length; i++)
+        {
+            if (HasContext(streams[i]) || !streams[i].Behaviors.IsEmpty)
+            {
+                WriteStreamContext(writer, streams[i], i);
+            }
+        }
+
+        for (var i = 0; i < notifications.Length; i++)
+        {
+            WriteNotificationContext(writer, notifications[i], i);
+        }
+
+        writer.Close();
+        writer.Close();
+        return writer.ToSourceText();
+    }
+
+    public static SourceText ServiceCollectionExtensions(HostSettings settings, HostComposition composition)
+    {
+        var writer = new CodeWriter(capacity: 4096);
+        writer.Namespace(settings.Namespace);
+        writer.Member();
+        writer.Documentation("<summary>Registers this host's Keryx mediator.</summary>");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal static class KeryxServiceCollectionExtensions");
+        writer.Open();
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    Registers <see cref=\"KeryxMediator\" />, <see cref=\"global::Keryx.IMediator\" />, <see cref=\"global::Keryx.ISender\" /> and",
+            "    <see cref=\"global::Keryx.IPublisher\" /> as transient factories that each create a mediator over the provider that resolves",
+            "    it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every",
+            "    mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the",
+            "    services they inject, call this host's own handlers through their static entries and construct referenced handlers.",
+            "    Registrations that already exist are kept, so a second call does nothing.",
+            "</summary>",
+            "<param name=\"services\">The service collection.</param>",
+            "<returns>The same service collection.</returns>"
+        );
+        writer.Line($"public static {ServiceCollection} AddKeryx(this {ServiceCollection} services)");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}(services);");
+        // Transient mediators over a scoped state (owner decision 46): the container tracks a transient result only when it is
+        // disposable, and neither the mediator nor the state is, so resolving a mediator adds nothing to the scope; the state is the scope's
+        // one entry for Keryx, and it is resolved only by the first call that needs a pipeline context.
+        writer.Line($"{DescriptorExtensions}.TryAddTransient(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
+        foreach (var service in (string[])["global::Keryx.IMediator", "global::Keryx.ISender", "global::Keryx.IPublisher"])
+        {
+            writer.Line($"{DescriptorExtensions}.TryAddTransient<{service}>(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
+        }
+
+        if (HasScopeState(composition))
+        {
+            writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator.{ScopeStateName}()")});");
+        }
+
+        writer.Line("return services;");
+        writer.Close();
+        writer.Close();
+        writer.Close();
+        return writer.ToSourceText();
+    }
+
+    /// <summary>A registration's factory: <c>static serviceProvider =&gt; body</c>.</summary>
+    private static string Factory(string body) => $"static {ServiceProviderName} => {body}";
+
+    private static void WriteTypedSend(CodeWriter writer, HostHandlerModel request, int index)
+    {
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            $"    Sends a <c>{Display(request.MessageType)}</c> through its pipeline to its handler, without type dispatch{( request.MessageIsValueType ? " and without boxing it" : "" )}.",
+            "</summary>",
+            "<param name=\"request\">The request.</param>",
+            "<param name=\"cancellationToken\">The token passed to the handler.</param>",
+            "<returns>The handler's response.</returns>"
+        );
+        writer.Line($"public {ValueTask}<{request.ResponseType}> Send({request.MessageType} request, {OptionalTokenParameter})");
+        writer.Open();
+        if (!request.MessageIsValueType)
+        {
+            writer.Line($"{ThrowIfNull}(request);");
+        }
+
+        writer.Line($"return {CoreName(index)}(request, cancellationToken);");
+        writer.Close();
+    }
+
+    private static void WriteGenericSend(CodeWriter writer, ImmutableArray<HostHandlerModel> requests)
+    {
+        writer.Member();
+        writer.Documentation("<inheritdoc />");
+        writer.Line($"public {ValueTask}<TResponse> Send<TResponse>(global::Keryx.IRequest<TResponse> request, {OptionalTokenParameter})");
+        writer.Open();
+        writer.Line($"{ThrowIfNull}(request);");
+        WriteRequestDispatch(writer, requests, "__RequestIndex", static (_, i, request) => $"{DispatchName(i)}<TResponse>({request}, cancellationToken)");
+        writer.Close();
+
+        if (requests.Length > DispatchThreshold)
+        {
+            WriteTypeTable(writer, "request", "__requestTypes", "__RequestIndex", requests.Select(static h => h.MessageType).ToImmutableArray());
+        }
+
+        for (var i = 0; i < requests.Length; i++)
+        {
+            WriteDispatchArm(writer, requests[i], i);
+        }
+    }
+
+    /// <summary>
+    ///     The statements that dispatch generic <c>Send</c> or <c>Stream</c> on the request's runtime type (ADR 0001, Generic entry points). Up
+    ///     to <see cref="DispatchThreshold" /> types, a type pattern per request type, <c>switch (request) { case global::X r: return ...;
+    ///     default: throw __HandlerNotFound(request.GetType()); }</c>: every request type the host composes is sealed (KRX024, KRX038), so the
+    ///     pattern matches the exact type only, and the JIT compiles it to one method-table compare. Above the threshold,
+    ///     <c>var requestType = request.GetType();</c> and <c>switch (Index(requestType)) { case 0: return ...; default: throw ...; }</c>, which
+    ///     compiles to a jump table on the exact type. Without types, the throw alone.
+    /// </summary>
+    /// <remarks>
+    ///     A switch statement with one <c>return</c> per section, not a switch expression: C# lowers a switch expression to one result local
+    ///     that every arm stores and a single return, and the JIT then neither tail-calls the arms nor avoids zeroing that result in the prolog
+    ///     (OQ-67). A struct request's section has no designation (<c>case global::S:</c>) and its arm gets <c>request</c> as the interface and
+    ///     unboxes it itself: a pattern variable would unbox the struct into a local of the dispatching method, which the JIT zeroes in the
+    ///     prolog of every call (it holds references) and whose copy keeps that arm from being a tail call.
+    /// </remarks>
+    /// <param name="writer">The writer, in the dispatching method's body.</param>
+    /// <param name="requests">The dispatched request or stream request types, in switch order.</param>
+    /// <param name="lookup">The index method above the threshold.</param>
+    /// <param name="arm">
+    ///     The result of the section of type <c>i</c>, given the request: as its exact type for a class, as the interface-typed <c>request</c>
+    ///     for a struct.
+    /// </param>
+    private static void WriteRequestDispatch(
+        CodeWriter writer,
+        ImmutableArray<HostHandlerModel> requests,
+        string lookup,
+        Func<HostHandlerModel, int, string, string> arm
+    )
+    {
+        if (requests.IsEmpty)
+        {
+            writer.Line("throw __HandlerNotFound(request.GetType());");
+            return;
+        }
+
+        if (requests.Length > DispatchThreshold)
+        {
+            writer.Line("var requestType = request.GetType();");
+            writer.Switch(lookup + "(requestType)");
+            for (var i = 0; i < requests.Length; i++)
+            {
+                var request = requests[i];
+                writer.Section(Case(i), $"return {arm(request, i, request.MessageIsValueType ? "request" : Exact(request.MessageType, false, "request"))};");
+            }
+
+            writer.Section("default:", "throw __HandlerNotFound(requestType);");
+            writer.CloseStatement();
+            return;
+        }
+
+        writer.Switch("request");
+        for (var i = 0; i < requests.Length; i++)
+        {
+            var request = requests[i];
+            if (request.MessageIsValueType)
+            {
+                writer.Section($"case {request.MessageType}:", $"return {arm(request, i, "request")};");
+            }
+            else
+            {
+                writer.Section($"case {request.MessageType} r:", $"return {arm(request, i, "r")};");
+            }
+        }
+
+        writer.Section("default:", "throw __HandlerNotFound(request.GetType());");
+        writer.CloseStatement();
+    }
+
+    /// <summary>
+    ///     The statements that dispatch generic <c>Publish</c> on the exact runtime type of a notification held as a reference (ADR 0001,
+    ///     Generic entry points): notification types are not sealed (a handler of a base type receives derived notifications through the
+    ///     host's expansion, so a type pattern would match a derived type the host does not know), so up to <see cref="DispatchThreshold" />
+    ///     types the sections keep exact-type guards, <c>switch (type) { case var _ when type == typeof(X): return ...; default: ... }</c>;
+    ///     above it, <c>switch (Index(type)) { case 0: return ...; default: ... }</c>, which compiles to a jump table.
+    /// </summary>
+    /// <param name="writer">The writer, in the dispatching method's body.</param>
+    /// <param name="typeVariable">The local that holds the runtime type.</param>
+    /// <param name="lookup">The index method above the threshold.</param>
+    /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
+    /// <param name="arm">The result of the section of type <c>i</c>.</param>
+    /// <param name="fallback">The statement of the <c>default</c> section.</param>
+    private static void WriteExactTypeDispatch(
+        CodeWriter writer,
+        string typeVariable,
+        string lookup,
+        ImmutableArray<string> types,
+        Func<string, int, string> arm,
+        string fallback
+    )
+    {
+        if (types.IsEmpty)
+        {
+            writer.Line(fallback);
+            return;
+        }
+
+        if (types.Length > DispatchThreshold)
+        {
+            writer.Switch($"{lookup}({typeVariable})");
+            for (var i = 0; i < types.Length; i++)
+            {
+                writer.Section(Case(i), $"return {arm(types[i], i)};");
+            }
+        }
+        else
+        {
+            writer.Switch(typeVariable);
+            for (var i = 0; i < types.Length; i++)
+            {
+                writer.Section($"case var _ when {typeVariable} == typeof({types[i]}):", $"return {arm(types[i], i)};");
+            }
+        }
+
+        writer.Section("default:", fallback);
+        writer.CloseStatement();
+    }
+
+    /// <summary>
+    ///     The <c>FrozenDictionary</c> generic dispatch uses above <see cref="DispatchThreshold" />, and the non-inlined lookup into it.
+    /// </summary>
+    /// <param name="writer">The writer, in the mediator's body.</param>
+    /// <param name="kind">"request", "stream request" or "notification", for the documentation.</param>
+    /// <param name="table">The name of the static table.</param>
+    /// <param name="lookup">The name of the lookup method.</param>
+    /// <param name="types">The dispatched types, fully qualified, in switch order.</param>
+    private static void WriteTypeTable(CodeWriter writer, string kind, string table, string lookup, ImmutableArray<string> types)
+    {
+        var entries = new StringBuilder(64 * types.Length + 64).Append("new global::System.Collections.Generic.KeyValuePair<global::System.Type, int>[] { ");
+        for (var i = 0; i < types.Length; i++)
+        {
+            entries.Append(i == 0 ? "new(typeof(" : ", new(typeof(").Append(types[i]).Append("), ").Append(Digits(i)).Append(')');
+        }
+
+        entries.Append(" }");
+
+        // A field without attributes: no blank line would separate it from another such field, but it follows a method.
+        writer.Member(plainField: true);
+        writer.Documentation($"<summary>Every {kind} type this host dispatches, mapped to its position in the dispatch switch.</summary>");
+        writer.Line(
+            $"private static readonly global::System.Collections.Frozen.FrozenDictionary<global::System.Type, int> {table} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary({entries});"
+        );
+
+        writer.Member();
+        writer.Documentation($"<summary>The position of a {kind} type in the dispatch switch, or -1 for a type this host does not dispatch.</summary>");
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow($"private static int {lookup}(global::System.Type requestType)", $"{table}.TryGetValue(requestType, out var requestIndex) ? requestIndex : -1");
+    }
+
+    /// <summary>
+    ///     One arm of generic dispatch: a class request arrives as its exact type (the switch section's type pattern, or above the threshold
+    ///     the request reinterpreted with <c>Unsafe.As</c>); a struct request arrives as <c>IRequest&lt;TResponse&gt;</c> and is unboxed here,
+    ///     so the dispatching method holds no struct local (<see cref="WriteRequestDispatch" />). It reinterprets the arm's
+    ///     <c>ValueTask&lt;X&gt;</c> as <c>ValueTask&lt;TResponse&gt;</c>, which is the same type at run time because <c>IRequest&lt;&gt;</c>
+    ///     is invariant and a request implements exactly one closing (KRX011). Never a cast through <c>object</c>, which would box the result.
+    /// </summary>
+    /// <remarks>
+    ///     Each arm is its own method, not inlined, so the dispatching method holds no address-taken locals: with one <c>Unsafe.As(ref ...)</c>
+    ///     local per arm (or an <c>out</c> lookup local) in one method, the JIT zeroes every arm's <c>ValueTask</c> in the prolog of each call
+    ///     and cannot tail-call the arms, which measured about 45 ns per <c>Send</c> under Dynamic PGO whatever the arm taken (OQ-15).
+    /// </remarks>
+    private static void WriteDispatchArm(CodeWriter writer, HostHandlerModel request, int index)
+    {
+        var parameter = request.MessageIsValueType ? "global::Keryx.IRequest<TResponse>" : request.MessageType;
+        var argument = request.MessageIsValueType ? Exact(request.MessageType, true, "request") : "request";
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Line($"private {ValueTask}<TResponse> {DispatchName(index)}<TResponse>({parameter} request, {TokenParameter})");
+        writer.Open();
+        writer.Line($"var response = {CoreName(index)}({argument}, cancellationToken);");
+        writer.Line($"return {Unsafe}.As<{ValueTask}<{request.ResponseType}>, {ValueTask}<TResponse>>(ref response);");
+        writer.Close();
+    }
+
+    /// <summary>A message typed as an interface, as its exact type: a class reinterpreted with <c>Unsafe.As</c>, a struct unboxed.</summary>
+    private static string Exact(string type, bool isValueType, string message) =>
+        isValueType ? $"({type})(object){message}" : $"{Unsafe}.As<{type}>({message})";
+
+    /// <summary>
+    ///     The pipeline of one request, without checks: the typed overload and generic dispatch both call it. Without behaviors it calls the
+    ///     handler's invoker; with behaviors it calls the outermost behavior method directly, with explicit type arguments and the first link.
+    /// </summary>
+    private static void WriteCore(CodeWriter writer, HostPipeline pipeline, int index) =>
+        WritePipelineCore(
+            writer,
+            pipeline,
+            $"private {ValueTask}<{pipeline.Handler.ResponseType}> {CoreName(index)}({pipeline.Handler.MessageType} request, {TokenParameter})",
+            ContextName(index),
+            ContextField(index),
+            GetContextName(index),
+            CreateContextName(index),
+            LinkName(0)
+        );
+
+    /// <summary>
+    ///     The pipeline method of a request or stream request: the handler's invoker without behaviors, else the outermost behavior method
+    ///     with the first link, and, when the pipeline has a context, the methods that read it from the scope state and create it
+    ///     (<see cref="WriteContextAccess" />). A pipeline without a context (<see cref="HasContext(HostPipeline)" />) reads nothing: the
+    ///     method calls the outermost behavior method with <c>new(request)</c>.
+    /// </summary>
+    private static void WritePipelineCore(
+        CodeWriter writer,
+        HostPipeline pipeline,
+        string declaration,
+        string contextName,
+        string contextField,
+        string getName,
+        string createName,
+        string firstLink
+    )
+    {
+        var request = pipeline.Handler;
+        var hasContext = HasContext(pipeline);
+        var context = ContextRead(getName);
+        writer.Member();
+        if (pipeline.Behaviors.IsEmpty && request is { StaticEntry: true, Services.Count: > 1 })
+        {
+            // The static entry reads several of the context's fields: the context is read once.
+            writer.Line(declaration);
+            writer.Open();
+            writer.Line($"var {PipelineName} = {context};");
+            writer.Line($"return {HandlerInvocation(request, request.ServiceSlots, request.ContextServices, PipelineName + ".", HandlerFieldName, "request")};");
+            writer.Close();
+        }
+        else if (pipeline.Behaviors.IsEmpty)
+        {
+            writer.Arrow(declaration, HandlerInvocation(request, request.ServiceSlots, request.ContextServices, context + ".", HandlerFieldName, "request"));
+        }
+        else
+        {
+            var links = LinkCaptures(pipeline.Behaviors, End(pipeline));
+            writer.Line(declaration);
+            WriteEntry(
+                writer,
+                "return " + BehaviorCall(pipeline.Behaviors[0], request.ContextServices, contextName + "." + firstLink, links[0], "request") + ";",
+                CallCaptures(pipeline.Behaviors[0], links[0]),
+                context,
+                pipeline.Behaviors[0].ObliviousFit
+            );
+        }
+
+        if (hasContext)
+        {
+            WriteContextAccess(writer, contextName, contextField, getName, createName);
+        }
+    }
+
+    /// <summary>The call of a pipeline's context accessor: the scope's context, created on first use (<see cref="WriteContextAccess" />).</summary>
+    private static string ContextRead(string getName) => getName + "()";
+
+    /// <summary>
+    ///     The body of a pipeline method with behaviors: the call of the outermost behavior method, after <c>var pipeline = ...;</c> when
+    ///     that call reads the context or passes it on; with nullable warnings disabled around the call through an oblivious fit (OQ-58).
+    /// </summary>
+    private static void WriteEntry(CodeWriter writer, string call, Captures captures, string context, bool obliviousFit)
+    {
+        writer.Open();
+        if (( captures & Captures.Pipeline ) != 0)
+        {
+            writer.Line($"var {PipelineName} = {context};");
+        }
+
+        if (obliviousFit)
+        {
+            writer.Directive("#nullable disable warnings");
+            writer.Line(call);
+            writer.Directive("#nullable restore warnings");
+        }
+        else
+        {
+            writer.Line(call);
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     What a link or a behavior method call needs from where it is written (ADR 0001, Generated pipeline shape): the pipeline context, the
+    ///     message, both or neither. A link takes exactly the parameters it reads or passes on, so it captures nothing it does not use and has
+    ///     no unread primary constructor parameter (CS9113).
+    /// </summary>
+    [Flags]
+    private enum Captures
+    {
+        None = 0,
+        Pipeline = 1,
+        Message = 2,
+    }
+
+    /// <summary>
+    ///     What the end of a request or stream pipeline reads: the request, and the context when it holds the handler or its services (the
+    ///     invoker is not static).
+    /// </summary>
+    private static Captures End(HostPipeline pipeline) => Captures.Message | ( pipeline.Handler.StaticInvoker ? Captures.None : Captures.Pipeline );
+
+    /// <summary>
+    ///     What each link reads or passes on, outermost first: the last link what the end of the pipeline reads (<paramref name="end" />),
+    ///     every other link what its call of the next behavior method needs (<see cref="CallCaptures" />).
+    /// </summary>
+    private static Captures[] LinkCaptures(ImmutableArray<PipelineBehaviorModel> behaviors, Captures end)
+    {
+        var links = new Captures[behaviors.Length];
+        links[^1] = end;
+        for (var k = behaviors.Length - 2; k >= 0; k--)
+        {
+            links[k] = CallCaptures(behaviors[k + 1], links[k + 1]);
+        }
+
+        return links;
+    }
+
+    /// <summary>
+    ///     What a call of <paramref name="behavior" />'s method needs: the message when the method takes it, the context when it injects a
+    ///     service (read from the context's fields), and what its link <paramref name="next" /> takes, which the call constructs.
+    /// </summary>
+    private static Captures CallCaptures(PipelineBehaviorModel behavior, Captures next)
+    {
+        var captures = Captures.None;
+        foreach (var role in behavior.Parameters)
+        {
+            captures |= role switch
+            {
+                BehaviorParameterRole.Message => Captures.Message,
+                BehaviorParameterRole.Service => Captures.Pipeline,
+                BehaviorParameterRole.Next => next,
+                _ => Captures.None,
+            };
+        }
+
+        return captures;
+    }
+
+    /// <summary>
+    ///     The two methods that give a pipeline its scope's context (ADR 0001, Mediator): the accessor, inlined into the pipeline method, reads
+    ///     the mediator's scope state (<c>Volatile.Read(ref __state) ?? __ResolveState()</c>) and then the state's field for this pipeline
+    ///     with <c>Volatile.Read</c>; the non-inlined create method, on first use in the scope, stores a new context there with
+    ///     <c>Interlocked.CompareExchange</c>, so under concurrent first use every caller in the scope, through any mediator of the scope, ends
+    ///     up with the context that won the exchange. The state is <c>internal</c> (<c>AddKeryx()</c> registers it) and the context classes
+    ///     are private, so its fields are <see cref="object" /> and the accessor reinterprets the field with <c>Unsafe.As</c>, which is safe
+    ///     because the field only ever holds that context.
+    /// </summary>
+    /// <param name="writer">The writer, in the mediator's body.</param>
+    /// <param name="contextName">The context class.</param>
+    /// <param name="contextField">The scope state's field for the context.</param>
+    /// <param name="getName">The accessor.</param>
+    /// <param name="createName">The create method.</param>
+    private static void WriteContextAccess(CodeWriter writer, string contextName, string contextField, string getName, string createName)
+    {
+        writer.Member();
+        writer.Line(CodeWriter.AggressiveInliningAttribute);
+        writer.Line($"private {contextName} {getName}()");
+        writer.Open();
+        writer.Line($"var state = {Volatile}.Read(ref {ScopeStateField}) ?? {ResolveStateName}();");
+        writer.Line($"return {Unsafe}.As<{contextName}?>({Volatile}.Read(ref state.{contextField})) ?? {createName}(state);");
+        writer.Close();
+
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Arrow(
+            $"private {contextName} {createName}({ScopeStateName} state)",
+            $"{Unsafe}.As<{contextName}>({Interlocked}.CompareExchange(ref state.{contextField}, new {contextName}(__serviceProvider), null) ?? state.{contextField})"
+        );
+    }
+
+    /// <summary>
+    ///     The non-inlined method that resolves the scope state from the mediator's provider on the first call that needs a pipeline context,
+    ///     and keeps it: every mediator resolved in the scope gets the same state (it is scoped), so a race between two callers of one
+    ///     mediator stores the same instance twice.
+    /// </summary>
+    private static void WriteResolveState(CodeWriter writer)
+    {
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Line($"private {ScopeStateName} {ResolveStateName}()");
+        writer.Open();
+        writer.Line($"var state = {ServiceProviderExtensions}.GetRequiredService<{ScopeStateName}>(__serviceProvider);");
+        writer.Line($"{Volatile}.Write(ref {ScopeStateField}, state);");
+        writer.Line("return state;");
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     The scope state (owner decision 46): the pipeline contexts of one scope, registered scoped by <c>AddKeryx()</c> and shared by every
+    ///     mediator of the scope, one field per pipeline with a context. Owner decision 47 asked for a size-bounded layout chosen by
+    ///     measurement; a cache of four write-once slots measured slower on the long-lived scope's generic <c>Send</c> with behaviors, so
+    ///     the fields stay one per pipeline (open-questions, "The mediator is transient over a scoped state", and OQ-78).
+    /// </summary>
+    private static void WriteScopeState(CodeWriter writer, List<string> contextFields)
+    {
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    The pipeline contexts of one scope, shared by every mediator of the scope (registered scoped by",
+            "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />): one field per pipeline with a context, set once, on first use.",
+            "</summary>"
+        );
+        writer.Line($"internal sealed class {ScopeStateName}");
+        writer.Open();
+        foreach (var field in contextFields)
+        {
+            writer.Member(plainField: true);
+            writer.Line($"public object? {field};");
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     The pipeline context of one request: the services its behavior methods and its handler inject, resolved once per scope and shared
+    ///     (owner decision 43; the host's own handler receives them through its static entry), and the referenced handler it constructs with
+    ///     them, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
+    ///     <c>next</c> of behavior <c>k</c>: it calls behavior <c>k + 1</c>'s method with <c>Link{k + 1}</c>, and the last link calls the
+    ///     handler's invoker. A pipeline with nothing to resolve (a static invoker and no injected services) has no context: its links are
+    ///     nested in a static class of the same name and take only the request.
+    /// </summary>
+    private static void WriteContext(CodeWriter writer, HostPipeline pipeline, int index) =>
+        WritePipelineContext(
+            writer,
+            pipeline,
+            ContextName(index),
+            "pipeline",
+            LinkName,
+            $"global::Keryx.INext<{pipeline.Handler.ResponseType}>",
+            $"{ValueTask}<{pipeline.Handler.ResponseType}>"
+        );
+
+    /// <summary>
+    ///     The pipeline context class of a request or stream request, with its links; for a pipeline without a context, the static class
+    ///     that holds its links.
+    /// </summary>
+    private static void WritePipelineContext(
+        CodeWriter writer,
+        HostPipeline pipeline,
+        string contextName,
+        string description,
+        Func<int, string> linkName,
+        string nextInterface,
+        string returnType
+    )
+    {
+        var request = pipeline.Handler;
+        writer.Member();
+        if (HasContext(pipeline))
+        {
+            writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(pipeline)}, resolved once per scope.</summary>");
+            writer.Line($"private sealed class {contextName}");
+            writer.Open();
+            var resolution = new List<string>(request.ContextServices.Count + 2);
+            WriteServiceFields(writer, request.ContextServices, request.ContextServiceProvider, resolution);
+            WriteHandlerField(writer, request, request.ServiceSlots, request.ContextServices, HandlerFieldName, resolution);
+            WriteContextConstructor(writer, contextName, resolution);
+        }
+        else
+        {
+            writer.Documentation(
+                $"<summary>The links of the {description} of <c>{Display(request.MessageType)}</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>"
+            );
+            writer.Line($"private static class {contextName}");
+            writer.Open();
+        }
+
+        var links = pipeline.Behaviors.IsEmpty ? [] : LinkCaptures(pipeline.Behaviors, End(pipeline));
+        for (var k = 0; k < pipeline.Behaviors.Length; k++)
+        {
+            var isLast = k == pipeline.Behaviors.Length - 1;
+            var body = !isLast
+                ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, linkName(k + 1), links[k + 1], "request")
+                : HandlerInvocation(request, request.ServiceSlots, request.ContextServices, PipelineName + ".", HandlerFieldName, "request");
+            WriteLink(
+                writer,
+                linkName(k),
+                contextName,
+                links[k],
+                request.MessageType,
+                "request",
+                nextInterface,
+                returnType,
+                body,
+                !isLast && pipeline.Behaviors[k + 1].ObliviousFit,
+                NextSummary(pipeline.Behaviors, k, "the handler")
+            );
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     The field of a referenced handler, which the pipeline context constructs with <c>new</c> (owner decision 42) over the context's
+    ///     shared services (owner decision 43), with the statement that constructs it to <paramref name="resolution" />, after the services'.
+    ///     Nothing for a static invoker or the host's own handler, which the context calls through its static entry with its service fields.
+    /// </summary>
+    /// <param name="writer">The writer, in the context's body.</param>
+    /// <param name="handler">The handler.</param>
+    /// <param name="slots">The context service each of its injected parameters receives.</param>
+    /// <param name="services">The context's shared services.</param>
+    /// <param name="field">The handler's field.</param>
+    /// <param name="resolution">The context constructor's statements.</param>
+    private static void WriteHandlerField(
+        CodeWriter writer,
+        HostHandlerModel handler,
+        EquatableArray<int> slots,
+        EquatableArray<ContextServiceModel> services,
+        string field,
+        List<string> resolution
+    )
+    {
+        if (handler.StaticInvoker || handler.StaticEntry)
+        {
+            return;
+        }
+
+        var creation = new StringBuilder(256).Append("new ").Append(handler.HandlerClass).Append('(');
+        for (var j = 0; j < handler.Services.Count; j++)
+        {
+            creation.Append(j == 0 ? "" : ", ").Append(ConstructorArgument(services, slots[j], handler.Services[j]));
+        }
+
+        writer.Member(plainField: true);
+        writer.Line($"public readonly {handler.HandlerClass} {field};");
+        resolution.Add($"{field} = {creation.Append(')')};");
+    }
+
+    /// <summary>
+    ///     The call of a handler from a pipeline: a static invoker on the class; the host's own handler's static entry
+    ///     (<c>__keryx_InvokeAsync</c>) on the class, with the context's shared services it injects (owner decisions 43 and 44); a referenced
+    ///     handler's <c>InvokeAsync</c> on the instance the context holds.
+    /// </summary>
+    /// <param name="handler">The handler.</param>
+    /// <param name="slots">The context service each of its injected parameters receives.</param>
+    /// <param name="services">The context's shared services.</param>
+    /// <param name="context">How the context is reached, with the member access dot (<c>pipeline.</c>), or empty inside the context.</param>
+    /// <param name="field">The field of a referenced handler (<see cref="WriteHandlerField" />).</param>
+    /// <param name="message">The message argument.</param>
+    private static string HandlerInvocation(
+        HostHandlerModel handler,
+        EquatableArray<int> slots,
+        EquatableArray<ContextServiceModel> services,
+        string context,
+        string field,
+        string message
+    )
+    {
+        if (handler.StaticInvoker)
+        {
+            return $"{handler.HandlerClass}.{HandlerAnalysis.InvokerName}({message}, cancellationToken)";
+        }
+
+        if (!handler.StaticEntry)
+        {
+            return $"{context}{field}.{HandlerAnalysis.InvokerName}({message}, cancellationToken)";
+        }
+
+        var call = new StringBuilder(128).Append(handler.HandlerClass).Append('.').Append(HandlerAnalysis.StaticEntryName).Append('(').Append(message);
+        for (var j = 0; j < handler.Services.Count; j++)
+        {
+            call.Append(", ").Append(SlotArgument(services, slots[j], handler.Services[j], context));
+        }
+
+        return call.Append(", cancellationToken)").ToString();
+    }
+
+    /// <summary>The context field of a request or stream request pipeline's referenced handler.</summary>
+    private const string HandlerFieldName = "Handler";
+
+    /// <summary>The constructor of a pipeline context, which resolves what it holds from the scope.</summary>
+    private static void WriteContextConstructor(CodeWriter writer, string contextName, List<string> resolution)
+    {
+        writer.Member();
+        writer.Line($"public {contextName}({ServiceProvider} {ServiceProviderName})");
+        writer.Open();
+        foreach (var statement in resolution)
+        {
+            writer.Line(statement);
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     One link (ADR 0001, Generated pipeline shape): a <c>readonly struct</c> with a primary constructor over what its <c>InvokeAsync</c>
+    ///     reads or passes on (<paramref name="captures" />: the pipeline context, the message, both, or neither, then without a parameter
+    ///     list), and an expression-bodied <c>InvokeAsync</c> that calls the next behavior method (or the handler, or the publish strategy).
+    ///     A call through a nullable-oblivious fit (OQ-58) is written with nullable warnings disabled: generated code names that type without
+    ///     an annotation, so the call would warn where the oblivious declaration does not.
+    /// </summary>
+    private static void WriteLink(
+        CodeWriter writer,
+        string name,
+        string contextName,
+        Captures captures,
+        string messageType,
+        string messageName,
+        string nextInterface,
+        string returnType,
+        string body,
+        bool obliviousFit,
+        string summary
+    )
+    {
+        var parameters = ( captures & ( Captures.Pipeline | Captures.Message ) ) switch
+        {
+            Captures.Pipeline | Captures.Message => $"({contextName} {PipelineName}, {messageType} {messageName})",
+            Captures.Pipeline => $"({contextName} {PipelineName})",
+            Captures.Message => $"({messageType} {messageName})",
+            _ => "",
+        };
+
+        writer.Member();
+        writer.Documentation(summary);
+        writer.Line($"public readonly struct {name}{parameters} : {nextInterface}");
+        writer.Open();
+        writer.Member();
+        var invoke = $"public {returnType} InvokeAsync({TokenParameter})";
+        if (obliviousFit)
+        {
+            writer.NullableObliviousArrow(invoke, body);
+            writer.Directive("#nullable restore warnings");
+        }
+        else
+        {
+            writer.Arrow(invoke, body);
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>The one-line summary of link <paramref name="position" />: whose <c>next</c> it is, and where it goes.</summary>
+    private static string NextSummary(ImmutableArray<PipelineBehaviorModel> behaviors, int position, string end) =>
+        position == behaviors.Length - 1
+            ? $"<summary>The <c>next</c> of <c>{Display(behaviors[position].Identity)}</c>: {end}.</summary>"
+            : $"<summary>The <c>next</c> of <c>{Display(behaviors[position].Identity)}</c>: <c>{Display(behaviors[position + 1].Identity)}</c>.</summary>";
+
+    /// <summary>
+    ///     The direct call of a behavior method (ADR 0001, Behavior methods): the class's static method with explicit type arguments
+    ///     (<paramref name="link" /> in place of <c>TNext</c>) and the arguments in declared order: the message, the link as a target-typed
+    ///     <c>new(...)</c> over what it takes (<c>new(pipeline, message)</c>, <c>new(message)</c>, <c>new(pipeline)</c> or <c>new()</c>), the
+    ///     call's token, and its injected services read from the context's shared fields.
+    /// </summary>
+    /// <param name="behavior">The behavior.</param>
+    /// <param name="services">
+    ///     The pipeline context's services, which the behavior's <see cref="PipelineBehaviorModel.ServiceSlots" /> index; the unkeyed
+    ///     <c>IServiceProvider</c> (<see cref="PipelineBehaviors.ServiceProviderSlot" />) reads the context's <c>ServiceProvider</c> field.
+    /// </param>
+    /// <param name="link">The link type its <c>next</c> is, qualified as the call site needs it.</param>
+    /// <param name="linkCaptures">What that link takes (<see cref="LinkCaptures" />).</param>
+    /// <param name="message">The name of the request or notification.</param>
+    private static string BehaviorCall(
+        PipelineBehaviorModel behavior,
+        EquatableArray<ContextServiceModel> services,
+        string link,
+        Captures linkCaptures,
+        string message
+    )
+    {
+        var call = new StringBuilder(256).Append(behavior.Class).Append('.').Append(behavior.Method).Append('<');
+        for (var i = 0; i < behavior.TypeArguments.Count; i++)
+        {
+            var argument = behavior.TypeArguments[i];
+            call.Append(i == 0 ? "" : ", ").Append(argument.Length == 0 ? link : argument);
+        }
+
+        call.Append(">(");
+        var service = 0;
+        for (var i = 0; i < behavior.Parameters.Count; i++)
+        {
+            call.Append(i == 0 ? "" : ", ");
+            switch (behavior.Parameters[i])
+            {
+                case BehaviorParameterRole.Service:
+                    call.Append(SlotArgument(services, behavior.ServiceSlots[service], behavior.Services[service], PipelineName + "."));
+                    service++;
+                    break;
+                case BehaviorParameterRole.Message:
+                    call.Append(message);
+                    break;
+                case BehaviorParameterRole.Next:
+                    call.Append(
+                        ( linkCaptures & ( Captures.Pipeline | Captures.Message ) ) switch
+                        {
+                            Captures.Pipeline | Captures.Message => $"new({PipelineName}, {message})",
+                            Captures.Pipeline => $"new({PipelineName})",
+                            Captures.Message => $"new({message})",
+                            _ => "new()",
+                        }
+                    );
+                    break;
+                case BehaviorParameterRole.CancellationToken:
+                    call.Append("cancellationToken");
+                    break;
+                default:
+                    call.Append("default");
+                    break;
+            }
+        }
+
+        return call.Append(')').ToString();
+    }
+
+    /// <summary>
+    ///     What one injected parameter of a behavior method or of an own handler's static entry receives, read through
+    ///     <paramref name="context" /> (<c>pipeline.</c>, or empty inside the context): the context's <c>ServiceProvider</c> field for the
+    ///     unkeyed <c>IServiceProvider</c> (<see cref="PipelineBehaviors.ServiceProviderSlot" />), else its field for the parameter's service
+    ///     (<see cref="WithDefault" />).
+    /// </summary>
+    private static string SlotArgument(EquatableArray<ContextServiceModel> services, int slot, ServiceParameterModel parameter, string context) =>
+        slot == PipelineBehaviors.ServiceProviderSlot
+            ? context + ServiceProviderField
+            : WithDefault(services[slot], parameter, context + ServiceField(slot));
+
+    /// <summary>
+    ///     What one injected parameter of a referenced handler's constructor receives in the context's constructor: the provider the context
+    ///     is built with for the unkeyed <c>IServiceProvider</c>, else the field for its service, or the constructor's local when only
+    ///     constructors take it (<see cref="ContextServiceModel.Held" />), with <see cref="WithDefault" />.
+    /// </summary>
+    private static string ConstructorArgument(EquatableArray<ContextServiceModel> services, int slot, ServiceParameterModel parameter) =>
+        slot == PipelineBehaviors.ServiceProviderSlot
+            ? ServiceProviderName
+            : WithDefault(services[slot], parameter, services[slot].Held ? ServiceField(slot) : ServiceLocal(slot));
+
+    /// <summary>
+    ///     What one consumer of a shared service receives from where the service is stored (<paramref name="stored" />). A service resolved as
+    ///     required is passed as is to every consumer; a service whose consumers are all optional is stored nullable (<see langword="null" />
+    ///     when missing), and each call site applies its own parameter's default with <c>??</c> (<c>GetValueOrDefault()</c> for a
+    ///     <c>default</c> value type).
+    /// </summary>
+    /// <param name="service">The parameter's service.</param>
+    /// <param name="parameter">The parameter.</param>
+    /// <param name="stored">The field or local that holds the service.</param>
+    private static string WithDefault(ContextServiceModel service, ServiceParameterModel parameter, string stored) =>
+        service.Required || parameter.DefaultValue is not { } defaultValue || defaultValue == "null"
+            ? stored
+            : service.IsValueType && defaultValue == "default"
+            ? stored + ".GetValueOrDefault()"
+            : $"{stored} ?? {defaultValue}";
+
+    /// <summary>What a request or stream pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
+    private static string Holds(HostPipeline pipeline)
+    {
+        var handler = pipeline.Handler;
+        var behaviors = pipeline.Behaviors.Any(static b => b.Services.Count > 0);
+        return handler.StaticInvoker ? "the injected services of its behaviors"
+            : handler.StaticEntry ? behaviors ? "the services its handler and its behaviors inject" : "the services its handler injects"
+            : behaviors ? "its handler and the services it and its behaviors inject"
+            : "its handler";
+    }
+
+    /// <summary>
+    ///     The <c>ServiceProvider</c> field when <paramref name="serviceProvider" /> (a behavior method or an own handler's static entry
+    ///     injects the unkeyed <c>IServiceProvider</c>; it is assigned the provider the context is built with, never resolved, OQ-63), then
+    ///     one field per service the pipeline context shares (ADR 0001, Injected parameters; owner decision 43), in their stable order
+    ///     (OQ-64): the service type for a service resolved as required, the nullable service type for one whose consumers are all optional
+    ///     (<see langword="null" /> when the service is missing; each call site applies its own default). A service only referenced handlers'
+    ///     constructors take is a local of the context's constructor instead (<see cref="ContextServiceModel.Held" />). Adds the statement that
+    ///     assigns or resolves each from the scope, once, to <paramref name="resolution" />.
+    /// </summary>
+    private static void WriteServiceFields(CodeWriter writer, EquatableArray<ContextServiceModel> services, bool serviceProvider, List<string> resolution)
+    {
+        if (serviceProvider)
+        {
+            writer.Member(plainField: true);
+            writer.Line($"public readonly {ServiceProvider} {ServiceProviderField};");
+            resolution.Add($"{ServiceProviderField} = {ServiceProviderName};");
+        }
+
+        for (var i = 0; i < services.Count; i++)
+        {
+            var service = services[i];
+            if (!service.Held)
+            {
+                resolution.Add($"var {ServiceLocal(i)} = {ResolveShared(service, i)};");
+                continue;
+            }
+
+            writer.Member(plainField: true);
+            writer.Line(
+                $"public readonly {( service.Required || service.NullableUnderlyingType is not null ? service.ServiceType : service.ServiceType + "?" )} {ServiceField(i)};"
+            );
+            resolution.Add($"{ServiceField(i)} = {ResolveShared(service, i)};");
+        }
+    }
+
+    /// <summary>
+    ///     The resolution of a shared service: as required (<see cref="Resolve" /> without a default) when any consumer is required;
+    ///     otherwise <c>GetService</c>/<c>GetKeyedService</c>, <see langword="null" /> for a missing service (a value type is matched with
+    ///     the type pattern of <see cref="Resolve" />, once, into a <c>Nullable&lt;T&gt;</c> field).
+    /// </summary>
+    private static string ResolveShared(ContextServiceModel service, int slot)
+    {
+        if (service.Required || !service.IsValueType)
+        {
+            return Resolve(
+                new(
+                    service.ServiceType,
+                    service.ServiceType,
+                    service.ServiceKey,
+                    service.Required ? null : "null",
+                    service.IsValueType,
+                    service.NullableUnderlyingType,
+                    false
+                ),
+                slot
+            );
+        }
+
+        var variable = "__value" + Digits(slot);
+        var nullable = service.NullableUnderlyingType is null ? service.ServiceType + "?" : service.ServiceType;
+        return $"{ServiceLookup(service.ServiceType, service.ServiceKey)} is {service.NullableUnderlyingType ?? service.ServiceType} {variable} ? ({nullable}){variable} : null";
+    }
+
+    /// <summary>
+    ///     <c>serviceProvider.GetService(typeof(T))</c>, or for a keyed service <c>(serviceProvider as IKeyedServiceProvider)?.GetKeyedService(typeof(T), key)</c>.
+    ///     <c>GetKeyedService(Type, object)</c> is an extension only from Microsoft.Extensions.DependencyInjection.Abstractions 9.0; the interface
+    ///     method exists from 8.0, the floor for keyed services (ADR 0001, Injected parameters).
+    /// </summary>
+    private static string ServiceLookup(string type, string? key) =>
+        key is null
+            ? $"{ServiceProviderName}.GetService(typeof({type}))"
+            : $"({ServiceProviderName} as {KeyedServiceProvider})?.GetKeyedService(typeof({type}), {key})";
+
+    /// <summary>
+    ///     The resolution of one injected parameter (ADR 0001, Injected parameters). No reflection: optional value types are matched with a
+    ///     type pattern on <c>GetService(typeof(T))</c>, which neither allocates nor activates anything.
+    /// </summary>
+    internal static string Resolve(ServiceParameterModel parameter, int index)
+    {
+        if (parameter is { ServiceKey: null, IsServiceProvider: true })
+        {
+            return ServiceProviderName;
+        }
+
+        var key = parameter.ServiceKey;
+        if (parameter.DefaultValue is not { } defaultValue)
+        {
+            // Nullable<T> does not satisfy the notnull constraint of GetRequiredService<T>, so it is resolved by type and unboxed.
+            return parameter.NullableUnderlyingType is not null
+                ? key is null
+                    ? $"({parameter.Type}){ServiceProviderExtensions}.GetRequiredService({ServiceProviderName}, typeof({parameter.Type}))"
+                    : $"({parameter.Type}){KeyedServiceProviderExtensions}.GetRequiredKeyedService({ServiceProviderName}, typeof({parameter.Type}), {key})"
+                : key is null
+                ? $"{ServiceProviderExtensions}.GetRequiredService<{parameter.ServiceType}>({ServiceProviderName})"
+                : $"{KeyedServiceProviderExtensions}.GetRequiredKeyedService<{parameter.ServiceType}>({ServiceProviderName}, {key})";
+        }
+
+        if (!parameter.IsValueType)
+        {
+            // GetService<T> already returns null for a missing service; any other default (including the null! of a parameter that is not
+            // annotated) is applied with ??.
+            var lookup = key is null
+                ? $"{ServiceProviderExtensions}.GetService<{parameter.ServiceType}>({ServiceProviderName})"
+                : $"{KeyedServiceProviderExtensions}.GetKeyedService<{parameter.ServiceType}>({ServiceProviderName}, {key})";
+            return defaultValue == "null" ? lookup : $"{lookup} ?? {defaultValue}";
+        }
+
+        var variable = "__value" + Digits(index);
+        return parameter.NullableUnderlyingType is { } underlying
+            ? $"{ServiceLookup(parameter.Type, key)} is {underlying} {variable} ? ({parameter.Type}){variable} : {defaultValue}"
+            : $"{ServiceLookup(parameter.Type, key)} is {parameter.Type} {variable} ? {variable} : {defaultValue}";
+    }
+
+    /// <summary>
+    ///     Whether a request or stream pipeline has a context (created once per scope): it resolves something, its handler's services or its
+    ///     handler (the invoker is not static) or an injected service of its behaviors, or it holds the scope's provider for a behavior that injects the unkeyed
+    ///     <c>IServiceProvider</c> (ADR 0001, Generated pipeline shape; OQ-63). A pipeline with nothing to resolve or hold has none: without
+    ///     behaviors it calls the static invoker directly, with behaviors it calls the outermost behavior method directly and its links,
+    ///     nested in a static class, take only the request.
+    /// </summary>
+    private static bool HasContext(HostPipeline pipeline) =>
+        !pipeline.Handler.StaticInvoker || pipeline.Handler.ContextServices.Count > 0 || pipeline.Handler.ContextServiceProvider;
+
+    /// <summary>The label of the switch section of jump-table position <paramref name="position" />.</summary>
+    private static string Case(int position) => "case " + Digits(position) + ":";
+
+    private const string Volatile = "global::System.Threading.Volatile";
+    private const string Interlocked = "global::System.Threading.Interlocked";
+
+    /// <summary>The scope state class, nested in the mediator (<see cref="WriteScopeState" />).</summary>
+    private const string ScopeStateName = "__KeryxScopeState";
+
+    /// <summary>The mediator's field that keeps the scope state once a call has resolved it.</summary>
+    private const string ScopeStateField = "__state";
+
+    private const string ResolveStateName = "__ResolveState";
+
+    /// <summary>Whether the host has a pipeline with a context, and so a scope state.</summary>
+    private static bool HasScopeState(HostComposition composition) =>
+        composition.Requests.Any(HasContext)
+     || composition.Streams.Any(HasContext)
+     || composition.Notifications.Any(static n => n.IsActive && HasContext(n));
+
+    /// <summary>The context field that holds the scope's provider for the behavior methods that inject the unkeyed <c>IServiceProvider</c> (OQ-63).</summary>
+    private const string ServiceProviderField = "ServiceProvider";
+
+    /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
+    private static string ServiceField(int slot) => "Service" + Digits(slot);
+
+    /// <summary>The context constructor's local for the shared service at <paramref name="slot" /> that no call reads (<see cref="ContextServiceModel.Held" />).</summary>
+    private static string ServiceLocal(int slot) => "__service" + Digits(slot);
+
+    private static string LinkName(int position) => "Link" + Digits(position + 1);
+
+    private static string ContextName(int index) => "__Pipeline" + Digits(index);
+
+    private static string ContextField(int index) => "__pipeline" + Digits(index);
+
+    private static string GetContextName(int index) => "__GetPipeline" + Digits(index);
+
+    private static string CreateContextName(int index) => "__CreatePipeline" + Digits(index);
+
+    private static string CoreName(int index) => "__Send" + Digits(index);
+
+    private static string DispatchName(int index) => "__Dispatch" + Digits(index);
+
+    private static string Digits(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>A type name for documentation text: without <c>global::</c>, with the angle brackets of type arguments escaped for XML.</summary>
+    private static string Display(string type) => type.Replace("global::", "").Replace("<", "&lt;").Replace(">", "&gt;");
+}
+
+/// <summary>
+///     One request pipeline: the handler and its behaviors, sorted outermost first (ADR 0001, Ordering).
+/// </summary>
+/// <param name="Handler">The request handler.</param>
+/// <param name="Behaviors">The behaviors, outermost first.</param>
+internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<PipelineBehaviorModel> Behaviors);
+
+/// <summary>
+///     What the host dispatches, composed from the handler models (ADR 0001, How the host reads it).
+/// </summary>
+/// <param name="Requests">The request pipelines, one per request type, ordered by request type.</param>
+/// <param name="Streams">The stream pipelines, one per stream request type, ordered by stream request type.</param>
+/// <param name="Notifications">
+///     The notification pipelines, one per concrete notification type the host knows (whether or not anything runs for it), ordered by
+///     notification type.
+/// </param>
+/// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
+internal sealed record HostComposition(
+    ImmutableArray<HostPipeline> Requests,
+    ImmutableArray<HostPipeline> Streams,
+    ImmutableArray<NotificationPipeline> Notifications,
+    ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
+)
+{
+    /// <summary>Every sorted behavior list of every pipeline: requests, streams and publishes.</summary>
+    public IEnumerable<ImmutableArray<PipelineBehaviorModel>> BehaviorLists =>
+        Requests
+           .Concat(Streams)
+           .Select(static p => p.Behaviors)
+           .Concat(Notifications.Select(static n => n.Behaviors));
+
+    public static HostComposition Create(IEnumerable<HostHandlerModel> handlers, IEnumerable<HostNotificationModel> notifications)
+    {
+        var all = handlers.ToArray();
+
+        var cycles = new List<ImmutableArray<PipelineBehaviorModel>>();
+        var requests = Pipelines(all, HandlerKind.Request, cycles);
+        var streams = Pipelines(all, HandlerKind.Stream, cycles);
+        var notificationPipelines = NotificationPipelines(all, notifications, cycles);
+        return new(requests, streams, notificationPipelines, [.. cycles]);
+    }
+
+    /// <summary>
+    ///     The pipelines of one kind of handler, one per message type, ordered by message type, each with its behaviors sorted (ADR 0001,
+    ///     Ordering). A message type with more than one handler is KRX005 (the analyzer reports it in this assembly); the host dispatches
+    ///     neither, so the error is not joined by duplicate members in generated code.
+    /// </summary>
+    private static ImmutableArray<HostPipeline> Pipelines(HostHandlerModel[] all, HandlerKind kind, List<ImmutableArray<PipelineBehaviorModel>> cycles) =>
+        all
+           .Where(h => h.Kind == kind)
+           .GroupBy(static h => h.MessageType, StringComparer.Ordinal)
+           .Where(static g => g.Count() == 1)
+           .Select(static g => g.Single())
+           .OrderBy(static h => h.MessageType, StringComparer.Ordinal)
+           .Select(h => new HostPipeline(h, BehaviorOrdering.Sort(h.Behaviors, static b => b.Key, cycles)))
+           .ToImmutableArray();
+
+    /// <summary>
+    ///     One pipeline per concrete notification type the host knows (declared in its source, or delivered to one of its handlers), ordered
+    ///     by type: its notification behaviors sorted, and every handler that receives it (exact-type and polymorphic), ordered by
+    ///     <c>[HandlerOrder]</c>, then by the ordinal fully qualified handler class name (ADR 0001, Handler order).
+    /// </summary>
+    private static ImmutableArray<NotificationPipeline> NotificationPipelines(
+        HostHandlerModel[] all,
+        IEnumerable<HostNotificationModel> declared,
+        List<ImmutableArray<PipelineBehaviorModel>> cycles
+    )
+    {
+        var handlers = all.Where(static h => h.Kind == HandlerKind.Notification).ToArray();
+        var known = new SortedDictionary<string, HostNotificationModel>(StringComparer.Ordinal);
+        foreach (var notification in declared.Concat(handlers.SelectMany(static h => h.Deliveries)))
+        {
+            if (!known.ContainsKey(notification.Type))
+            {
+                known.Add(notification.Type, notification);
+            }
+        }
+
+        var received = new Dictionary<string, List<NotificationHandlerPipeline>>(StringComparer.Ordinal);
+        foreach (var handler in handlers.OrderBy(static h => h.Order).ThenBy(static h => h.HandlerClass, StringComparer.Ordinal))
+        {
+            foreach (var delivery in handler.Deliveries)
+            {
+                if (!received.TryGetValue(delivery.Type, out var list))
+                {
+                    list = [];
+                    received.Add(delivery.Type, list);
+                }
+
+                list.Add(new(handler, delivery.IsValueType && handler.MessageType != delivery.Type));
+            }
+        }
+
+        var pipelines = ImmutableArray.CreateBuilder<NotificationPipeline>(known.Count);
+        foreach (var notification in known.Values)
+        {
+            // The publish context shares each service among the notification behaviors and every handler it calls (owner decision 43), so
+            // the behaviors' slots are numbered again over that set.
+            var receivers = received.TryGetValue(notification.Type, out var list) ? list : [];
+            var consumers = ImmutableArray.CreateBuilder<HandlerConsumer>(receivers.Count);
+            foreach (var receiver in receivers)
+            {
+                consumers.Add(new(receiver.Handler.Services, receiver.Handler.StaticEntry));
+            }
+
+            var shared = PipelineBehaviors.ShareServices(Sorted(notification.Behaviors, cycles), consumers.MoveToImmutable());
+            var handlerPipelines = ImmutableArray.CreateBuilder<NotificationHandlerPipeline>(receivers.Count);
+            for (var i = 0; i < receivers.Count; i++)
+            {
+                handlerPipelines.Add(receivers[i] with { ServiceSlots = shared.HandlerSlots[i] });
+            }
+
+            pipelines.Add(new(notification, shared.Behaviors, handlerPipelines.MoveToImmutable(), shared.Services, shared.ServiceProvider));
+        }
+
+        return pipelines.MoveToImmutable();
+    }
+
+    private static ImmutableArray<PipelineBehaviorModel> Sorted(
+        Specular.Scanning.EquatableArray<PipelineBehaviorModel> behaviors,
+        List<ImmutableArray<PipelineBehaviorModel>> cycles
+    ) =>
+        BehaviorOrdering.Sort(behaviors, static b => b.Key, cycles);
+}
+
+/// <summary>
+///     One notification type's publish pipeline: its notification behaviors, sorted outermost first, around its publish strategy over its
+///     handlers (ADR 0001, Notifications).
+/// </summary>
+/// <param name="Notification">The concrete notification type.</param>
+/// <param name="Behaviors">The notification behaviors, outermost first, with their slots in <paramref name="Services" />.</param>
+/// <param name="Handlers">The handlers, in handler order, with their slots in <paramref name="Services" />.</param>
+/// <param name="Services">
+///     The distinct services its publish pipeline context resolves once and shares among its notification behaviors and its handlers (owner
+///     decisions 9 and 43), in the stable order of <see cref="PipelineBehaviors.CompareServices" />, without the unkeyed
+///     <c>IServiceProvider</c>.
+/// </param>
+/// <param name="ServiceProvider">
+///     Whether a notification behavior or an own handler's static entry injects the unkeyed <c>IServiceProvider</c>, so the context holds the
+///     provider it is built with in its <c>ServiceProvider</c> field (OQ-63).
+/// </param>
+internal sealed record NotificationPipeline(
+    HostNotificationModel Notification,
+    ImmutableArray<PipelineBehaviorModel> Behaviors,
+    ImmutableArray<NotificationHandlerPipeline> Handlers,
+    EquatableArray<ContextServiceModel> Services,
+    bool ServiceProvider
+)
+{
+    /// <summary>
+    ///     Whether anything runs when the type is published: a handler or a notification behavior (OQ-18). Otherwise <c>Publish</c> completes
+    ///     immediately.
+    /// </summary>
+    public bool IsActive => !Handlers.IsEmpty || !Behaviors.IsEmpty;
+
+    /// <summary>Whether a publish boxes the notification once, for handlers typed as an interface (KRX037).</summary>
+    public bool Boxes => Handlers.Any(static h => h.Boxed);
+}
+
+/// <summary>
+///     One handler of a notification type. Handlers have no behaviors of their own: the publish strategy calls them directly.
+/// </summary>
+/// <param name="Handler">The handler.</param>
+/// <param name="Boxed">
+///     Whether the notification is a struct and the handler's parameter an interface or <c>INotification</c>, so the handler receives the
+///     publish's one box (OQ-17).
+/// </param>
+/// <param name="ServiceSlots">
+///     For each of the handler's injected parameters, the index of the publish context's service it receives
+///     (<see cref="NotificationPipeline.Services" />), or <see cref="PipelineBehaviors.ServiceProviderSlot" /> for the unkeyed
+///     <c>IServiceProvider</c>; empty for a static invoker.
+/// </param>
+internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, bool Boxed, EquatableArray<int> ServiceSlots = default);

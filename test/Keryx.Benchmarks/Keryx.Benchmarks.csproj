@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        BenchmarkDotNet suite (ADR 0001, Benchmarks): Keryx against a hand-written baseline and the other mediators (Comparison/), each library
+        in its own small project under test/benchmark-subjects; the Phase 4 gate prototype (Prototype/); the Phase 3 dispatch measurements
+        (Host/). Not a test project: CI builds it, checks the comparison subjects with its verify mode and runs it with the Dry job; numbers from
+        shared runners are never published. An Exe, but not a Keryx host: it neither runs the analyzers nor imports the package's build files,
+        so KeryxHost is never set here; the host it measures is test/benchmark-subjects/Keryx.Benchmarks.KeryxHost.
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    </PropertyGroup>
+    <!--
+        NativeAOT (owner decision 29). BenchmarkDotNet's NativeAOT toolchain (the runtime nativeaot10.0) publishes a generated project that
+        references this one; the AOT check publishes this project itself with KeryxBenchmarksNativeAot=true and runs its verify mode
+        (Comparison/NativeAot.cs). PublishAot is set only then: it also writes the AOT feature switches (IsDynamicCodeSupported false, no
+        EventSource, ...) into the runtimeconfig of a JIT build, which would change what the JIT runs measure. Every build runs the trim,
+        AOT and single-file analyzers instead. In the AOT publish, project references (Keryx, the subjects) report their trim and AOT
+        warnings one by one, and those stay errors; the package assemblies' warnings stay warnings: BenchmarkDotNet and its dependencies
+        (CommandLine, Gee.External.Capstone, Microsoft.CodeAnalysis, TraceEvent) report IL2104, IL3053, IL3000 and IL3002, and MediatR, which
+        is n/a under NativeAOT, IL2104 and IL3053.
+    -->
+    <PropertyGroup>
+        <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+        <EnableAotAnalyzer>true</EnableAotAnalyzer>
+        <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(KeryxBenchmarksNativeAot)' == 'true' and '$(TargetFramework)' == 'net10.0'">
+        <PublishAot>true</PublishAot>
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053;IL3000;IL3002</WarningsNotAsErrors>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="BenchmarkDotNet" />
+        <!-- The scoped container the pipeline context benchmark resolves handlers from. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Keryx\Keryx.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.Common\Keryx.Benchmarks.Common.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.Baseline\Keryx.Benchmarks.Baseline.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.KeryxHost\Keryx.Benchmarks.KeryxHost.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorScoped\Keryx.Benchmarks.MediatorScoped.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorParallel\Keryx.Benchmarks.MediatorParallel.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatorSingleton\Keryx.Benchmarks.MediatorSingleton.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.MediatRHandlers\Keryx.Benchmarks.MediatRHandlers.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ImmediateHandlers\Keryx.Benchmarks.ImmediateHandlers.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ZeroAllocMediator\Keryx.Benchmarks.ZeroAllocMediator.csproj" />
+    </ItemGroup>
+    <!--
+        The fan-out subjects (owner decision 41): the notifications with 25, 50 and 100 handlers, one project per library beside the ones above
+        (test/benchmark-subjects/GenerateFanOut.cs writes them). ZeroAlloc.Mediator's generated types are internal and have the same names in
+        every assembly, so its fan-out project comes in under an extern alias.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.Baseline\Keryx.Benchmarks.FanOut.Baseline.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.KeryxHost\Keryx.Benchmarks.FanOut.KeryxHost.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorScoped\Keryx.Benchmarks.FanOut.MediatorScoped.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorParallel\Keryx.Benchmarks.FanOut.MediatorParallel.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorSingleton\Keryx.Benchmarks.FanOut.MediatorSingleton.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatRHandlers\Keryx.Benchmarks.FanOut.MediatRHandlers.csproj" />
+        <ProjectReference
+            Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.ZeroAllocMediator\Keryx.Benchmarks.FanOut.ZeroAllocMediator.csproj"
+            Aliases="ZeroAllocFanOut"
+        />
+    </ItemGroup>
+</Project>

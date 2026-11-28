@@ -1,0 +1,78 @@
+name: Native AOT
+
+# Publishes every sample host (samples/hosts/*/*.csproj) with Native AOT for each target framework, fails on any trim or AOT
+# warning (IL2xxx/IL3xxx), which the repository's warnings-as-errors policy promotes, and runs the published binary, which exits
+# non-zero when its scenario fails (ADR 0001, AOT verification). Each host sets PublishAot in its project file: passed as a global
+# property it would also reach the netstandard2.0 libraries the host references (NETSDK1207).
+on:
+    push:
+        branches:
+            - main
+            - next
+    pull_request:
+        branches:
+            - main
+            - next
+    merge_group:
+        branches:
+            - main
+            - next
+
+permissions:
+    contents: read
+
+concurrency:
+    group: aot-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: '0'
+            - name: 🔎 Find sample hosts
+              id: hosts
+              run: |
+                  shopt -s nullglob
+                  hosts=(samples/hosts/*/*.csproj)
+                  echo "count=${#hosts[@]}" >> "$GITHUB_OUTPUT"
+                  if [ ${#hosts[@]} -eq 0 ]; then
+                      echo "::notice title=Native AOT::No sample hosts yet; nothing to publish."
+                  fi
+            - name: 🛠️ Setup mise
+              if: steps.hosts.outputs.count != '0'
+              uses: jdx/mise-action@v5
+              env:
+                  MISE_JOBS: '1'
+              with:
+                  install: true
+                  install_args: dotnet
+                  cache: true
+                  cache_save: false
+                  experimental: true
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+            - name: ⚙️ Publish and run hosts (Native AOT)
+              if: steps.hosts.outputs.count != '0'
+              run: |
+                  set -euo pipefail
+                  shopt -s nullglob
+                  for host in samples/hosts/*/*.csproj; do
+                      name="$(basename "$host" .csproj)"
+                      for framework in net10.0 net11.0; do
+                          output="artifacts/aot/$name/$framework"
+                          log="artifacts/aot/$name-$framework.log"
+                          mkdir -p "$(dirname "$log")"
+                          dotnet publish "$host" -c Release -f "$framework" -o "$output" -p:TreatWarningsAsErrors=true -p:TrimmerSingleWarn=false --disable-build-servers 2>&1 | tee "$log"
+                          # Belt and braces: warnings as errors already fails the publish on any IL2xxx/IL3xxx warning.
+                          if grep -E "(warning|error) IL[23][0-9]{3}" "$log"; then
+                              echo "::error title=Native AOT::$name ($framework) has trim or AOT warnings."
+                              exit 1
+                          fi
+                          echo "::group::Run $name ($framework)"
+                          "$output/$name"
+                          echo "::endgroup::"
+                      done
+                  done

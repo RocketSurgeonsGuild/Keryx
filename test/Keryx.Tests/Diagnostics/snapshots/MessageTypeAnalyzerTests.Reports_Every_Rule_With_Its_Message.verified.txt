@@ -1,0 +1,98 @@
+﻿[
+  {
+    Id: KRX011,
+    Title: Type implements conflicting request or notification interfaces,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (9,20)-(9,24),
+    Description: A request implements exactly one closing of IRequest<> or IStreamRequest<>, never both, and never together with INotification. Dispatch reinterprets the response type, which is only safe with one closing.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx011,
+    MessageFormat: '{0}' implements {1}; a type is exactly one request, stream request or notification,
+    Message: 'Both' implements INotification and IRequest<int> and IStreamRequest<int>; a type is exactly one request, stream request or notification,
+    Category: Keryx
+  },
+  {
+    Id: KRX012,
+    Title: Request, notification or handler class has an unsupported shape,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (10,20)-(10,23),
+    Description: Requests, stream requests, notifications and handler classes have no type parameters and are not nested in generic types. A ref struct cannot be a request or notification. Use a generic abstract base with closed subtypes instead.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx012,
+    MessageFormat: '{0}' {1},
+    Message: 'Get<T>' has type parameters, so it cannot be a request or notification; use a generic abstract base with closed subtypes instead,
+    Category: Keryx
+  },
+  {
+    Id: KRX012,
+    Title: Request, notification or handler class has an unsupported shape,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (11,18)-(11,22),
+    Description: Requests, stream requests, notifications and handler classes have no type parameters and are not nested in generic types. A ref struct cannot be a request or notification. Use a generic abstract base with closed subtypes instead.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx012,
+    MessageFormat: '{0}' {1},
+    Message: 'Span' is a ref struct, so it cannot be a request or notification: a ref struct cannot be boxed, stored in a link or captured by an async method,
+    Category: Keryx
+  },
+  {
+    Id: KRX016,
+    Title: Type a pipeline needs is not public,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (12,22)-(12,28),
+    Description: Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator uses them from outside their containing types.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx016,
+    MessageFormat: '{0}' must be {1}, because {2},
+    Message: 'Hidden' must be public, because it is a request and this assembly is not a host,
+    Category: Keryx
+  },
+  {
+    Id: KRX016,
+    Title: Type a pipeline needs is not public,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (12,22)-(12,28),
+    Description: Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator uses them from outside their containing types.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx016,
+    MessageFormat: '{0}' must be {1}, because {2},
+    Message: 'Result' must be public, because the request 'Hidden' responds with it and this assembly is not a host,
+    Category: Keryx
+  },
+  {
+    Id: KRX041,
+    Title: [PublishStrategy] on a type that is not a notification,
+    Severity: Warning,
+    WarningLevel: 1,
+    Location: Input0.cs: (14,1)-(14,42),
+    Description: [PublishStrategy] chooses how a notification's handlers run. On any other type it does nothing.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx041,
+    MessageFormat: [PublishStrategy] on '{0}' has no effect, because it is not a notification,
+    Message: [PublishStrategy] on 'NotANotification' has no effect, because it is not a notification,
+    Category: Keryx
+  },
+  {
+    Id: KRX024,
+    Title: Request type is not sealed,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (15,13)-(15,17),
+    Description: Every non-abstract request and stream request type is sealed (a struct always is). An abstract or closed (C# 15) type may implement a request interface as the base of sealed request types; it is never a request itself, needs no handler and cannot have one (KRX003). Generic Send and Stream test each sealed request type with a type pattern, which the JIT compiles to one method-table compare. Notifications are not affected.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx024,
+    MessageFormat: {0} '{1}' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+    Message: Request type 'Open' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+    Category: Keryx
+  },
+  {
+    Id: KRX024,
+    Title: Request type is not sealed,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (16,14)-(16,24),
+    Description: Every non-abstract request and stream request type is sealed (a struct always is). An abstract or closed (C# 15) type may implement a request interface as the base of sealed request types; it is never a request itself, needs no handler and cannot have one (KRX003). Generic Send and Stream test each sealed request type with a type pattern, which the JIT compiles to one method-table compare. Notifications are not affected.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx024,
+    MessageFormat: {0} '{1}' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+    Message: Stream request type 'OpenStream' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+    Category: Keryx
+  }
+]

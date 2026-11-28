@@ -1,0 +1,24 @@
+<Project>
+    <!--
+        Keryx needs C# 14 or later in every project that references it: the default language of the .NET 10 SDK that Keryx requires, so
+        generated code may use any C# 14 feature. A netstandard2.0 project defaults to C# 7.3, so, imported before the project file, this
+        raises only that default, as Specular.Scanning.Sources does for its own generator projects. A LangVersion the project (or its
+        Directory.Build.props) sets itself still wins: it is never raised behind the project's back, because that would change the language
+        the project's own code is compiled with. One below C# 14 is error KRX022 instead of compiler errors in generated code.
+    -->
+    <PropertyGroup>
+        <LangVersion Condition="'$(LangVersion)' == ''">latest</LangVersion>
+    </PropertyGroup>
+    <!--
+        MSBuild properties the generators and analyzers read as build_property.*: KeryxHost for whether the project is a host (defaulted in
+        build/Keryx.targets), RootNamespace for the namespace of the generated mediator and AddKeryx(), TargetFrameworkIdentifier and
+        TargetFrameworkVersion for KRX031 (a host targets net10.0 or newer). Added just before the generated .editorconfig is written, when
+        every other CompilerVisibleProperty is known: the .NET SDK's analyzers already ask for the target framework ones, and a property
+        listed twice is written to the file twice.
+    -->
+    <Target Name="_KeryxAddCompilerVisibleProperties" BeforeTargets="GenerateMSBuildEditorConfigFileShouldRun">
+        <ItemGroup>
+            <CompilerVisibleProperty Include="KeryxHost;RootNamespace;TargetFrameworkIdentifier;TargetFrameworkVersion" Exclude="@(CompilerVisibleProperty)" />
+        </ItemGroup>
+    </Target>
+</Project>

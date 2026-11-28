@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' Mediator (martinothamar) 3.0.2 subject with the scoped lifetime (owner decision 41): the notifications with 25,
+        50 and 100 handlers, in a project of their own (the generator fixes the lifetime per assembly, and they stay out of
+        Keryx.Benchmarks.MediatorScoped's generated dispatch). FanOut.cs is written by ../GenerateFanOut.cs. Its generated Mediator class is public,
+        in this project's namespace.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Mediator.SourceGenerator" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

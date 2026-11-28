@@ -1,0 +1,32 @@
+<Project>
+    <!-- Inherit repository-wide targets. -->
+    <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)../'))" />
+
+    <PropertyGroup>
+        <!-- Samples are never packed; the Web SDKs still ask `dotnet pack Keryx.slnx` to warn about them. -->
+        <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
+    </PropertyGroup>
+
+    <!--
+        Samples consume Keryx through ProjectReferences, so the analyzers and the packed build files don't flow the way they do from the
+        NuGet package. Every sample gets the generator wired like a package consumer.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Keryx/Keryx.csproj" />
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Keryx.Analyzers/Keryx.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+    <Import Project="$(MSBuildThisFileDirectory)../src/Keryx/build/Keryx.props" />
+    <!--
+        The packed build/Keryx.targets imports the Specular.Scanning scan cache wiring that src/Keryx copies into the package from
+        Specular.Scanning.Sources. In the repository the file stays in that package, so samples take it from there: the package is
+        referenced only for its path (no assets), and the wiring is imported before Keryx.targets, whose import it then guards off.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Specular.Scanning.Sources" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+    </ItemGroup>
+    <Import
+        Project="$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets"
+        Condition="'$(_SpecularScanningCacheImported)' != 'true' and '$(PkgSpecular_Scanning_Sources)' != '' and Exists('$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets')"
+    />
+    <Import Project="$(MSBuildThisFileDirectory)../src/Keryx/build/Keryx.targets" />
+</Project>

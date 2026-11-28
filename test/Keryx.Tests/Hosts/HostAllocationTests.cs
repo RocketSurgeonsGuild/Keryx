@@ -1,0 +1,489 @@
+using Keryx.Analyzers.Hosts;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Keryx.Tests.Hosts;
+
+/// <summary>
+///     The Performance contract for <c>Send</c> with synchronous handlers and no behaviors (ADR 0001, Performance contract): after one warm-up
+///     call in the same scope, Keryx allocates 0 bytes per call on the typed overloads and, for class requests, on the generic entry point,
+///     for value-type and reference-type responses. A struct request sent through <c>ISender</c> is boxed at the call site (KRX021); that box
+///     is the caller's, and dispatching an already boxed struct allocates nothing.
+/// </summary>
+/// <remarks>
+///     The measuring loops live in the compiled host (<c>Sample.Probe</c>), so no reflection runs inside the measured region. Each region
+///     completes synchronously (<c>IsCompletedSuccessfully</c>, then <c>Result</c>) and is measured with
+///     <c>GC.GetAllocatedBytesForCurrentThread</c>, several times, keeping the smallest: runtime caches shared with the rest of the process
+///     (generic virtual method and cast caches) can grow on the measuring thread while other code fills them. For the same reason the class
+///     runs alone (<c>[NotInParallel]</c> without a key: no other test runs at the same time).
+/// </remarks>
+[Timeout(ModuleInitializer.TestTimeout)]
+[NotInParallel]
+public class HostAllocationTests : HostTest
+{
+    private const string Probe = """
+
+        public static class Probe
+        {
+            public const int Iterations = 1_000;
+            public const int Repeats = 5;
+
+            public static global::System.Collections.Generic.Dictionary<string, long> Measure(IServiceProvider services)
+            {
+                var mediator = services.GetRequiredService<KeryxMediator>();
+                ISender sender = mediator;
+
+                var ping = new Ping();
+                var add = new Add(1, 2);
+                var echo = new Echo("echo");
+                var count = new Count(1);
+                var tick = new Tick(1);
+                var name = new Name(1);
+                var touch = new Touch();
+                var done = new Done();
+                Base @case = new Case(1);
+                IRequest<int> boxedTick = tick;
+                IRequest<string> boxedName = name;
+
+                // Each delegate is created before its region, and each region starts with the first call in this scope.
+                return new()
+                {
+                    ["typed class, reference response, static handler"] = Region(() => mediator.Send(ping)),
+                    ["typed class, value response, static handler"] = Region(() => mediator.Send(add)),
+                    ["typed class, reference response, injected handler"] = Region(() => mediator.Send(echo)),
+                    ["typed class, value response, injected handler"] = Region(() => mediator.Send(count)),
+                    ["typed struct, value response, injected handler"] = Region(() => mediator.Send(tick)),
+                    ["typed struct, reference response, static handler"] = Region(() => mediator.Send(name)),
+                    ["typed IRequest, void handler"] = Region(() => mediator.Send(touch)),
+                    ["typed IRequest, completed ValueTask handler"] = Region(() => mediator.Send(done)),
+                    ["generic class, reference response, static handler"] = Region(() => sender.Send(ping)),
+                    ["generic class, value response, static handler"] = Region(() => sender.Send(add)),
+                    ["generic class, reference response, injected handler"] = Region(() => sender.Send(echo)),
+                    ["generic class, value response, injected handler"] = Region(() => sender.Send(count)),
+                    ["generic IRequest, void handler"] = Region(() => sender.Send(touch)),
+                    ["generic IRequest, completed ValueTask handler"] = Region(() => sender.Send(done)),
+                    ["typed sealed case of an abstract request base"] = Region(() => mediator.Send((Case)@case)),
+                    ["generic sealed case of an abstract request base"] = Region(() => sender.Send(@case)),
+                    ["generic on the mediator class, class request"] = Region(() => mediator.Send<string>(echo)),
+                    ["generic struct, boxed by the caller beforehand, value response"] = Region(() => sender.Send(boxedTick)),
+                    ["generic struct, boxed by the caller beforehand, reference response"] = Region(() => sender.Send(boxedName)),
+                };
+            }
+
+            /// <summary>The struct request boxed at each call site of ISender.Send: the caller's allocation, not Keryx's.</summary>
+            public static long BoxedAtTheCallSite(IServiceProvider services)
+            {
+                ISender sender = services.GetRequiredService<KeryxMediator>();
+                return Region(() => sender.Send(new Tick(1)));
+            }
+
+            public static long Region<T>(Func<ValueTask<T>> send)
+            {
+                _ = Complete(send());
+                var smallest = long.MaxValue;
+                for (var repeat = 0; repeat < Repeats; repeat++)
+                {
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < Iterations; i++)
+                    {
+                        _ = Complete(send());
+                    }
+
+                    smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                }
+
+                return smallest;
+            }
+
+            private static T Complete<T>(ValueTask<T> task) =>
+                task.IsCompletedSuccessfully ? task.Result : throw new InvalidOperationException("The send did not complete synchronously.");
+        }
+        """;
+
+    private const string Requests = """
+        namespace Sample;
+
+        public sealed class Clock { }
+
+        public sealed record Ping : IRequest<string>;
+        public static partial class PingHandler { private static string Handle(Ping request) => "pong"; }
+
+        public sealed record Add(int Left, int Right) : IRequest<int>;
+        public static partial class AddHandler { private static int Handle(Add request) => request.Left + request.Right; }
+
+        public sealed record Echo(string Text) : IRequest<string>;
+        public partial class EchoHandler { private static ValueTask<string> Handle(Echo request, Clock clock, CancellationToken ct) => new(request.Text); }
+
+        public sealed record Count(int Value) : IRequest<int>;
+        public partial class CountHandler { private static int Handle(Count request, Clock clock) => request.Value + 1; }
+
+        public readonly record struct Tick(int Value) : IRequest<int>;
+        public partial class TickHandler { private static int Handle(Tick request, Clock clock) => request.Value + 1; }
+
+        public readonly record struct Name(int Value) : IRequest<string>;
+        public static partial class NameHandler { private static string Handle(Name request) => "name"; }
+
+        public sealed record Touch : IRequest;
+        public static partial class TouchHandler { private static void Handle(Touch request) { } }
+
+        public sealed record Done : IRequest;
+        public partial class DoneHandler { private static ValueTask Handle(Done request, Clock clock) => default; }
+
+        public sealed record Rang : INotification;
+        public partial class RangHandler { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+
+        /// <summary>An abstract request base: its sealed case has its own handler (KRX024).</summary>
+        public abstract record Base(int Value) : IRequest<int>;
+        public sealed record Case(int Value) : Base(Value);
+        public static partial class CaseHandler { private static int Handle(Case request) => request.Value + 1; }
+
+        public static class Registrations
+        {
+            public static void Required(IServiceCollection services) => services.AddScoped(static _ => new Clock());
+        }
+        """;
+
+    [Test]
+    public async Task Synchronous_Sends_Allocate_Nothing_After_Warm_Up(CancellationToken cancellationToken)
+    {
+        var host = await CompileHostAsync(Requests + Probe, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+        await using var scope = provider.CreateAsyncScope();
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.Probe", "Measure", scope.ServiceProvider);
+
+        await Assert.That(allocated.Count).IsEqualTo(19);
+        foreach (var (scenario, bytes) in allocated)
+        {
+            await Assert.That(bytes).IsEqualTo(0L).Because(scenario);
+        }
+    }
+
+    [Test]
+    public async Task A_Struct_Request_Sent_Through_ISender_Is_Boxed_By_The_Caller(CancellationToken cancellationToken)
+    {
+        var host = await CompileHostAsync(Requests + Probe, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+        await using var scope = provider.CreateAsyncScope();
+
+        var allocated = Call<long>(host, "Sample.Probe", "BoxedAtTheCallSite", scope.ServiceProvider);
+
+        // Exactly one box of a Tick per call (KRX021): object header and method table pointer plus the int, rounded up to the pointer size
+        // (24 bytes on 64-bit). Dispatching the boxed request adds nothing (see the pre-boxed scenarios above).
+        var box = ( ( IntPtr.Size * 2 ) + sizeof(int) + IntPtr.Size - 1 ) / IntPtr.Size * IntPtr.Size;
+        await Assert.That(allocated).IsEqualTo(1_000L * box);
+    }
+
+    private const string ScopeProbe = """
+
+        public static class ScopeProbe
+        {
+            private static readonly Echo EchoRequest = new("echo");
+            private static readonly Rang RangNotification = new();
+
+            public static global::System.Collections.Generic.Dictionary<string, long> Measure(IServiceProvider root)
+            {
+                var scopes = root.GetRequiredService<IServiceScopeFactory>();
+                return new()
+                {
+                    // A scope alone, then a scope that resolves one mediator, or one of each service type.
+                    ["scope"] = Region(scopes, static services => services),
+                    ["KeryxMediator"] = Region(scopes, static services => services.GetRequiredService<KeryxMediator>()),
+                    ["IMediator"] = Region(scopes, static services => services.GetRequiredService<IMediator>()),
+                    ["ISender"] = Region(scopes, static services => services.GetRequiredService<ISender>()),
+                    ["IPublisher"] = Region(scopes, static services => services.GetRequiredService<IPublisher>()),
+                    ["all four"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = services.GetRequiredService<IMediator>();
+                            _ = services.GetRequiredService<ISender>();
+                            _ = services.GetRequiredService<IPublisher>();
+                            return services.GetRequiredService<KeryxMediator>();
+                        }
+                    ),
+
+                    // Resolving, then the scope's normal work: the scope state, the pipeline context, the handler and its scoped service join
+                    // the scope. A second mediator of the scope uses the same state and context.
+                    ["send: KeryxMediator"] = Region(scopes, static services => Send(services.GetRequiredService<KeryxMediator>())),
+                    ["send: IMediator"] = Region(scopes, static services => Send(services.GetRequiredService<IMediator>())),
+                    ["send: ISender"] = Region(scopes, static services => Send(services.GetRequiredService<ISender>())),
+                    ["send: two mediators"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = Send(services.GetRequiredService<ISender>());
+                            return Send(services.GetRequiredService<IMediator>());
+                        }
+                    ),
+                    ["publish: KeryxMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<KeryxMediator>())),
+                    ["publish: IMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<IMediator>())),
+                    ["publish: IPublisher"] = Region(scopes, static services => Publish(services.GetRequiredService<IPublisher>())),
+                    ["publish: two mediators"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = Publish(services.GetRequiredService<IPublisher>());
+                            return Publish(services.GetRequiredService<IMediator>());
+                        }
+                    ),
+                };
+            }
+
+            private static object Send(ISender sender)
+            {
+                var sent = sender.Send(EchoRequest);
+                return sent.IsCompletedSuccessfully ? sent.Result : throw new InvalidOperationException("The send did not complete synchronously.");
+            }
+
+            private static object Publish(IPublisher publisher)
+            {
+                var published = publisher.Publish(RangNotification);
+                return published.IsCompletedSuccessfully ? publisher : throw new InvalidOperationException("The publish did not complete synchronously.");
+            }
+
+            /// <summary>The bytes of 1,000 scopes that each resolve and are disposed, the smallest of five repeats after a warm-up.</summary>
+            private static long Region(IServiceScopeFactory scopes, Func<IServiceProvider, object> resolve)
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    using var scope = scopes.CreateScope();
+                    _ = resolve(scope.ServiceProvider);
+                }
+
+                var smallest = long.MaxValue;
+                for (var repeat = 0; repeat < 5; repeat++)
+                {
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < 1_000; i++)
+                    {
+                        using var scope = scopes.CreateScope();
+                        _ = resolve(scope.ServiceProvider);
+                    }
+
+                    smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                }
+
+                return smallest;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State(CancellationToken cancellationToken)
+    {
+        // KeryxMediator, IMediator, ISender and IPublisher are transient factories that create a mediator (owner decision 46): the container
+        // does not track a transient result that is not disposable, so resolving one adds the mediator object to a scope, its provider and
+        // its state field (four pointers on 64-bit, with the object header), and no entry to the scope's resolved services. The scope state is
+        // the scope's one Keryx entry, resolved by the first call that needs a pipeline context and shared by every mediator of the scope, so
+        // a second mediator that sends or publishes adds only itself.
+        var host = await CompileHostAsync(Requests + ScopeProbe, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.ScopeProbe", "Measure", provider);
+
+        await Assert.That(allocated.Count).IsEqualTo(14);
+        const long scopes = 1_000;
+        long mediator = 4 * IntPtr.Size;
+        await Assert.That(allocated["KeryxMediator"] - allocated["scope"]).IsEqualTo(scopes * mediator);
+        await Assert.That(allocated["all four"] - allocated["scope"]).IsEqualTo(scopes * 4 * mediator);
+        (string Scenario, string Baseline)[] same =
+        [
+            ("IMediator", "KeryxMediator"),
+            ("ISender", "KeryxMediator"),
+            ("IPublisher", "KeryxMediator"),
+            ("send: IMediator", "send: KeryxMediator"),
+            ("send: ISender", "send: KeryxMediator"),
+            ("publish: IMediator", "publish: KeryxMediator"),
+            ("publish: IPublisher", "publish: KeryxMediator"),
+        ];
+        foreach (var (scenario, baseline) in same)
+        {
+            await Assert.That(allocated[scenario]).IsEqualTo(allocated[baseline]).Because(scenario);
+        }
+
+        await Assert.That(allocated["send: KeryxMediator"]).IsGreaterThan(allocated["KeryxMediator"]);
+        await Assert.That(allocated["send: two mediators"] - allocated["send: KeryxMediator"]).IsEqualTo(scopes * mediator);
+        await Assert.That(allocated["publish: KeryxMediator"]).IsGreaterThan(allocated["KeryxMediator"]);
+        await Assert.That(allocated["publish: two mediators"] - allocated["publish: KeryxMediator"]).IsEqualTo(scopes * mediator);
+    }
+
+    /// <summary>
+    ///     Requests whose contexts each hold one scoped <c>Clock</c>: <c>Handled</c>'s for its handler (the host's own, called through its
+    ///     static entry), <c>Behaved</c>'s for its behavior, <c>Both</c>'s for its handler and its behavior, which share it (owner decision
+    ///     43); and notifications whose contexts hold one: <c>Rung</c>'s for its one handler, <c>Rang</c>'s for its two handlers, which
+    ///     share it. A ping without a context is the baseline of a scope that resolves the mediator and sends.
+    /// </summary>
+    private const string HandlerServices = """
+        namespace Sample;
+
+        public sealed class Clock { }
+
+        public sealed record Ping : IRequest<int>;
+        public static partial class PingHandler { private static int Handle(Ping request) => 1; }
+
+        public sealed record Handled : IRequest<int>;
+        public partial class HandledHandler { private static int Handle(Handled request, Clock clock) => 1; }
+
+        public sealed record Behaved : IRequest<int>;
+        public static partial class BehavedHandler { [Behavior(typeof(Clocked))] private static int Handle(Behaved request) => 1; }
+
+        [RequestBehavior]
+        public static class Clocked
+        {
+            public static ValueTask<int> Handle<TNext>(Behaved request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TNext : struct, INext<int> =>
+                next.InvokeAsync(cancellationToken);
+        }
+
+        public sealed record Both : IRequest<int>;
+        public partial class BothHandler { [Behavior(typeof(BothClocked))] private static int Handle(Both request, Clock clock) => 1; }
+
+        [RequestBehavior]
+        public static class BothClocked
+        {
+            public static ValueTask<int> Handle<TNext>(Both request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TNext : struct, INext<int> =>
+                next.InvokeAsync(cancellationToken);
+        }
+
+        public sealed record Rung : INotification;
+        public partial class OnRung { private static ValueTask Handle(Rung notification, Clock clock) => default; }
+
+        public sealed record Rang : INotification;
+        public partial class OnRangA { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+        public partial class OnRangB { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+
+        public static class Registrations
+        {
+            public static void Required(IServiceCollection services) => services.AddScoped(static _ => new Clock());
+        }
+
+        public static class HandlerProbe
+        {
+            public static global::System.Collections.Generic.Dictionary<string, long> Measure(IServiceProvider root)
+            {
+                var scopes = root.GetRequiredService<IServiceScopeFactory>();
+                return new()
+                {
+                    ["ping"] = Region(scopes, static mediator => mediator.Send(new Ping())),
+                    ["handler service"] = Region(scopes, static mediator => mediator.Send(new Handled())),
+                    ["behavior service"] = Region(scopes, static mediator => mediator.Send(new Behaved())),
+                    ["shared by handler and behavior"] = Region(scopes, static mediator => mediator.Send(new Both())),
+                    ["one handler"] = Region(scopes, static mediator => Completed(mediator.Publish(new Rung()))),
+                    ["shared by two handlers"] = Region(scopes, static mediator => Completed(mediator.Publish(new Rang()))),
+                };
+            }
+
+            private static ValueTask<int> Completed(ValueTask published) =>
+                published.IsCompletedSuccessfully ? new(0) : throw new InvalidOperationException("The publish did not complete synchronously.");
+
+            /// <summary>The bytes of 1,000 scopes that each send once, the smallest of five repeats after a warm-up.</summary>
+            private static long Region(IServiceScopeFactory scopes, Func<KeryxMediator, ValueTask<int>> send)
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    using var scope = scopes.CreateScope();
+                    _ = send(scope.ServiceProvider.GetRequiredService<KeryxMediator>()).Result;
+                }
+
+                var smallest = long.MaxValue;
+                for (var repeat = 0; repeat < 5; repeat++)
+                {
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < 1_000; i++)
+                    {
+                        using var scope = scopes.CreateScope();
+                        var sent = send(scope.ServiceProvider.GetRequiredService<KeryxMediator>());
+                        _ = sent.IsCompletedSuccessfully ? sent.Result : throw new InvalidOperationException("The send did not complete synchronously.");
+                    }
+
+                    smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                }
+
+                return smallest;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task An_Own_Handler_With_Services_Costs_A_Scope_What_A_Behavior_With_Them_Costs(CancellationToken cancellationToken)
+    {
+        // Owner decisions 42 and 44: the host's own handler is not registered and never constructed. Its context holds the Clock it injects
+        // and calls its static entry, so a scope that sends it allocates exactly what one that sends a request whose behavior injects the
+        // Clock does (the scope state, a context of one field, the Clock and its scope entry): no handler object, no scope entry for one.
+        var host = await CompileHostAsync(HandlerServices, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.HandlerProbe", "Measure", provider);
+
+        await Assert.That(allocated["handler service"]).IsEqualTo(allocated["behavior service"]);
+        await Assert.That(allocated["handler service"]).IsGreaterThan(allocated["ping"]);
+    }
+
+    [Test]
+    public async Task A_Service_Shared_In_A_Context_Costs_A_Scope_What_One_Consumer_Costs(CancellationToken cancellationToken)
+    {
+        // Owner decision 43: a context resolves each service once for its behaviors and its handlers and holds it in one field. A request
+        // whose handler and behavior inject the Clock costs a scope exactly what one whose handler alone injects it costs, and a publish to
+        // two handlers that inject it exactly what a publish to one handler costs (the same context size, one Clock, one scope entry).
+        var host = await CompileHostAsync(HandlerServices, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.HandlerProbe", "Measure", provider);
+
+        await Assert.That(allocated["shared by handler and behavior"]).IsEqualTo(allocated["handler service"]);
+        await Assert.That(allocated["shared by two handlers"]).IsEqualTo(allocated["one handler"]);
+        await Assert.That(allocated["one handler"]).IsGreaterThan(allocated["ping"]);
+    }
+
+    [Test]
+    public async Task FrozenDictionary_Dispatch_Allocates_Nothing_After_Warm_Up(CancellationToken cancellationToken)
+    {
+        var count = HostEmitter.DispatchThreshold + 1;
+        var last = $"R{count - 1:00}";
+        var host = await CompileHostAsync(
+            HostGeneratorTests.ManyRequests(count)
+          + $$"""
+
+              public static class Probe
+              {
+                  public static long[] Measure(IServiceProvider services)
+                  {
+                      ISender sender = services.GetRequiredService<KeryxMediator>();
+                      var first = new R00(1);
+                      var last = new {{last}}(1);
+                      var results = new long[2];
+                      results[0] = Region(() => sender.Send(first));
+                      results[1] = Region(() => sender.Send(last));
+                      return results;
+                  }
+
+                  private static long Region(Func<ValueTask<int>> send)
+                  {
+                      _ = send().Result;
+                      var smallest = long.MaxValue;
+                      for (var repeat = 0; repeat < 5; repeat++)
+                      {
+                          var before = GC.GetAllocatedBytesForCurrentThread();
+                          for (var i = 0; i < 1_000; i++)
+                          {
+                              var task = send();
+                              _ = task.IsCompletedSuccessfully ? task.Result : throw new InvalidOperationException();
+                          }
+
+                          smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                      }
+
+                      return smallest;
+                  }
+              }
+              """,
+            cancellationToken
+        );
+        await using var provider = BuildProvider(host);
+        await using var scope = provider.CreateAsyncScope();
+
+        await Assert.That(host.GetType("Sample.KeryxMediator")!.GetField("__requestTypes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)).IsNotNull();
+        await Assert.That(Call<long[]>(host, "Sample.Probe", "Measure", scope.ServiceProvider)).IsEquivalentTo([0L, 0L]);
+    }
+}

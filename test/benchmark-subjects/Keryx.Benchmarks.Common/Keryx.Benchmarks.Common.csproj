@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        What every benchmark subject shares: the verification probe, the stream every stream handler returns, and the real-world scenarios'
+        services (the Pong response, the in-memory logging provider, the validator contract, the scoped repository, the SQLite database and
+        the notification handlers' body).
+    -->
+    <!--
+        KeryxBenchmarksProbe=false (set by the benchmark runner before BenchmarkDotNet builds, owner decision 34): Probe.Enabled is a const
+        false and Probe.Hit is empty, so the JIT and NativeAOT benchmark builds have no probe. Every other build (the verify run, under the
+        JIT and in the NativeAOT publish) keeps the AppContext switch.
+    -->
+    <PropertyGroup Condition="'$(KeryxBenchmarksProbe)' == 'false'">
+        <DefineConstants>$(DefineConstants);KERYX_BENCHMARKS_NO_PROBE</DefineConstants>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.Sqlite" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <PackageReference Include="Microsoft.Extensions.Logging" />
+    </ItemGroup>
+</Project>

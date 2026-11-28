@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' direct-call baseline (owner decision 41): the notifications with 25, 50 and 100 handlers, called directly or
+        through a hand-written publisher class, in a project of their own like every library's fan-out subject. FanOut.cs is written by
+        ../GenerateFanOut.cs.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

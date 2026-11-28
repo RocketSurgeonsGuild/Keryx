@@ -1,0 +1,29 @@
+name: Draft Release and Create Milestone
+
+# After every merge: names the pending milestone and the draft release after the next version (the latest release
+# bumped by the merged pull requests' labels), files the merged pull requests under it and regenerates the draft's notes
+# from .github/release.yml. Each run reconciles everything, so a missed run is repaired by the next one.
+on:
+    push:
+        branches:
+            - main
+    schedule:
+        - cron: 0 0 * * 4
+    workflow_dispatch:
+
+permissions:
+    contents: write
+    issues: write
+    pull-requests: write
+
+# One reconcile at a time, shared with close-milestone.yml. Never cancelled mid-run; a queued run that replaces another
+# queued one loses nothing because every run starts from the current state.
+concurrency:
+    group: release-milestones
+    cancel-in-progress: false
+
+jobs:
+    draft_release:
+        uses: RocketSurgeonsGuild/actions/.github/workflows/draft-release.yml@v0.4.0
+        secrets:
+            RSG_BOT_TOKEN: ${{ secrets.RSG_BOT_TOKEN }}

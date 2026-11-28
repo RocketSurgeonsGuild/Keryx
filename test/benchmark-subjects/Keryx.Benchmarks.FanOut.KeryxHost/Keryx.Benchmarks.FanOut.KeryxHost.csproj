@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' Keryx host (owner decision 41): the notifications with 25, 50 and 100 handlers, in a host of their own so they
+        neither grow Keryx.Benchmarks.KeryxHost's scope state (8 B per pipeline with a context, open-questions OQ-78) nor change its dispatch.
+        FanOut.cs is written by ../GenerateFanOut.cs. Wired up like Keryx.Benchmarks.KeryxHost: a host by KeryxHost, its generated
+        KeryxMediator and AddKeryx() internal and seen by the benchmark runner through InternalsVisibleTo.
+    -->
+    <PropertyGroup>
+        <KeryxHost>true</KeryxHost>
+    </PropertyGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="Keryx.Benchmarks" />
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <ProjectReference Include="../../../src/Keryx/Keryx.csproj" />
+        <ProjectReference Include="../../../src/Keryx.Analyzers/Keryx.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <PackageReference Include="Specular.Scanning.Sources" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
+    </ItemGroup>
+    <Import Project="../../../src/Keryx/build/Keryx.props" />
+    <Import
+        Project="$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets"
+        Condition="'$(_SpecularScanningCacheImported)' != 'true' and '$(PkgSpecular_Scanning_Sources)' != '' and Exists('$(PkgSpecular_Scanning_Sources)/build/Specular.Scanning.Cache.targets')"
+    />
+    <Import Project="../../../src/Keryx/build/Keryx.targets" />
+</Project>

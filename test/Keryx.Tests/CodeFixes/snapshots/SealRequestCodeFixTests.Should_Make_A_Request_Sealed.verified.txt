@@ -1,0 +1,292 @@
+﻿{
+  Before: [
+    using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+  ],
+  Actions: [
+    {
+      Diagnostic: KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Plain' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public sealed class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    },
+    {
+      Diagnostic: KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Positional' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public sealed record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    },
+    {
+      Diagnostic: KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Split' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public sealed partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    },
+    {
+      Diagnostic: KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Ship' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public sealed record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    },
+    {
+      Diagnostic: KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Bare' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+sealed record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    },
+    {
+      Diagnostic: KRX024: Request type 'Outer.Nested' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+      Title: Make 'Nested' sealed,
+      EquivalenceKey: Keryx.MakeSealed,
+      After: {
+        Input0.cs:
+using Keryx;
+
+namespace Sample;
+
+/// <summary>A class request.</summary>
+public class Plain : IRequest<int> { }
+
+public record Positional(int Value) : IRequest<int>;
+
+public partial record Split : IStreamRequest<int>;
+
+public partial record Split
+{
+    public int Value { get; init; }
+}
+
+public abstract record Command : IRequest;
+
+[System.Serializable]
+public record Ship : Command;
+
+record Bare : IRequest<string>;
+
+public static partial class Outer
+{
+    // A nested request.
+    internal sealed partial class Nested : IRequest<string> { }
+}
+      },
+      Remaining: [
+        KRX024: Request type 'Bare' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Plain' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Positional' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Request type 'Ship' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types,
+        KRX024: Stream request type 'Split' is not sealed; make it sealed, or abstract (or closed) if it is the base of other request types
+      ]
+    }
+  ]
+}

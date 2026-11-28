@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Rocket.Surgery.AssemblyInfo" Version="2026.11.7" />
+    <GlobalPackageReference Include="Microsoft.DotNet.ApiCompat.Task" Version="11.0.100" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The build host (build/Build.cs). Dovetail joints and the Specular module scan are generated into the host, so both are direct references there. -->
+    <PackageVersion Include="Rocket.Surgery.ModularPipelines.Extensions" Version="0.2.5" />
+    <PackageVersion Include="Joinery.Dovetail.ModularPipelines" Version="0.8.0" />
+    <PackageVersion Include="Specular" Version="0.4.1" />
+    <PackageVersion Include="Sourcy.DotNet" Version="1.1.1" />
+    <PackageVersion Include="Sourcy.Git" Version="1.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+        The analyzers and code fixes build against the oldest Roslyn Specular.Scanning.Sources supports (5.0, the .NET 10 SDK compiler),
+        so Keryx loads in every compiler from there on. Tests override these with newer versions (VersionOverride): the source generator
+        testing helpers need Roslyn 5.9 or later.
+    -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.12.0" />
+    <!-- Source-only, compiled into Keryx.Analyzers as internal types. Prerelease: pinned exactly. -->
+    <PackageVersion Include="Specular.Scanning.Sources" Version="0.4.3-beta.2" />
+    <!--
+        Shipped beside the generator (analyzers/dotnet/cs), so they must load in the .NET 10 SDK compiler and in Visual Studio:
+        stay on 9.0.x, the versions Specular.Scanning.Sources is built and checked against.
+    -->
+    <PackageVersion Include="System.Collections.Immutable" Version="9.0.23" />
+    <PackageVersion Include="System.Text.Json" Version="9.0.23" />
+    <PackageVersion Include="Polyfill" Version="12.0.0" />
+    <!-- netstandard2.0 support for Keryx: ValueTask and IAsyncEnumerable. -->
+    <PackageVersion Include="System.Threading.Tasks.Extensions" Version="4.6.3" />
+    <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.15" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Tests -->
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Bogus" Version="35.6.5" />
+    <PackageVersion Include="TUnit" Version="1.87.12" />
+    <PackageVersion Include="TUnit.Assertions.Should" Version="1.87.12-beta" />
+    <PackageVersion Include="Rocket.Surgery.Extensions.Testing.TUnit" Version="11.0.1" />
+    <PackageVersion Include="Rocket.Surgery.Extensions.Testing.SourceGenerators" Version="11.0.2" />
+    <PackageVersion Include="Verify.TUnit" Version="33.7.3" />
+    <!-- Public API snapshot of Keryx.dll (test/Keryx.Tests/PublicApiTests.cs). -->
+    <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Benchmarks: Keryx against a hand-written baseline and the other mediators (pinned exactly). -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="MediatR" Version="15.0.0" />
+    <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />
+    <PackageVersion Include="Mediator.SourceGenerator" Version="3.0.2" />
+    <PackageVersion Include="Immediate.Handlers" Version="4.4.0" />
+    <PackageVersion Include="ZeroAlloc.Mediator" Version="7.0.1" />
+    <!-- ZeroAlloc.Mediator's source generator ships as its own package, at the same version. -->
+    <PackageVersion Include="ZeroAlloc.Mediator.Generator" Version="7.0.1" />
+    <!-- The real-world scenarios' data-access handler: a parameterized query against a shared-cache in-memory database. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+  </ItemGroup>
+  <!--
+      Microsoft.Extensions.DependencyInjection.Abstractions is a dependency of the Keryx package, per target framework (OQ-8): 8.0.x for
+      netstandard2.0 (the oldest version with keyed services) and 10.0.x for net10.0. The .NET 11 shared framework carries the assembly, so
+      package pruning drops the reference for net11.0 and that dependency group is empty (OQ-56); the 11.0.x version stays for the
+      projects that build against it.
+  -->
+  <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0')) And !$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
+  </ItemGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
+    <!--
+        The benchmark subjects' logging behaviors write through Microsoft.Extensions.Logging to an in-memory provider, and the MediatR subject
+        filters MediatR's license log category (ADR 0001, Benchmarks).
+    -->
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.15" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="11.0.0" />
+  </ItemGroup>
+</Project>
