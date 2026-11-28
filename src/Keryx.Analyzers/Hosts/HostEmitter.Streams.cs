@@ -75,6 +75,7 @@ internal static partial class HostEmitter
             $"private {AsyncEnumerable}<{pipeline.Handler.ResponseType}> {StreamCoreName(index)}({pipeline.Handler.MessageType} request, {TokenParameter})",
             StreamContextName(index),
             StreamContextField(index),
+            GetStreamContextName(index),
             CreateStreamContextName(index),
             StreamLinkName(0)
         );
@@ -101,6 +102,8 @@ internal static partial class HostEmitter
     private static string StreamContextName(int index) => "__StreamPipeline" + Digits(index);
 
     private static string StreamContextField(int index) => "__streamPipeline" + Digits(index);
+
+    private static string GetStreamContextName(int index) => "__GetStreamPipeline" + Digits(index);
 
     private static string CreateStreamContextName(int index) => "__CreateStreamPipeline" + Digits(index);
 

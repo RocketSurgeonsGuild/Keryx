@@ -32,11 +32,36 @@ the same day) follow; OQ-72 was raised while implementing the first and OQ-73 wh
 (decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27 (decision 35),
 follows; OQ-76 was raised while implementing it. OQ-72, OQ-73 and OQ-75, decided by the owner the same day (decisions 33, 34
 and 36), follow. Decision 37's run (the same day) is recorded in "Full benchmark run" and in those entries; OQ-77 was raised while
-doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 39), come last.
+doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 39), follow. "The mediator is transient over a scoped
+state" (owner decisions 46 and 47, 2026-11-28; it supersedes decision 35's one-mediator-per-scope guarantee and changes decision 38's
+trade-off) comes last; OQ-78 was raised while implementing decision 47 and is open.
 
 ## Open
 
-None.
+### OQ-78: The scope state has one field per pipeline with a context (2026-11-28)
+
+Owner decision 47 asked for a scope state whose size does not grow with the host: a few write-once slots read with `Volatile.Read` and a
+type test on the sealed context class, with an overflow allocated on need (or chunked pages above a threshold), chosen by measurement,
+and to keep one field per pipeline "if the slot cache regresses the long-lived rows beyond noise". The slot cache was built and measured
+(four slots, each read in turn by an inlined accessor, then an overflow array indexed by pipeline position; "The mediator is transient
+over a scoped state", at the end): it saves 40 B per scope that uses a context in the benchmark host (ten pipelines with a context, so
+56 B of state against 96 B), but the long-lived `RealWorldBehaviors` generic `Send` measured 128.3, 129.1 and 128.2 ns in three rounds
+interleaved with the per-field layout (124.5, 124.9, 125.1 ns) and the code before decision 46 (127.1, 127.0, 125.5 ns), 1.105 to 1.110
+times its direct call against 1.064 to 1.078: about 2 to 4 ns, every round, beyond the runs' error (under 1.1 ns). The typed overload
+did not move (121.4 ns mean against 122.2 and 121.9). So the per-field layout stays, and the state grows by 8 B per pipeline with a
+context: in a scope that uses any context, a host with 10, 25, 50 or 100 such pipelines allocates a 96, 216, 416 or 816 B state. A host
+with many pipelines (decision 41's 25, 50 and 100 notification handlers in the benchmark host, which decision 48 expected to share it
+"now that the state size is bounded") pays that once per scope; the long-lived path is unaffected.
+
+- **Interim:** one `object?` field per pipeline with a context in `KeryxMediator.__KeryxScopeState`, read with `Volatile.Read` and
+  `Unsafe.As`, set once with `Interlocked.CompareExchange` (what this step ships). The 25/50/100-handler benchmarks of decision 41 would
+  add 8 B to every Keryx scope-per-request row of the benchmark host per new pipeline with a context; put them in a host of their own (or
+  behind a build property like `KeryxDispatchPadding`) until this is decided.
+- **Proposal:** keep the per-field layout up to a threshold of pipelines with a context (for example 32, `DispatchThreshold`), and
+  above it measure a variant that reads only slot 0 inline and finds the
+  others in the non-inlined create method (smaller inlined code; the four-slot chain is the suspect for the generic row, unverified), or
+  chunked pages of 16 fields allocated on first use. Alternative: accept the per-field layout for every size and document the 8 B per
+  pipeline. Needs a decision.
 
 ## Decided
 
@@ -2310,6 +2335,13 @@ Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Bench
 
 ### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
 
+**Superseded in part** (2026-11-28) by owner decision 46 ("The mediator is transient over a scoped state", at the end): `KeryxMediator`,
+`IMediator`, `ISender` and `IPublisher` are all transient factories that create a mediator (`new KeryxMediator(sp)`), so the guarantee
+below that all four resolve to one instance per scope no longer holds; the pipeline contexts are still one per scope and pipeline,
+held by a scoped state every mediator of the scope shares. The forwarding factories, the test
+`AddKeryx_Registers_One_Scoped_Mediator_Behind_Every_Interface` and the allocation test described below are replaced. The history
+follows.
+
 Decision 32's run ("Full benchmark run", at the end) measured Keryx's `IMediator` rows with a scope per request slower than its typed
 overload: `RealWorldPingScopePerRequest` 80.4 ns against 54.3 ns (448 B both), `RealWorldPublish1ScopePerRequest` 219 ns and 920 B against
 161 ns and 560 B, and `RealWorldPublish5ScopePerRequest` 634 ns and 2,136 B against 557 ns and 1,336 B (the notification-behavior pair
@@ -2601,6 +2633,13 @@ Folded into the ADR (status; Benchmarks), the README (Benchmarks) and whats-left
 
 ### OQ-76: `ValidateOnBuild` no longer reports a singleton that injects `IMediator`, `ISender` or `IPublisher` (2026-11-27)
 
+**Superseded in part** (2026-11-28) by owner decision 46 ("The mediator is transient over a scoped state", at the end): the trade-off
+stays accepted and documented, as MediatR's is, with no generator warning, but it changes shape. A singleton that injects `KeryxMediator`,
+`IMediator`, `ISender` or `IPublisher` now passes `ValidateOnBuild` and is resolved: it gets a mediator over the root provider. Under
+`ValidateScopes` its first call that needs a pipeline context throws ("Cannot resolve scoped service '…KeryxMediator+__KeryxScopeState'
+from root provider"), while calls through pipelines without a context run. The pinning test is now
+`HostRuntimeTests.A_Singleton_Taking_A_Mediator_Fails_At_Its_First_Pipeline_Context`. The history follows.
+
 Decision 35 (OQ-74, Decided) makes the three interfaces transient factories that forward to the scoped `KeryxMediator`. With the scoped
 forwarders, a singleton that injects one of them was rejected when the provider was built with `ValidateOnBuild`: "Cannot consume scoped
 service 'IMediator' from singleton '…'". `ValidateOnBuild` cannot see inside a factory, so with the transient forwarders the provider
@@ -2677,3 +2716,119 @@ on this one benchmark.
       net11.0) pass. The reports are in the session scratchpad, `oq77/aot-measured-1` (with `run.log`), `oq77/dry-jit` and `oq77/dry-aot`.
 
 Folded into the ADR (status; Benchmarks, NativeAOT), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
+
+### The mediator is transient over a scoped state (2026-11-28)
+
+Owner decisions 46 and 47, with 48 (the deep dive into ZeroAlloc.Mediator's lead with a scope per request, its "Rank 6 D" and "Rank 5 E").
+
+- **Decision 46** (owner; it reverses decision 35's same-instance guarantee, OQ-74): `KeryxMediator` becomes a small transient object,
+  the provider that resolved it and a lazily resolved reference to the scope's state; a generated scoped `__KeryxScopeState` holds the
+  pipeline contexts and is resolved from the mediator's provider by the first call that needs a context (thread-safe, one state per scope,
+  one context per pipeline per scope as before). `IMediator`, `ISender`, `IPublisher` and `KeryxMediator` are registered transient as
+  `sp => new KeryxMediator(sp)`, with no forwarder hop. Accepted: mediator identity is per resolve, contexts stay per scope, and a
+  singleton that captures the mediator fails at its first context use under `ValidateScopes` (OQ-74 and OQ-76 carry superseded notes).
+- **Decision 47** (session, no behavior change): bound the state's size with a few write-once slots and an overflow, or chunked pages,
+  chosen by measurement; keep one field per pipeline if that regresses the long-lived rows beyond noise, and record why.
+- **Decision 48**: verify the bytes exactly and measure the targeted rows on a quiet machine against decision 37's run
+  (`bench-final-2/jit` in the session scratchpad).
+
+Done:
+
+- **Generated code** (`HostEmitter`, `HostEmitter.Streams`, `HostEmitter.Notifications`; `CodeWriter.AggressiveInliningAttribute`).
+  `KeryxMediator` has two fields, `__serviceProvider` and `__state` (`__KeryxScopeState?`; a host without a pipeline that has a context
+  has neither the field nor the state). Each pipeline with a context gets an accessor, `[MethodImpl(AggressiveInlining)] __GetPipelineN()`
+  (`__GetStreamPipelineN`, `__GetNotificationN`): `var state = Volatile.Read(ref __state) ?? __ResolveState();` then
+  `Unsafe.As<__PipelineN?>(Volatile.Read(ref state.__pipelineN)) ?? __CreatePipelineN(state)`; the non-inlined `__CreatePipelineN(state)` is
+  `Unsafe.As<__PipelineN>(Interlocked.CompareExchange(ref state.__pipelineN, new __PipelineN(__serviceProvider), null) ??
+  state.__pipelineN)`, the exchange the mediator's own field had before. The non-inlined `__ResolveState()` resolves the state with
+  `GetRequiredService<__KeryxScopeState>(__serviceProvider)` and keeps it with `Volatile.Write` (two callers of one mediator store the same
+  scoped instance). `__KeryxScopeState` is an `internal sealed` class nested in the mediator, with one `public object? __pipelineN` field
+  per pipeline with a context (requests, then streams, then notifications): `AddKeryx()` must name it, and the context classes are
+  private, so the fields are `object` and the accessor reinterprets them with `Unsafe.As` (each field only ever holds its own context).
+  `AddKeryx()` registers `TryAddTransient(sp => new KeryxMediator(sp))`, the same for `IMediator`, `ISender` and `IPublisher`, then, when
+  the host has a pipeline with a context, `TryAddScoped(sp => new KeryxMediator.__KeryxScopeState())`; the handler registrations are
+  unchanged. Neither the mediator nor the state is disposable, so the container tracks neither; the state is the scope's one entry for
+  Keryx.
+- **Layout (decision 47), by measurement: one field per pipeline.** The slot cache was implemented first (four `object?` slots taken in
+  order of first use, an accessor that type-tests each slot in turn, a non-inlined create method that offers the context to the state's
+  `Add`, which keeps the first context of each type in the first free slot, and an overflow array indexed by pipeline position for a host
+  with more than four, allocated with `Interlocked.CompareExchange` on first need) and passed the same tests, the two-pipelines-racing
+  test included. It saved 40 B per scope that uses a context in the benchmark host (a 56 B state against 96 B), but regressed the
+  long-lived generic `Send` with behaviors by 2 to 4 ns in every round (below), so decision 47's rule keeps the per-field layout. The
+  bound that decision 47 wanted is OQ-78 (open). The emitted per-field code is the measured variant's, token for token, except the field
+  names and the state's summary (checked by diffing the benchmark host's generated mediator, emitted from the per-field variant's
+  source and from the final tree: `rework-scope/state/final/generated-mediator.diff`, whose only changes are the ten `SlotN` fields
+  renamed `__pipelineN`, `__streamPipelineN` and `__notificationN` in the accessors, the create methods and the state, and the state's
+  summary).
+- **Bytes, exact** (BenchmarkDotNet's allocation counts, from its `// GC:` lines, total bytes over total operations, and
+  `HostAllocationTests`). Per scope in the benchmark host, before, then per field (kept), then the slot cache: `RealWorldPingScopePerRequest`
+  (no context, so no state) 448, 192, 192 B, typed and `IMediator`, against ZeroAlloc.Mediator's 208 B and the direct call's 368 B: the
+  scope (128 B), a 32 B mediator and the 32 B `Pong`; the mediator no longer takes a scope entry (184 B of the scope's first resolved-services
+  arrays) and is 32 B instead of 104 B. With a context: `RealWorldBehaviorsScopePerRequest` 1,408, 1,432, 1,392 B;
+  `RealWorldPublish1ScopePerRequest` 560, 584, 544 B; `RealWorldPublish5ScopePerRequest` 1,336, 1,360, 1,320 B;
+  `RealWorldPublishBehavior1ScopePerRequest` 712, 736, 696 B; `RealWorldPublishBehavior5ScopePerRequest` 1,488, 1,512, 1,472 B, typed and
+  `IMediator` alike: the 72 B the mediator saves, against a 96 B state (16 B and ten fields) that takes the scope entry the mediator had.
+  The long-lived rows allocate what they allocated (0 B for `PublishTo1`/`5` and `SendSyncDepth0`/`8`, 32 B for `RealWorldPing`, 520 B for
+  `RealWorldBehaviors`, all of it the `Pong` and the behaviors' work), and `HostAllocationTests.Synchronous_Sends_Allocate_Nothing_After_Warm_Up`
+  still measures 0 B for every scenario.
+- **Time** (JIT, BenchmarkDotNet 0.15.8, Apple M4 Max, .NET 10.0.15, the README's job: IterationCount=15, IterationTime=200ms,
+  LaunchCount=1, WarmupCount=5; `before` from a clean `git archive` of 2c97e91, the variants from the working tree). Typed, then `IMediator`:
+  `RealWorldPingScopePerRequest` 55.4 and 67.4 ns before, 29.9 and 34.8 ns now (the direct call 49.2 ns, ZeroAlloc.Mediator 52.2 ns);
+  `RealWorldBehaviorsScopePerRequest` 322 and 331 ns, now 336 and 339 ns; `RealWorldPublish1ScopePerRequest` 162 and 168 ns, now 174 and
+  180 ns; `RealWorldPublish5ScopePerRequest` 555 and 572 ns, now 579 and 566 ns; `RealWorldPublishBehavior1ScopePerRequest` 247 and 252 ns,
+  now 254 and 265 ns; `RealWorldPublishBehavior5ScopePerRequest` 651 and 670 ns, now 639 and 646 ns. A scope that uses one context pays one
+  more container call (the state's resolve, about 7 to 13 ns), as the deep dive predicted; one that uses none saves the mediator's scope
+  entry and, through `IMediator`, the forwarder. Long-lived: `RealWorldBehaviors` 121.9 and 126.5 ns before, 122.2 and 124.8 ns now (means
+  of three interleaved rounds; the slot cache 121.4 and 128.5 ns); `RealWorldPing` 2.32 and 6.47 ns, now 2.25 and 5.80 ns; `PublishTo1`
+  0.56 and 3.85 ns, now 0.46 and 3.30 ns; `PublishTo5` 0.51 and 3.27 ns, now 0.37 and 3.20 ns; `SendSyncDepth0` 0.00 and 2.76 ns, now 0.00
+  and 2.43 ns; `SendSyncDepth8` 0.53 and 3.01 ns, now 0.52 and 2.73 ns. No long-lived row regressed beyond noise; only `RealWorldBehaviors`,
+  of these, reads a context (the others' handlers are static). Decision 37's run (`bench-final-2/jit`) measured the before rows within 1 to
+  15 ns of this session's before run (for example `RealWorldPingScopePerRequest` 55.1 and 67.9 ns, `RealWorldBehaviors` 126.5 and 132.9 ns).
+- **How it was measured** (decision 48's rule). A script sampled `ps` every 5 s and started a run only after 35 s with no busy
+  dotnet-related process outside its own process tree (MSBuild, the compiler server, test hosts, benchmark processes, language servers),
+  then sampled every 3 s during the run and logged any busy one with the benchmark it overlapped. MSBuild node reuse and the MSBuild and
+  compiler servers were off for the benchmark builds. This machine's Keryx language server woke for about 25 s after each BenchmarkDotNet
+  build: in the first runs of the two variants it overlapped the three `PublishTo1` rows, and a short MSBuild node and compiler-server burst
+  outside the script's tree overlapped the slot cache's `RealWorldPublish5ScopePerRequest` ZeroAlloc.Mediator row and `SendSyncDepth8` typed row;
+  those rows were measured again, and the re-runs and the three interleaved `RealWorldBehaviors` rounds started with a scratch-only
+  benchmark whose 45 s `[GlobalSetup]` absorbed the language server's burst (no busy sample outside it). The before run had no overlap.
+  Every number above is from a run with no overlap. `--verify` passed (238 under the JIT) on each variant under net10.0 and net11.0 and
+  on the final tree under both (the logs are named in the last bullet).
+- **Tests** (1,582, both target frameworks). `HostRuntimeTests.AddKeryx_Registers_Transient_Mediators_Over_One_Scope_State` replaces
+  `AddKeryx_Registers_One_Scoped_Mediator_Behind_Every_Interface`: the four service types are transient factories and the state and the
+  handlers scoped; every resolve is a new `KeryxMediator`, the mediators of one scope share its state (the same `__state` reference) and so
+  its contexts (the same handler identity whichever mediator uses the pipeline first, also for a mediator resolved afterwards), another
+  scope has its own; from the root a mediator resolves, a pipeline without a context runs, and one with a context throws naming
+  `__KeryxScopeState` under `ValidateScopes`. `A_Singleton_Taking_A_Mediator_Fails_At_Its_First_Pipeline_Context` replaces
+  `A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` (OQ-76). The `Inspect` handler reports that its
+  injected `IMediator`, `ISender` and `IPublisher` (and the one it resolves itself) are `KeryxMediator` instances instead of the same
+  instance. `HostAllocationTests.A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State` replaces
+  `Resolving_An_Interface_In_A_New_Scope_Allocates_The_Same_As_Resolving_The_Mediator`: over 1,000 scopes, resolving any of the four adds
+  exactly a four-pointer mediator (32 B) to an empty scope, four resolves add four, a send or publish through any of them allocates the
+  same, and a second mediator that sends or publishes in the scope adds only itself. `HostConcurrencyTests` keeps its 16-caller race,
+  now spread over four mediator instances of the scope, and adds `Pipelines_Racing_In_One_Scope_Each_Keep_One_Context`: six pipelines
+  with a context first used at once by 24 callers through four mediators, in each of 50 scopes, so pipelines race each other for the state
+  and callers race for each context; every pipeline ends with one identity, a different one per pipeline, the state's field for each holds
+  that pipeline's context, and a later mediator reuses them. `Request_Stream_And_Publish_Pipelines_Racing_In_One_Scope_Each_Keep_Their_Own_Context`
+  does the same with two request pipelines (and a static one between them), two streams and two publish pipelines, all with a context,
+  each first used at once through four mediators in each of 50 scopes, and checks by name that every state field holds its own
+  pipeline's context (`__pipelineN` a `__PipelineN`, `__streamPipelineN` a `__StreamPipelineN`, `__notificationN` a `__NotificationN`):
+  the fields are `object` read with `Unsafe.As`, so a wrong one would misbehave without throwing. `HostRuntimeTests.Source` gains a stream
+  (`CountMe`) and a notification (`SeenBy`) whose handlers inject `Identity`: the lifetime test checks that the mediators of one scope reach
+  the same stream and publish contexts, another scope other ones, and that a root mediator of each of the four service types throws naming
+  `__KeryxScopeState` for that stream and publish under `ValidateScopes`; the singleton test checks the same for the captured senders'
+  stream and the captured `IPublisher`'s publish, next to the publish of a notification without a pipeline, which still runs. The two
+  `AddKeryx_Registers_No_*Behaviors` tests list `__KeryxScopeState`.
+- **Snapshots.** The 41 Verify snapshots that contain the mediator or `AddKeryx()` change in those parts only (checked line by line: the
+  removed lines are the mediator's summary and constructor documentation, its context fields, the `Volatile.Read(ref __pipelineN) ??
+  __CreatePipelineN()` reads and the old create methods, and the scoped mediator and forwarder registrations; the added lines are the
+  shapes above), the same on both target frameworks. New: `HostGeneratorTests.Should_Give_The_Scope_State_One_Field_Per_Pipeline_With_A_Context`
+  (two request pipelines, a stream and a publish pipeline with a context, and one without).
+- The reports, scripts and logs are in the session scratchpad, `rework-scope/state/` (`results.md` collects the tables; `before`,
+  `perfield`, `slot`, `rerun-*`, `behaviors-*-{1,2,3}`). The `--verify` logs: `perfield/verify.log` and `slot/verify.log` (net10.0, from
+  the benchmark runs), `perfield/verify-net11.0.log` and `slot/verify-net11.0.log`, and `final/verify-net10.0.log` and
+  `final/verify-net11.0.log` (the final working tree; `run_verify.sh` made the last four); `final/generated-mediator.diff` is the diff of
+  the benchmark host's generated mediator between the per-field variant and the final tree (`final/gen-*`).
+
+Folded into the ADR (status; Injected parameters; Generated pipeline shape; Mediator; DI registration; Consequences), the brief (the
+host), CONTEXT.md (mediator, pipeline context, scope state), the README (Injected parameters, Hosts, Benchmarks notes) and whats-left.md.

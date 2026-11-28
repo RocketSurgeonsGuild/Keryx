@@ -29,12 +29,15 @@ question, the interim behavior you are using and a proposal, continue with the s
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
   attribute.
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
-  net10.0 or later, OQ-61 and OQ-62) gets an internal scoped `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
+  net10.0 or later, OQ-61 and OQ-62) gets an internal transient `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
-  lambdas (nothing for behaviors); `IMediator`, `ISender` and `IPublisher` are transient factories forwarding to the scoped
-  `KeryxMediator`, so they add no scope entry (owner decision 35, OQ-74); as a result `ValidateOnBuild` no longer reports a singleton
-  that injects one of them, which fails when first resolved instead: a trade-off accepted and documented, as MediatR's is, with no
-  generator warning (owner decision 38, OQ-76).
+  lambdas (nothing for behaviors); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
+  mediator over the scope (`sp => new KeryxMediator(sp)`), and the pipeline contexts live in a scoped `KeryxMediator.__KeryxScopeState`
+  that every mediator of the scope shares, resolved by the first call that needs a context, one `object?` field per pipeline with a
+  context (owner decisions 46 and 47, superseding decision 35's one mediator per scope; the size-bounded layout decision 47 asked for
+  measured slower on the long-lived path and is OQ-78, open). Mediator identity is per resolve, contexts are per scope. A singleton that
+  injects a mediator passes `ValidateOnBuild` and fails at its first pipeline context under `ValidateScopes`: a trade-off accepted and
+  documented, as MediatR's is, with no generator warning (owner decision 38, OQ-76, changed in shape by decision 46).
 - Behaviors are `static` classes marked with kind attributes (`[RequestBehavior]`, `[StreamBehavior]`, `[NotificationBehavior]`); for each
   kind the class declares one `static` `Handle`/`HandleAsync` behavior method, fully open (its message type parameter constrained to the
   kind's message interface) or fully closed, called directly by the generated pipeline. Attached per target, per assembly or globally;
@@ -233,8 +236,8 @@ inference (`true` for `OutputType` `Exe`/`WinExe`, `IsTestProject` or `AndroidAp
 sets wins, so KRX031 means an explicit `true` below `net10.0`), `build/Keryx.props` makes it a
 `CompilerVisibleProperty`, `buildTransitive/` imports `build/` for transitive consumers, and every generator and analyzer reads
 `build_property.KeryxHost` (unset is not a host; tests set it with the `WithKeryxHost()` builder helper). Host diagnostics without a source
-location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (scoped,
-lazy pipeline contexts created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic
+location are reported with `Location.None`. KRX031 (via `build/Keryx.props` and the `System.Runtime` fallback), `KeryxMediator` (transient,
+over a scoped state whose lazy pipeline contexts are created with `Interlocked.CompareExchange`), typed overloads (`IRequest` overloads return `ValueTask<Unit>`), generic
 `Send` with exact-type dispatch (a switch statement with a type pattern per sealed request type, `case global::X r: return
 __Dispatch0<TResponse>(r, cancellationToken);`, ending `default: throw __HandlerNotFound(request.GetType());`, and above the threshold a switch on
 the index of `request.GetType()`; switch statements with one `return` per section, never switch expressions, which lose the arms' tail
@@ -528,8 +531,8 @@ benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
 wrapping the whole publish, examples with the message constraint, attaching per target on a request or stream handler method or on the
-notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the scoped mediator
-creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
+notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the transient mediator over a
+scoped state creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
 through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, decision 37's run at 3575a50). A short "what is left" note in
 `docs/whats-left.md`.

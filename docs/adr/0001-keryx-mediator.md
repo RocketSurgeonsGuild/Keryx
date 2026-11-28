@@ -78,6 +78,13 @@ Amended a fifteenth time 2026-11-27 (owner decisions 38 and 39): the `ValidateOn
 and documented, as MediatR's is, with no generator warning (Generated host, DI registration; open-questions OQ-76, decided); and the
 benchmark runner gives the NativeAOT job of the direct call's `Publish` to one handler a fixed invocation count, so a full NativeAOT run
 of the comparison suite measures every benchmark with no manual step (Benchmarks; OQ-77, decided).
+Amended a sixteenth time 2026-11-28 (owner decisions 46 and 47, with 48): `KeryxMediator` is a small transient object over a scoped
+state that holds the pipeline contexts, shared by every mediator of the scope; `KeryxMediator`, `IMediator`, `ISender` and `IPublisher`
+are transient factories that create a mediator, so mediator identity is per resolve while contexts stay per scope and pipeline, which
+reverses decision 35's one-mediator-per-scope guarantee and changes decision 38's trade-off (Generated host, Mediator and DI
+registration; Injected parameters; open-questions, "The mediator is transient over a scoped state"). The state keeps one field per
+pipeline with a context: the size-bounded slot cache decision 47 asked for measured slower on the long-lived scope, and the bound is
+OQ-78 (open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -423,7 +430,7 @@ handler and of a behavior method.
 | `T` with a default value             | reference type: `sp.GetService<T>() ?? <default>`; value type (including `Nullable<T>`): `sp.GetService(typeof(T)) is T __v ? __v : <default>` (no reflection, no allocation). A nullable annotation alone does not make a parameter optional. |
 | `[FromKeyedServices(key)] T`         | `sp.GetRequiredKeyedService<T>(key)`; the key must be a compile-time constant (KRX018). The parameterless (`InheritKey`) form is KRX018. With a default value, the same optional forms as above using `GetKeyedService`.                       |
 | `IServiceProvider`                   | the scope's provider itself, never resolved (counts as an injected parameter; in a pipeline context, the `ServiceProvider` field). `[FromKeyedServices(key)] IServiceProvider` is an ordinary keyed service.                                   |
-| `IMediator`, `ISender`, `IPublisher` | the scoped mediator (no cycle: handlers are resolved lazily); the interfaces are transient registrations that forward to it                                                                                                                    |
+| `IMediator`, `ISender`, `IPublisher` | a new transient mediator over the same scope, which shares the scope's pipeline contexts (no cycle: handlers are resolved lazily)                                                                                                              |
 | `CancellationToken`                  | the call's token, never injected                                                                                                                                                                                                               |
 
 An injected service is stored in a field (of the handler class, or of the pipeline context for a behavior method), so an injected
@@ -780,8 +787,8 @@ For each pipeline the host emits:
   order: handler(s), `ServiceProvider`, then `Service0`, `Service1`, .... Only a pipeline that resolves or holds something has one (decided 2026-11-26, OQ-65;
   for publish pipelines with handlers, 2026-11-27, OQ-70): a request or stream pipeline whose handler's invoker is static and whose
   behaviors inject nothing has no context, nor does a publish pipeline whose handlers' invokers are all static (or that has no handlers)
-  and whose behaviors inject nothing. A behavior that injects only the unkeyed `IServiceProvider` gives its pipeline a context. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field and no
-  `__CreatePipelineN`: without behaviors it calls the static invoker directly, with behaviors its entry calls the outermost behavior
+  and whose behaviors inject nothing. A behavior that injects only the unkeyed `IServiceProvider` gives its pipeline a context. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field in the scope state and no
+  `__GetPipelineN`/`__CreatePipelineN` (Mediator): without behaviors it calls the static invoker directly, with behaviors its entry calls the outermost behavior
   method directly and its links are nested in a `private static class` of the same name (`__PipelineN`, `__StreamPipelineN`,
   `__NotificationN`). A publish pipeline without a context that has handlers keeps its publish strategy in that static class, as static
   members (`RunHandlers`, and `RunHandlersAsync` for the sequential strategy), and its entry (without behaviors) or its last link calls
@@ -1107,17 +1114,32 @@ internal sealed partial class KeryxMediator : IMediator
 }
 ```
 
-- **Lifetime: scoped.** The mediator holds one lazily created pipeline context per pipeline that resolves something (its handler, the
-  handlers of a notification type whose invokers are not static, or the injected services of its behaviors); any other pipeline has no
-  context and no field in the mediator (Generated pipeline shape, OQ-65, OQ-70). After the first call in a scope, nothing is resolved or allocated per call. Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A
-  handler's transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because
-  its injected services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the
-  pipeline that injects the service).
-- **Concurrent first use.** One scope can use the mediator concurrently (parallel publish, handlers that send in parallel, user
-  `Task.WhenAll` over `Send`). Contexts are read with `Volatile.Read(ref __pipeline17) ?? __CreatePipeline17()`, where the non-inlined
-  `__CreatePipeline17()` is `Interlocked.CompareExchange(ref __pipeline17, new __Pipeline17(__serviceProvider), null) ?? __pipeline17!`,
-  so every caller in the scope uses the same context; this is allocation-free after warm-up. A losing race may construct, and discard,
-  one extra context, so transient dependencies can be created more than once under concurrent first use. A concurrency test covers this.
+- **Lifetime: transient, over a scoped state** (owner decision 46, 2026-11-28, which reverses decision 35's one instance per scope). The
+  mediator holds two references: the provider that resolved it and, from its first call that needs a pipeline context, the scope state
+  (`KeryxMediator.__KeryxScopeState`, registered scoped), which it resolves from that provider once (`__ResolveState()`, then
+  `Volatile.Write` into its `__state` field). The state holds one lazily created pipeline context per pipeline that resolves something
+  (its handler, the handlers of a notification type whose invokers are not static, or the injected services of its behaviors), one
+  `object?` field each; any other pipeline has no context and no field (Generated pipeline shape, OQ-65, OQ-70), and a host without any
+  context has no state. Every mediator resolved in a scope shares the scope's state and so its contexts: mediator identity is per
+  resolve, contexts are per scope and pipeline. After the first call in a scope, nothing is resolved or allocated per call; a mediator
+  resolved later in the same scope resolves the state once more (the container returns the same scoped instance). A scope that uses no
+  context allocates the 32 B mediator and nothing else for Keryx. Singletons and hosted services that need the mediator create a scope
+  with `IServiceScopeFactory`; a singleton that captures one gets a mediator over the root provider (DI registration). A handler's
+  transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because its injected
+  services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the pipeline that
+  injects the service).
+- **Concurrent first use.** One scope can use its mediators concurrently (parallel publish, handlers that send in parallel, user
+  `Task.WhenAll` over `Send`, several mediator instances of the scope). A pipeline reads its context through an inlined accessor,
+  `__GetPipeline17()`: `var state = Volatile.Read(ref __state) ?? __ResolveState();` then
+  `Unsafe.As<__Pipeline17?>(Volatile.Read(ref state.__pipeline17)) ?? __CreatePipeline17(state)`, where the non-inlined
+  `__CreatePipeline17(state)` is `Unsafe.As<__Pipeline17>(Interlocked.CompareExchange(ref state.__pipeline17, new __Pipeline17(__serviceProvider), null) ?? state.__pipeline17)`,
+  so every caller in the scope, through any of its mediators, uses the same context; this is allocation-free after warm-up. The state's
+  fields are `object` because the state is `internal` (`AddKeryx()` names it) and the context classes are private; `Unsafe.As` is safe
+  because a field only ever holds its own context. Two callers of one mediator that both resolve the state store the same scoped instance.
+  A losing race may construct, and discard, one extra context, so transient dependencies can be created more than once under concurrent
+  first use. Concurrency tests cover one pipeline raced through several mediators and several pipelines first used at once in one scope.
+  The state's size grows by 8 B per pipeline with a context; a size-bounded layout (write-once slots and an overflow) measured slower
+  on the long-lived scope and was not adopted (owner decision 47, open-questions OQ-78).
 - **Typed overloads** skip type dispatch. They exist only on the internal host mediator, so they are a host-only optimization; libraries
   call through `IMediator`/`ISender`/`IPublisher`.
 - Every request and stream request type is sealed (KRX024), so their typed overloads call the pipeline directly, without a runtime
@@ -1192,22 +1214,23 @@ internal static class KeryxServiceCollectionExtensions
 
 `AddKeryx()` uses `TryAdd*`, so a second call does nothing. It registers, all with generated factory lambdas:
 
-- `KeryxMediator`, scoped: one instance per scope;
-- `IMediator`, `ISender`, `IPublisher`, each a transient factory that forwards to the scope's mediator
-  (`sp.GetRequiredService<KeryxMediator>()`): all four service types resolve to that one instance in a scope and to different instances
-  in different scopes. Transient, not scoped (open-questions OQ-74): Microsoft's container caches a scoped factory's result as a scope
-  entry of its own, so a scoped forwarder runs a second factory and adds an entry to the scope's resolved services (whose storage grows
-  when the count crosses a capacity boundary), while a transient result that is not disposable is not tracked, and `KeryxMediator` is not
-  disposable. Resolving an interface in a new scope therefore allocates what resolving `KeryxMediator` does. Resolving an interface from
-  the root provider still resolves the scoped mediator there, so `ValidateScopes` still throws `InvalidOperationException`. A singleton
-  that depends on `IMediator`, `ISender` or `IPublisher` is no longer reported by `ValidateOnBuild`, which cannot see inside a factory:
-  the provider builds, and the singleton fails the first time it is resolved ("Cannot resolve scoped service '…KeryxMediator' from root
-  provider") rather than at build time ("Cannot consume scoped service 'Keryx.IMediator' from singleton …"). MediatR, whose `IMediator`
-  is transient by default, behaves the same. Without scope validation such a singleton captures the root provider's mediator, as it did
-  with scoped forwarders. This trade-off is accepted, as MediatR accepts it, and documented here and in the README (Hosts); the host
-  generator does not warn about such a singleton (owner decision 38, open-questions OQ-76), and
-  `HostRuntimeTests.A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved` pins it;
+- `KeryxMediator`, `IMediator`, `ISender` and `IPublisher`, each a transient factory, `sp => new KeryxMediator(sp)` (owner decision 46;
+  before it, decision 35's scoped `KeryxMediator` with transient forwarders, open-questions OQ-74): every resolve creates a mediator over
+  the provider that resolves it, and the mediators of one scope share that scope's state. Microsoft's container tracks a transient
+  result only when it is disposable, and `KeryxMediator` is not, so resolving a mediator adds no entry to the scope's resolved services
+  (whose storage grows when the count crosses a capacity boundary), whichever service type and however many times;
+- `KeryxMediator.__KeryxScopeState`, scoped, when a pipeline has a context (Mediator): the scope's one Keryx entry, resolved by a
+  mediator's first call that needs a context, and not disposable either;
 - every handler class that has injected parameters, scoped.
+
+A mediator resolved from the root provider resolves the state there. With `ValidateScopes` that throws `InvalidOperationException`
+("Cannot resolve scoped service '…KeryxMediator+__KeryxScopeState' from root provider") at the mediator's first call that needs a
+pipeline context; a call through a pipeline without a context runs. So a singleton that depends on `KeryxMediator`, `IMediator`, `ISender`
+or `IPublisher` passes `ValidateOnBuild` and is resolved, and fails at its first context use. MediatR, whose `IMediator` is transient by
+default, has the same kind of trade-off. Without scope validation such a singleton uses the root provider's state and contexts, as a
+root-resolved mediator always did. The trade-off is accepted, as MediatR accepts it, and documented here and in the README (Hosts); the
+host generator does not warn about such a singleton (owner decision 38, open-questions OQ-76, both changed in shape by decision 46), and
+`HostRuntimeTests.A_Singleton_Taking_A_Mediator_Fails_At_Its_First_Pipeline_Context` pins it.
 
 Behaviors are not registered: they are static, and the pipeline contexts resolve their injected services.
 
@@ -1801,6 +1824,14 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
   `Service0` was the outermost behavior's first service, but adding a behavior that used the same services in another order renumbered
   them although the set had not changed. The stable ordinal sort of (service type, key) keeps every name for any edit that keeps the set
   (Injected parameters).
+- **A scoped mediator that holds the contexts** (2026-11-26 to 2026-11-28, until owner decision 46; with transient forwarding
+  `IMediator`, `ISender` and `IPublisher` from decision 35, OQ-74): one mediator per scope behind all four service types, with one field
+  per pipeline context. Every scope paid for a scope entry and a mediator of 8 B per context field even when it used no context (448 B
+  for the benchmark's `Ping` per request, against 192 B now), and the interfaces cost a second container call.
+- **A size-bounded scope state** (owner decision 47, measured 2026-11-28): four write-once `object?` slots taken in order of first use,
+  read by an inlined accessor that type-tests each slot, plus an overflow array indexed by pipeline position. It saved 40 B per scope
+  in the benchmark host but measured 2 to 4 ns slower on the long-lived scope's generic `Send` with behaviors in every round, so the
+  state keeps one field per pipeline (Mediator; open-questions OQ-78 keeps the bound open).
 
 ## Consequences
 
@@ -1818,7 +1849,8 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 - An executable, test project or Android app that references Keryx and targets .NET 10 or later is a host unless it sets
   `<KeryxHost>false</KeryxHost>`; below `net10.0` none is a host unless it sets `<KeryxHost>true</KeryxHost>` (then KRX031), and a class
   library that should be one sets `<KeryxHost>true</KeryxHost>`. A host diagnostic without a source location takes only the project-wide severity.
-- The mediator is scoped. Singletons need a scope to use it.
+- The mediator is transient over a scoped state: mediator identity is per resolve, pipeline contexts are per scope. Singletons need a
+  scope to use any pipeline with a context.
 - Typed `Send` overloads are only reachable inside the host.
 - Pipelines produce more generated code, and generic struct specialization adds code size.
 - Most mistakes surface as compile errors rather than runtime failures.

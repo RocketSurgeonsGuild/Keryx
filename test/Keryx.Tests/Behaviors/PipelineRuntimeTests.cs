@@ -314,11 +314,14 @@ public class PipelineRuntimeTests : HostTest
         var (host, provider) = await StartAsync(cancellationToken);
         await using var _ = provider;
 
-        // Behaviors are static: AddKeryx() registers the mediator and the handlers with injected parameters, nothing else.
+        // Behaviors are static: AddKeryx() registers the mediator, the scope state and the handlers with injected parameters, nothing else.
         var services = new ServiceCollection();
         AddKeryx(host, services);
         await Assert.That(services.Select(static d => d.ServiceType.Name).Order(StringComparer.Ordinal).ToArray())
-                    .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator", "PingHandler"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+                    .IsEquivalentTo(
+                         ["IMediator", "IPublisher", "ISender", "KeryxMediator", "PingHandler", "__KeryxScopeState"],
+                         TUnit.Assertions.Enums.CollectionOrdering.Matching
+                     );
         await Assert.That(services.All(static d => d.ImplementationType is null)).IsTrue();
     }
 

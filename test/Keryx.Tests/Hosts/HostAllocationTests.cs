@@ -185,7 +185,8 @@ public class HostAllocationTests : HostTest
                 var scopes = root.GetRequiredService<IServiceScopeFactory>();
                 return new()
                 {
-                    // Resolving alone.
+                    // A scope alone, then a scope that resolves one mediator, or one of each service type.
+                    ["scope"] = Region(scopes, static services => services),
                     ["KeryxMediator"] = Region(scopes, static services => services.GetRequiredService<KeryxMediator>()),
                     ["IMediator"] = Region(scopes, static services => services.GetRequiredService<IMediator>()),
                     ["ISender"] = Region(scopes, static services => services.GetRequiredService<ISender>()),
@@ -201,14 +202,30 @@ public class HostAllocationTests : HostTest
                         }
                     ),
 
-                    // Resolving, then the scope's normal work: the handler and its scoped service join the scope, so one more entry from a
-                    // scoped forwarder pushes the scope's resolved services past a capacity boundary (OQ-74's real-world benchmarks).
+                    // Resolving, then the scope's normal work: the scope state, the pipeline context, the handler and its scoped service join
+                    // the scope. A second mediator of the scope uses the same state and context.
                     ["send: KeryxMediator"] = Region(scopes, static services => Send(services.GetRequiredService<KeryxMediator>())),
                     ["send: IMediator"] = Region(scopes, static services => Send(services.GetRequiredService<IMediator>())),
                     ["send: ISender"] = Region(scopes, static services => Send(services.GetRequiredService<ISender>())),
+                    ["send: two mediators"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = Send(services.GetRequiredService<ISender>());
+                            return Send(services.GetRequiredService<IMediator>());
+                        }
+                    ),
                     ["publish: KeryxMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<KeryxMediator>())),
                     ["publish: IMediator"] = Region(scopes, static services => Publish(services.GetRequiredService<IMediator>())),
                     ["publish: IPublisher"] = Region(scopes, static services => Publish(services.GetRequiredService<IPublisher>())),
+                    ["publish: two mediators"] = Region(
+                        scopes,
+                        static services =>
+                        {
+                            _ = Publish(services.GetRequiredService<IPublisher>());
+                            return Publish(services.GetRequiredService<IMediator>());
+                        }
+                    ),
                 };
             }
 
@@ -252,30 +269,42 @@ public class HostAllocationTests : HostTest
         """;
 
     [Test]
-    public async Task Resolving_An_Interface_In_A_New_Scope_Allocates_The_Same_As_Resolving_The_Mediator(CancellationToken cancellationToken)
+    public async Task A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State(CancellationToken cancellationToken)
     {
-        // IMediator, ISender and IPublisher are transient factories forwarding to the scoped KeryxMediator (OQ-74): resolving them, alone or
-        // all together, adds no entry to the scope's resolved services, so a scope costs what the same work starting from KeryxMediator costs.
-        // The scope's storage grows only when its entry count crosses a capacity boundary, so the resolve-only rows for one interface would
-        // pass with scoped forwarders too; the "all four" row and the send and publish rows (resolve, then resolve the handler and its
-        // scoped service) are the ones that fail with them.
+        // KeryxMediator, IMediator, ISender and IPublisher are transient factories that create a mediator (owner decision 46): the container
+        // does not track a transient result that is not disposable, so resolving one adds the mediator object to a scope, its provider and
+        // its state field (four pointers on 64-bit, with the object header), and no entry to the scope's resolved services. The scope state is
+        // the scope's one Keryx entry, resolved by the first call that needs a pipeline context and shared by every mediator of the scope, so
+        // a second mediator that sends or publishes adds only itself.
         var host = await CompileHostAsync(Requests + ScopeProbe, cancellationToken);
         await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
 
         var allocated = Call<Dictionary<string, long>>(host, "Sample.ScopeProbe", "Measure", provider);
 
-        await Assert.That(allocated.Count).IsEqualTo(11);
-        foreach (var (scenario, bytes) in allocated)
+        await Assert.That(allocated.Count).IsEqualTo(14);
+        const long scopes = 1_000;
+        long mediator = 4 * IntPtr.Size;
+        await Assert.That(allocated["KeryxMediator"] - allocated["scope"]).IsEqualTo(scopes * mediator);
+        await Assert.That(allocated["all four"] - allocated["scope"]).IsEqualTo(scopes * 4 * mediator);
+        (string Scenario, string Baseline)[] same =
+        [
+            ("IMediator", "KeryxMediator"),
+            ("ISender", "KeryxMediator"),
+            ("IPublisher", "KeryxMediator"),
+            ("send: IMediator", "send: KeryxMediator"),
+            ("send: ISender", "send: KeryxMediator"),
+            ("publish: IMediator", "publish: KeryxMediator"),
+            ("publish: IPublisher", "publish: KeryxMediator"),
+        ];
+        foreach (var (scenario, baseline) in same)
         {
-            var baseline = scenario switch
-            {
-                _ when scenario.StartsWith("send: ", StringComparison.Ordinal) => "send: KeryxMediator",
-                _ when scenario.StartsWith("publish: ", StringComparison.Ordinal) => "publish: KeryxMediator",
-                _ => "KeryxMediator",
-            };
-            await Assert.That(allocated[baseline]).IsGreaterThan(0L).Because(baseline);
-            await Assert.That(bytes).IsEqualTo(allocated[baseline]).Because(scenario);
+            await Assert.That(allocated[scenario]).IsEqualTo(allocated[baseline]).Because(scenario);
         }
+
+        await Assert.That(allocated["send: KeryxMediator"]).IsGreaterThan(allocated["KeryxMediator"]);
+        await Assert.That(allocated["send: two mediators"] - allocated["send: KeryxMediator"]).IsEqualTo(scopes * mediator);
+        await Assert.That(allocated["publish: KeryxMediator"]).IsGreaterThan(allocated["KeryxMediator"]);
+        await Assert.That(allocated["publish: two mediators"] - allocated["publish: KeryxMediator"]).IsEqualTo(scopes * mediator);
     }
 
     [Test]

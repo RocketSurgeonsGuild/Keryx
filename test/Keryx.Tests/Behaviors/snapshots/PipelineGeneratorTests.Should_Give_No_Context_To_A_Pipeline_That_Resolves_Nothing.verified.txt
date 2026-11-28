@@ -8,18 +8,19 @@ namespace Sample
 {
     /// <summary>
     ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each
-    ///     notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so
-    ///     nothing is resolved or allocated per call after that. Registered by <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
+    ///     notification through its pipeline to its handlers. Transient and small: it holds the scope's provider and, from its first call
+    ///     that needs a pipeline context, the scope state, which every mediator of the scope shares and which keeps each pipeline context,
+    ///     created once per scope on first use, so nothing is resolved or allocated per call after that. Registered by
+    ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal sealed partial class KeryxMediator : global::Keryx.IMediator
     {
         private readonly global::System.IServiceProvider __serviceProvider;
-        private __Pipeline1? __pipeline1;
-        private __Notification0? __notification0;
+        private __KeryxScopeState? __state;
 
-        /// <summary>Creates the mediator of one scope.</summary>
-        /// <param name="serviceProvider">The scope's service provider. Pipeline contexts resolve handlers from it.</param>
+        /// <summary>Creates a mediator over a scope.</summary>
+        /// <param name="serviceProvider">The scope's service provider. The scope state and the pipeline contexts are resolved from it.</param>
         public KeryxMediator(global::System.IServiceProvider serviceProvider)
         {
             global::System.ArgumentNullException.ThrowIfNull(serviceProvider);
@@ -161,13 +162,20 @@ namespace Sample
 
         private global::System.Threading.Tasks.ValueTask<int> __Send1(global::Sample.Middle request, global::System.Threading.CancellationToken cancellationToken)
         {
-            var pipeline = global::System.Threading.Volatile.Read(ref __pipeline1) ?? __CreatePipeline1();
+            var pipeline = __GetPipeline1();
             return global::Sample.Outer.Handle<global::Sample.Middle, int, __Pipeline1.Link1>(request, new(pipeline, request), cancellationToken);
         }
 
+        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private __Pipeline1 __GetPipeline1()
+        {
+            var state = global::System.Threading.Volatile.Read(ref __state) ?? __ResolveState();
+            return global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline1?>(global::System.Threading.Volatile.Read(ref state.__pipeline1)) ?? __CreatePipeline1(state);
+        }
+
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Pipeline1 __CreatePipeline1() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __pipeline1, new __Pipeline1(__serviceProvider), null) ?? __pipeline1!;
+        private __Pipeline1 __CreatePipeline1(__KeryxScopeState state) =>
+            global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline1>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline1, new __Pipeline1(__serviceProvider), null) ?? state.__pipeline1);
 
         private global::System.Collections.Generic.IAsyncEnumerable<int> __Stream0(global::Sample.Numbers request, global::System.Threading.CancellationToken cancellationToken)
         {
@@ -176,13 +184,20 @@ namespace Sample
 
         private global::System.Threading.Tasks.ValueTask __Publish0(global::Sample.Ticked notification, global::System.Threading.CancellationToken cancellationToken)
         {
-            var pipeline = global::System.Threading.Volatile.Read(ref __notification0) ?? __CreateNotification0();
+            var pipeline = __GetNotification0();
             return global::Sample.Counted.Handle<global::Sample.Ticked, __Notification0.Link1>(notification, new(pipeline, notification), cancellationToken);
         }
 
+        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private __Notification0 __GetNotification0()
+        {
+            var state = global::System.Threading.Volatile.Read(ref __state) ?? __ResolveState();
+            return global::System.Runtime.CompilerServices.Unsafe.As<__Notification0?>(global::System.Threading.Volatile.Read(ref state.__notification0)) ?? __CreateNotification0(state);
+        }
+
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private __Notification0 __CreateNotification0() =>
-            global::System.Threading.Interlocked.CompareExchange(ref __notification0, new __Notification0(__serviceProvider), null) ?? __notification0!;
+        private __Notification0 __CreateNotification0(__KeryxScopeState state) =>
+            global::System.Runtime.CompilerServices.Unsafe.As<__Notification0>(global::System.Threading.Interlocked.CompareExchange(ref state.__notification0, new __Notification0(__serviceProvider), null) ?? state.__notification0);
 
         private global::System.Threading.Tasks.ValueTask __Publish1(global::Sample.Unheard notification, global::System.Threading.CancellationToken cancellationToken)
         {
@@ -192,6 +207,24 @@ namespace Sample
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType) =>
             new(requestType);
+
+        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private __KeryxScopeState __ResolveState()
+        {
+            var state = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<__KeryxScopeState>(__serviceProvider);
+            global::System.Threading.Volatile.Write(ref __state, state);
+            return state;
+        }
+
+        /// <summary>
+        ///     The pipeline contexts of one scope, shared by every mediator of the scope (registered scoped by
+        ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />): one field per pipeline with a context, set once, on first use.
+        /// </summary>
+        internal sealed class __KeryxScopeState
+        {
+            public object? __pipeline1;
+            public object? __notification0;
+        }
 
         /// <summary>The links of the pipeline of <c>Sample.Bare</c>, which has no context: its handler's invoker is static and its behaviors inject nothing.</summary>
         private static class __Pipeline0
@@ -304,10 +337,11 @@ namespace Sample
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
-        ///     Registers the scoped <see cref="KeryxMediator" /> (one instance per scope), <see cref="global::Keryx.IMediator" />,
-        ///     <see cref="global::Keryx.ISender" /> and <see cref="global::Keryx.IPublisher" /> as transient factories that return that
-        ///     instance, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are static and
-        ///     are not registered.
+        ///     Registers <see cref="KeryxMediator" />, <see cref="global::Keryx.IMediator" />, <see cref="global::Keryx.ISender" /> and
+        ///     <see cref="global::Keryx.IPublisher" /> as transient factories that each create a mediator over the provider that resolves
+        ///     it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a
+        ///     pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are
+        ///     static and are not registered.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -315,10 +349,11 @@ namespace Sample
         public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeryx(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)
         {
             global::System.ArgumentNullException.ThrowIfNull(services);
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IMediator>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<KeryxMediator>(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient(services, static serviceProvider => new KeryxMediator(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IMediator>(services, static serviceProvider => new KeryxMediator(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => new KeryxMediator(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => new KeryxMediator(serviceProvider));
+            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator.__KeryxScopeState());
             return services;
         }
     }

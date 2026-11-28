@@ -8,7 +8,8 @@ README's numbers from a full local run under the JIT and NativeAOT, 2026-11-27) 
 and `IPublisher` forwarders, OQ-74); updated for decisions 33, 34 and 36 (the real-world setup rules in the ADR, the verification probe
 compiled out of the benchmark builds, `MessageName<T>`; OQ-72, OQ-73 and OQ-75); updated for decision 37 (the second full benchmark
 run, at 3575a50; OQ-77); updated for decisions 38 and 39 (OQ-76 and OQ-77 decided: the `ValidateOnBuild` trade-off accepted and
-documented, a fixed invocation count for the direct call's NativeAOT `Publish` to one handler).
+documented, a fixed invocation count for the direct call's NativeAOT `Publish` to one handler); updated for owner decisions 46 and 47,
+with 48 (2026-11-28: a transient mediator over a scoped state, one field per pipeline context; the size-bounded layout is OQ-78).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -283,9 +284,32 @@ invocation count (decided since: decision 39, below, puts the count in the runne
   per benchmark. The README's NativeAOT cell is now 0.04 ns (0.06 ns before). Build, 1,576 tests and `--verify` (238, net10.0 and
   net11.0) pass. The reports are in the session scratchpad (`oq77/aot-measured-1`, `oq77/dry-jit`, `oq77/dry-aot`).
 
+## Done: a transient mediator over a scoped state (owner decisions 46 and 47, with 48, 2026-11-28)
+
+`KeryxMediator` is a transient 32 B object (the provider and a lazily resolved `__state`); `AddKeryx()` registers it and `IMediator`,
+`ISender` and `IPublisher` as `sp => new KeryxMediator(sp)`, and the pipeline contexts live in a scoped `KeryxMediator.__KeryxScopeState`,
+one `object?` field per pipeline with a context, which every mediator of the scope shares and the first call that needs a context
+resolves. Mediator identity is per resolve, contexts are per scope; a singleton that captures a mediator fails at its first context
+use under `ValidateScopes` (decision 35 and OQ-74 superseded in part, decision 38 and OQ-76 changed in shape). Decision 47's slot cache
+(four write-once slots and an overflow) was built and measured: 40 B less per scope with a context, but 2 to 4 ns slower on the
+long-lived generic `Send` with behaviors in three interleaved rounds, so the per-field layout stays and the bound is OQ-78 (open).
+Measured (JIT, the README's job, against a run of the code before it): `RealWorldPingScopePerRequest` 448 to 192 B, 55.4 to 29.9 ns
+typed and 67.4 to 34.8 ns through `IMediator` (the direct call 368 B, ZeroAlloc.Mediator 208 B); scopes that use one context 24 B more
+and about 7 to 13 ns slower (the state's resolve); the long-lived rows unchanged within noise. `HostRuntimeTests`,
+`HostAllocationTests` and `HostConcurrencyTests` pin the new guarantees (several mediators and several pipelines racing in one scope,
+requests, streams and publishes, each state field holding its own pipeline's context); 41 snapshots change in the mediator and
+`AddKeryx()` only, and one is new. Build, 1,582 tests and `--verify` (238 under the JIT, net10.0 and net11.0, on both variants and on
+the final tree) pass. Details, numbers and how the runs were kept quiet: open-questions, "The mediator is transient over a scoped state"; the reports are
+in the session scratchpad (`rework-scope/state/`).
+
 ## Decisions for the owner
 
-No question is open ([open-questions.md](adr/open-questions.md), **Open**: none). OQ-76 (decision 38: the `ValidateOnBuild` trade-off
+**OQ-78** is open ([open-questions.md](adr/open-questions.md)): the scope state has one field per pipeline with a context (8 B each, in
+every scope that uses a context) because decision 47's slot cache measured slower on the long-lived path; the proposal keeps the fields
+up to a threshold and measures a lighter slot read or chunked pages above it. Until it is decided, decision 41's 25/50/100-handler
+benchmarks would add 8 B per new pipeline with a context to every Keryx scope-per-request row of the shared benchmark host.
+
+OQ-76 (decision 38: the `ValidateOnBuild` trade-off
 accepted, no generator warning) and OQ-77 (decision 39: a fixed invocation count for the direct call's NativeAOT `Publish` to one
 handler) are decided (above), as are OQ-74 (decision 35), OQ-72 (decision 33), OQ-73 (decision 34) and OQ-75 (decision 36), and
 decision 37's run is done.
@@ -347,9 +371,14 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   3.22 to 3.51 ns before the type patterns), three stream behaviors at 648 B (OQ-65), and the typed `Publish` at 0.44 and 0.48 ns
   (OQ-70). The same allocations hold under NativeAOT, the real-world behavior rows included (the benchmark behaviors' type names added
   96 B there in decision 32's run; read once per type since decision 36, OQ-75), except in the SQLite and async-handler rows, 16 B less
-  per query, the same change as the direct call's. With a scope per request, Keryx's typed overload allocates 80 B more than the direct
-  call for a plain `Ping` (the scoped `KeryxMediator`), and its `IMediator` rows allocate what the typed rows allocate (decision 32's
-  run, with the scoped forwarders decision 35 replaced, measured 360 B and 800 B more for the publishes; OQ-74).
+  per query, the same change as the direct call's. With a scope per request, decision 37's run measured Keryx's typed overload at 80 B
+  more than the direct call for a plain `Ping` (the scoped `KeryxMediator`), and its `IMediator` rows allocating what the typed rows
+  allocate (decision 32's run, with the scoped forwarders decision 35 replaced, measured 360 B and 800 B more for the publishes; OQ-74).
+  Since owner decision 46, with a scope per request the typed overload and `IMediator` allocate 192 B for `Ping`, 176 B less than the
+  direct call's 368 B (ZeroAlloc.Mediator 208 B), because a scope that uses no pipeline context resolves no scope state; scopes that use
+  a context allocate 24 B more than in decision 37's run (1,432 B for the behaviors, 584 B and 1,360 B for the publishes to 1 and 5
+  handlers: the 96 B state replaces the 104 B scoped mediator, plus the 32 B transient mediator). Open-questions, "The mediator is
+  transient over a scoped state".
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.01 ns (inlined) and 0.53 ns for 1 and 5 handlers, against Keryx typed at 0.44 ns and 0.48 ns; under
   NativeAOT 0.04 ns (a fixed invocation count, decision 39, OQ-77; from the run that proved it, 0.06 ns in decision 37's run) and 0.67
@@ -364,7 +393,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
-  decision 37's run at 3575a50).
+  decision 37's run at 3575a50; Keryx's scope-per-request cells predate decision 46, whose numbers are in the README's notes; NativeAOT
+  was not measured for decision 46).
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
   `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
   generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified

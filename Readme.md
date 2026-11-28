@@ -153,7 +153,7 @@ request declared in another assembly is [KRX023](#krx023). Notifications may be 
 | `T` with a default value                  | `GetService<T>()`, falling back to the default                                      |
 | `[FromKeyedServices("key")] T`            | `GetRequiredKeyedService<T>("key")`; the key is a constant ([KRX018](#krx018))      |
 | `IServiceProvider`                        | the scope's provider itself, never resolved (keyed: an ordinary keyed service)      |
-| `IMediator`, `ISender`, `IPublisher`      | the scoped mediator (the interfaces forward to it)                                  |
+| `IMediator`, `ISender`, `IPublisher`      | a new mediator over the same scope, sharing the scope's pipeline contexts           |
 | `CancellationToken`                       | the token of the call                                                               |
 
 ## Testing handlers
@@ -405,24 +405,28 @@ namespace:
 
 - `internal sealed partial class KeryxMediator : IMediator`, with `ISender.Send`, `ISender.Stream` and `IPublisher.Publish`, plus a typed
   overload for each request and notification (`ValueTask<Guid> Send(CreateOrder.Command)`), which skips type dispatch;
-- `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator` (scoped), `IMediator`,
-  `ISender` and `IPublisher` (transient factories that return the scope's `KeryxMediator`, so all four resolve to one instance per scope
-  and resolving an interface adds nothing to the scope; open-questions OQ-74) and every handler class with injected parameters (scoped),
-  all with generated factories and `TryAdd`. It registers no behavior types: behaviors are static. Because the interfaces are factories,
-  `ValidateOnBuild` does not report a singleton that injects `IMediator`, `ISender` or `IPublisher` (MediatR's transient `IMediator`
-  behaves the same); with `ValidateScopes` on, as in ASP.NET Core's Development environment, that singleton fails the first time it is
-  resolved ("Cannot resolve scoped service '…KeryxMediator' from root provider"). That is a deliberate trade-off, the one MediatR makes,
-  and the generator does not warn about it (open-questions OQ-76, decided): inject the mediator into scoped or transient services, or
-  create a scope.
+- `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator`, `IMediator`,
+  `ISender` and `IPublisher` as transient factories that each create a mediator (`sp => new KeryxMediator(sp)`), a scoped state that
+  holds the scope's pipeline contexts, and every handler class with injected parameters (scoped), all with generated factories and
+  `TryAdd`. It registers no behavior types: behaviors are static.
 
-The mediator is **scoped**. It creates one pipeline context per pipeline once per scope, lazily, holding the handler instance and the
-services its behavior methods inject; it never creates a behavior instance. A request or stream pipeline with a static handler whose
-behaviors inject nothing, and a notification type whose handlers are all static (or that has none) and whose behaviors inject nothing, have
-no context at all (open-questions OQ-65 and OQ-70): such a pipeline's entry calls the outermost behavior method, or the handler, or for a
-notification its static publish strategy, directly, and each `next` link holds only the request or notification. From then on a `Send`
-allocates nothing. Singletons and hosted services that need it create a scope with `IServiceScopeFactory`. A handler's or behavior method's
-transient dependencies therefore live as long as the scope, and the behaviors of one pipeline that inject the same transient share one
-instance.
+The mediator is **transient and small** (owner decision 46): it holds the scope's provider and, from its first call that needs a
+pipeline context, the **scope state**, which every mediator resolved in the scope shares. So each resolve is a new mediator, but the
+pipeline contexts are one per scope and pipeline, whichever mediator, or how many, the scope uses. Each pipeline context is
+created once per scope, lazily, and kept in the state; it holds the handler instance and the services the pipeline's behavior methods
+inject, and nothing creates a behavior instance. A request or stream pipeline with a static handler whose behaviors inject nothing, and a notification type whose
+handlers are all static (or that has none) and whose behaviors inject nothing, have no context at all (open-questions OQ-65 and OQ-70):
+such a pipeline's entry calls the outermost behavior method, or the handler, or for a notification its static publish strategy, directly,
+and each `next` link holds only the request or notification. A scope that uses no context resolves no state and allocates only the 32 B
+mediator for Keryx. From then on a `Send` allocates nothing. A handler's or behavior method's transient dependencies live as long as the
+scope, and the behaviors of one pipeline that inject the same transient share one instance.
+
+Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A singleton that injects
+`KeryxMediator`, `IMediator`, `ISender` or `IPublisher` passes `ValidateOnBuild` and is resolved (the mediator is transient), and gets a
+mediator over the root provider: with `ValidateScopes` on, as in ASP.NET Core's Development environment, its first call that needs a
+pipeline context throws ("Cannot resolve scoped service '…KeryxMediator+__KeryxScopeState' from root provider"). That is a deliberate
+trade-off, like the one MediatR makes with its transient `IMediator`, and the generator does not warn about it (open-questions OQ-76,
+decided, and "The mediator is transient over a scoped state").
 
 The generic `Send<TResponse>(IRequest<TResponse>)` dispatches on the exact runtime type: a switch statement with a type pattern per
 sealed request type (`case Ping r: return ...;`, one method-table compare each), and above 32 request types a `FrozenDictionary` lookup
@@ -528,6 +532,11 @@ the machine: another session there started some during the JIT run, so the five 
 nothing else was busy and run again when something started while it ran. "Decision 32's run" in the notes is the previous full run,
 earlier the same day at `1652e50` on the same machine, before decisions 34 to 36.
 
+The tables predate owner decision 46 (2026-11-28: a transient mediator over a scoped state), which changes Keryx's scope-per-request
+rows; the notes below give those rows as measured after it, on the same machine and settings (a run of the affected classes only,
+compared with a run of the code before it; open-questions, "The mediator is transient over a scoped state"). The next full run refreshes
+the tables.
+
 ```
 BenchmarkDotNet v0.15.8, macOS 27.2.1 (26B131) [Darwin 27.2.0]
 Apple M4 Max, 1 CPU, 16 logical and 16 physical cores
@@ -621,7 +630,7 @@ Requests:
 - `RealWorldPing`: the handler alone, from the long-lived scope.
 - `RealWorldPingScopePerRequest`: the same with a scope per request: the measured call creates a DI scope, resolves the mediator (or the
   library's entry point) from it, sends and disposes the scope, the way an ASP.NET Core request does. For Keryx this includes creating the
-  scoped `KeryxMediator`, which the long-lived rows hide.
+  transient `KeryxMediator` (and, where a pipeline has a context, resolving the scope state), which the long-lived rows hide.
 - `RealWorldBehaviors`: a logging behavior (Microsoft.Extensions.Logging, two messages per request, really formatted by an in-memory
   provider that keeps the last 1,024) and a validation behavior (a hand-written `IValidator<TRequest>`, scoped) around a handler that
   injects a scoped repository doing a dictionary lookup, from the long-lived scope.
@@ -645,22 +654,27 @@ Requests:
 | ZeroAlloc.Mediator 7.0.1, `IMediator` | 24.8 ns · 56 B | 54.1 ns · 208 B | 192 ns · 544 B | 252 ns · 928 B | 1,403 ns · 1,168 B |
 
 - `Ping` from the long-lived scope: Keryx's typed overload is within a tenth of a nanosecond of the direct call (the 32 B is the `Pong`).
-- Scope per request: Keryx's typed overload measures 55.1 ns against the direct call's 50.4 ns and allocates 80 B more: the scoped
-  `KeryxMediator` (one field per pipeline context, 104 B in this host) where the direct call resolves a handler object without fields.
-  Mediator singleton allocates least here because nothing scoped is resolved.
+- Scope per request: in the table (before decision 46) Keryx's typed overload measures 55.1 ns against the direct call's 50.4 ns and
+  allocates 80 B more, the scoped `KeryxMediator` (one field per pipeline context, 104 B in this host) and its scope entry. Since
+  decision 46 the mediator is a transient 32 B object that takes no scope entry, and `Ping` resolves no scope state (its handler is
+  static): 29.9 ns and 192 B typed, 34.8 ns and 192 B through `IMediator`, against the direct call's 49.2 ns and 368 B and
+  ZeroAlloc.Mediator's 52.2 ns and 208 B (55.4 and 67.4 ns, 448 B, before it, in the same session). Mediator singleton allocates least
+  here because nothing scoped is resolved.
 - Behaviors from the long-lived scope: Keryx's typed overload measures 126 ns against the direct call's 120 ns, with the same 520 B; the
   other libraries measure 142 to 262 ns.
 - Behaviors with a scope per request: Keryx's typed overload measures 328 ns and 1,408 B against the direct call's 221 ns and 920 B: the
-  first call in a scope creates the mediator and the pipeline context, which resolves the handler's and the behaviors' services. The other
+  first call in a scope creates the mediator and the pipeline context, which resolves the handler's and the behaviors' services. Since
+  decision 46 it also resolves the scope state (a 96 B object with a field per pipeline context, which takes the scope entry the scoped
+  mediator had): 336 ns and 1,432 B typed, 339 ns and 1,432 B through `IMediator` (322 and 331 ns, 1,408 B, before it, in the same
+  session; the direct call 210 ns). The other
   libraries measure 252 to 412 ns; ZeroAlloc.Mediator, whose behaviors resolve their services from the provider on every call, is the
   fastest here (252 ns), while from the long-lived scope it measures 192 ns, behind Immediate.Handlers (142 ns) and Keryx (126 to
   133 ns).
 - The SQLite query (about 1.4 µs and 1,144 B) is most of every row in the last column.
-- `IMediator` with a scope per request allocates what the typed overload allocates (448 B for `Ping`, 1,408 B with the behaviors):
-  `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as transient factories that forward to the scoped `KeryxMediator`, so
-  resolving one adds nothing to the scope (open-questions OQ-74). `Ping` per request measures 67.9 ns against the typed overload's
-  55.1 ns (80.4 ns against 54.3 ns in decision 32's run, with the scoped forwarders); 4.2 ns of that is the generic dispatch (6.61 ns
-  against 2.38 ns from the long-lived scope), and the rest is resolving `IMediator`, whose factory then resolves `KeryxMediator`.
+- `IMediator` with a scope per request allocates what the typed overload allocates. In the table (decision 35's transient forwarders,
+  open-questions OQ-74) `Ping` per request measures 67.9 ns against the typed overload's 55.1 ns, the forwarder resolving
+  `KeryxMediator` as a second container call; since decision 46 every service type creates the mediator itself, and the gap is 4.9 ns,
+  about the generic dispatch (5.80 ns against 2.25 ns from the long-lived scope).
 
 Notifications, each to 1 and to 5 handlers:
 
@@ -708,7 +722,10 @@ Handlers that await the SQLite query, from the long-lived scope:
   457 ns. Its `IMediator` rows allocate what the typed ones allocate (560 B and 1,336 B; 712 B and 1,488 B with the notification
   behavior) and measure 172 ns and 580 ns (256 ns and 673 ns with the behavior). In decision 32's run, with the scoped forwarding
   `IMediator` registration, they allocated 360 B and 800 B more and measured 219 ns and 634 ns: the scope entry that registration added
-  (OQ-74), which the transient forwarders no longer add.
+  (OQ-74), which the transient forwarders no longer add. Since decision 46 each of these scopes resolves the scope state (96 B) and a 32 B
+  mediator, 24 B more than the 104 B scoped mediator they replace: typed, then `IMediator`, 174 and 180 ns with 584 B (1 handler), 579 and 566 ns with 1,360 B
+  (5 handlers), 254 and 265 ns with 736 B and 639 and 646 ns with 1,512 B with the notification behavior (162 and 168 ns, 555 and 572 ns,
+  247 and 252 ns, 651 and 670 ns before it, in the same session; the direct call 124, 450, 200 and 520 ns).
 - SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
   handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 3% of its sequential
   publish. Keryx allocates what the direct call allocates in all four columns.

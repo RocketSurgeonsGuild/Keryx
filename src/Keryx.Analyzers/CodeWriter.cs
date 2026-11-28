@@ -31,6 +31,10 @@ internal sealed class CodeWriter
     public const string NoInliningAttribute =
         "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
 
+    /// <summary><c>[MethodImpl(MethodImplOptions.AggressiveInlining)]</c>.</summary>
+    public const string AggressiveInliningAttribute =
+        "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]";
+
     /// <summary><c>[AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]</c>.</summary>
     public const string PoolingBuilderAttribute =
         "[global::System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(global::System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]";

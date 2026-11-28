@@ -167,7 +167,7 @@ internal static partial class HostEmitter
     private static void WritePublishCore(CodeWriter writer, NotificationPipeline pipeline, int index)
     {
         var hasContext = HasContext(pipeline);
-        var context = ContextRead(NotificationContextField(index), CreateNotificationContextName(index));
+        var context = ContextRead(GetNotificationContextName(index));
         var declaration = $"private {ValueTask} {PublishCoreName(index)}({pipeline.Notification.Type} notification, {TokenParameter})";
         writer.Member();
         if (pipeline.Behaviors.IsEmpty && !hasContext)
@@ -198,7 +198,13 @@ internal static partial class HostEmitter
 
         if (hasContext)
         {
-            WriteCreateContext(writer, NotificationContextName(index), NotificationContextField(index), CreateNotificationContextName(index));
+            WriteContextAccess(
+                writer,
+                NotificationContextName(index),
+                NotificationContextField(index),
+                GetNotificationContextName(index),
+                CreateNotificationContextName(index)
+            );
         }
     }
 
@@ -518,6 +524,8 @@ internal static partial class HostEmitter
     private static string NotificationContextName(int index) => "__Notification" + Digits(index);
 
     private static string NotificationContextField(int index) => "__notification" + Digits(index);
+
+    private static string GetNotificationContextName(int index) => "__GetNotification" + Digits(index);
 
     private static string CreateNotificationContextName(int index) => "__CreateNotification" + Digits(index);
 

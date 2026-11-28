@@ -8,16 +8,17 @@ namespace Sample
 {
     /// <summary>
     ///     This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each
-    ///     notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so
-    ///     nothing is resolved or allocated per call after that. Registered by <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
+    ///     notification through its pipeline to its handlers. Transient and small: it holds the scope's provider, and no pipeline of this
+    ///     host has a context, so nothing is resolved or allocated per call. Registered by
+    ///     <see cref="KeryxServiceCollectionExtensions.AddKeryx" />.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal sealed partial class KeryxMediator : global::Keryx.IMediator
     {
         private readonly global::System.IServiceProvider __serviceProvider;
 
-        /// <summary>Creates the mediator of one scope.</summary>
-        /// <param name="serviceProvider">The scope's service provider. Pipeline contexts resolve handlers from it.</param>
+        /// <summary>Creates a mediator over a scope.</summary>
+        /// <param name="serviceProvider">The scope's service provider.</param>
         public KeryxMediator(global::System.IServiceProvider serviceProvider)
         {
             global::System.ArgumentNullException.ThrowIfNull(serviceProvider);

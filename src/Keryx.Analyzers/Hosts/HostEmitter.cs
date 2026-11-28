@@ -9,10 +9,11 @@ using Specular.Scanning;
 namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
-///     Writes the host's generated types (ADR 0001, Generated host), as text through a <see cref="CodeWriter" />: the scoped
+///     Writes the host's generated types (ADR 0001, Generated host), as text through a <see cref="CodeWriter" />: the transient
 ///     <c>KeryxMediator</c> with its typed overloads, generic dispatch as switch statements (type patterns on the sealed request and stream
 ///     request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for the pipelines
-///     that resolve something and flat link structs that take only what they read or pass on (ADR 0001, Generated pipeline shape), and
+///     that resolve something, kept per scope in a scoped state (owner decision 46), and flat link structs that take only
+///     what they read or pass on (ADR 0001, Generated pipeline shape), and
 ///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
 ///     their behavior methods directly, and the pipeline contexts resolve their injected services.
 /// </summary>
@@ -60,14 +61,34 @@ internal static partial class HostEmitter
 
         // About 2.5 KB of text per pipeline with a few behaviors, so the builder rarely grows.
         var writer = new CodeWriter(capacity: 8192 + 2560 * ( requests.Length + streams.Length + composition.Notifications.Length ));
+        // The scope state's fields: one per pipeline with a context, requests, then streams, then notifications.
+        var contextFields = new List<string>();
+        contextFields.AddRange(Enumerable.Range(0, requests.Length).Where(i => HasContext(requests[i])).Select(ContextField));
+        contextFields.AddRange(Enumerable.Range(0, streams.Length).Where(i => HasContext(streams[i])).Select(StreamContextField));
+        contextFields.AddRange(Enumerable.Range(0, notifications.Length).Where(i => HasContext(notifications[i])).Select(NotificationContextField));
         writer.Namespace(settings.Namespace);
         writer.Member();
         writer.Documentation(
-            "<summary>",
-            "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
-            "    notification through its pipeline to its handlers. Scoped: it creates each pipeline context once per scope, on first use, so",
-            "    nothing is resolved or allocated per call after that. Registered by <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
-            "</summary>"
+            contextFields.Count > 0
+                ?
+                [
+                    "<summary>",
+                    "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
+                    "    notification through its pipeline to its handlers. Transient and small: it holds the scope's provider and, from its first call",
+                    "    that needs a pipeline context, the scope state, which every mediator of the scope shares and which keeps each pipeline context,",
+                    "    created once per scope on first use, so nothing is resolved or allocated per call after that. Registered by",
+                    "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
+                    "</summary>",
+                ]
+                :
+                [
+                    "<summary>",
+                    "    This host's Keryx mediator: sends each request and stream request through its pipeline to its handler, and publishes each",
+                    "    notification through its pipeline to its handlers. Transient and small: it holds the scope's provider, and no pipeline of this",
+                    "    host has a context, so nothing is resolved or allocated per call. Registered by",
+                    "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />.",
+                    "</summary>",
+                ]
         );
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("internal sealed partial class KeryxMediator : global::Keryx.IMediator");
@@ -75,37 +96,18 @@ internal static partial class HostEmitter
 
         writer.Member(plainField: true);
         writer.Line($"private readonly {ServiceProvider} __serviceProvider;");
-        for (var i = 0; i < requests.Length; i++)
+        if (contextFields.Count > 0)
         {
-            if (HasContext(requests[i]))
-            {
-                writer.Member(plainField: true);
-                writer.Line($"private {ContextName(i)}? {ContextField(i)};");
-            }
-        }
-
-        for (var i = 0; i < streams.Length; i++)
-        {
-            if (HasContext(streams[i]))
-            {
-                writer.Member(plainField: true);
-                writer.Line($"private {StreamContextName(i)}? {StreamContextField(i)};");
-            }
-        }
-
-        for (var i = 0; i < notifications.Length; i++)
-        {
-            if (HasContext(notifications[i]))
-            {
-                writer.Member(plainField: true);
-                writer.Line($"private {NotificationContextName(i)}? {NotificationContextField(i)};");
-            }
+            writer.Member(plainField: true);
+            writer.Line($"private {ScopeStateName}? {ScopeStateField};");
         }
 
         writer.Member();
         writer.Documentation(
-            "<summary>Creates the mediator of one scope.</summary>",
-            $"<param name=\"{ServiceProviderName}\">The scope's service provider. Pipeline contexts resolve handlers from it.</param>"
+            "<summary>Creates a mediator over a scope.</summary>",
+            contextFields.Count > 0
+                ? $"<param name=\"{ServiceProviderName}\">The scope's service provider. The scope state and the pipeline contexts are resolved from it.</param>"
+                : $"<param name=\"{ServiceProviderName}\">The scope's service provider.</param>"
         );
         writer.Line($"public KeryxMediator({ServiceProvider} {ServiceProviderName})");
         writer.Open();
@@ -152,6 +154,12 @@ internal static partial class HostEmitter
         writer.Line(CodeWriter.NoInliningAttribute);
         writer.Arrow("private static global::Keryx.KeryxHandlerNotFoundException __HandlerNotFound(global::System.Type requestType)", "new(requestType)");
 
+        if (contextFields.Count > 0)
+        {
+            WriteResolveState(writer);
+            WriteScopeState(writer, contextFields);
+        }
+
         for (var i = 0; i < requests.Length; i++)
         {
             if (HasContext(requests[i]) || !requests[i].Behaviors.IsEmpty)
@@ -190,10 +198,11 @@ internal static partial class HostEmitter
         writer.Member();
         writer.Documentation(
             "<summary>",
-            "    Registers the scoped <see cref=\"KeryxMediator\" /> (one instance per scope), <see cref=\"global::Keryx.IMediator\" />,",
-            "    <see cref=\"global::Keryx.ISender\" /> and <see cref=\"global::Keryx.IPublisher\" /> as transient factories that return that",
-            "    instance, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are static and",
-            "    are not registered.",
+            "    Registers <see cref=\"KeryxMediator\" />, <see cref=\"global::Keryx.IMediator\" />, <see cref=\"global::Keryx.ISender\" /> and",
+            "    <see cref=\"global::Keryx.IPublisher\" /> as transient factories that each create a mediator over the provider that resolves",
+            "    it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a",
+            "    pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are",
+            "    static and are not registered.",
             "    Registrations that already exist are kept, so a second call does nothing.",
             "</summary>",
             "<param name=\"services\">The service collection.</param>",
@@ -202,14 +211,18 @@ internal static partial class HostEmitter
         writer.Line($"public static {ServiceCollection} AddKeryx(this {ServiceCollection} services)");
         writer.Open();
         writer.Line($"{ThrowIfNull}(services);");
-        writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
-        // Transient forwarders (OQ-74): still the scope's one KeryxMediator, but the container caches a scoped factory's result as a scope
-        // entry of its own, and a transient one that is not disposable is not tracked, so resolving an interface adds nothing to the scope.
+        // Transient mediators over a scoped state (owner decision 46): the container tracks a transient result only when it is
+        // disposable, and neither the mediator nor the state is, so resolving a mediator adds nothing to the scope; the state is the scope's
+        // one entry for Keryx, and it is resolved only by the first call that needs a pipeline context.
+        writer.Line($"{DescriptorExtensions}.TryAddTransient(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
         foreach (var service in (string[])["global::Keryx.IMediator", "global::Keryx.ISender", "global::Keryx.IPublisher"])
         {
-            writer.Line(
-                $"{DescriptorExtensions}.TryAddTransient<{service}>(services, {Factory($"{ServiceProviderExtensions}.GetRequiredService<KeryxMediator>({ServiceProviderName})")});"
-            );
+            writer.Line($"{DescriptorExtensions}.TryAddTransient<{service}>(services, {Factory($"new KeryxMediator({ServiceProviderName})")});");
+        }
+
+        if (HasScopeState(composition))
+        {
+            writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator.{ScopeStateName}()")});");
         }
 
         foreach (var handler in composition.ConstructedHandlers)
@@ -464,14 +477,16 @@ internal static partial class HostEmitter
             $"private {ValueTask}<{pipeline.Handler.ResponseType}> {CoreName(index)}({pipeline.Handler.MessageType} request, {TokenParameter})",
             ContextName(index),
             ContextField(index),
+            GetContextName(index),
             CreateContextName(index),
             LinkName(0)
         );
 
     /// <summary>
     ///     The pipeline method of a request or stream request: the handler's invoker without behaviors, else the outermost behavior method
-    ///     with the first link, and, when the pipeline has a context, the non-inlined method that creates it. A pipeline without a context
-    ///     (<see cref="HasContext(HostPipeline)" />) reads no field: the method calls the outermost behavior method with <c>new(request)</c>.
+    ///     with the first link, and, when the pipeline has a context, the methods that read it from the scope state and create it
+    ///     (<see cref="WriteContextAccess" />). A pipeline without a context (<see cref="HasContext(HostPipeline)" />) reads nothing: the
+    ///     method calls the outermost behavior method with <c>new(request)</c>.
     /// </summary>
     private static void WritePipelineCore(
         CodeWriter writer,
@@ -479,17 +494,18 @@ internal static partial class HostEmitter
         string declaration,
         string contextName,
         string contextField,
+        string getName,
         string createName,
         string firstLink
     )
     {
         var request = pipeline.Handler;
         var hasContext = HasContext(pipeline);
-        var context = ContextRead(contextField, createName);
+        var context = ContextRead(getName);
         writer.Member();
         if (pipeline.Behaviors.IsEmpty)
         {
-            var target = hasContext ? $"({context}).Handler" : request.HandlerClass;
+            var target = hasContext ? $"{context}.Handler" : request.HandlerClass;
             writer.Arrow(declaration, $"{target}.{HandlerAnalysis.InvokerName}(request, cancellationToken)");
         }
         else
@@ -507,12 +523,12 @@ internal static partial class HostEmitter
 
         if (hasContext)
         {
-            WriteCreateContext(writer, contextName, contextField, createName);
+            WriteContextAccess(writer, contextName, contextField, getName, createName);
         }
     }
 
-    /// <summary><c>Volatile.Read(ref field) ?? Create()</c>: the pipeline context of the scope, created on first use.</summary>
-    private static string ContextRead(string contextField, string createName) => $"global::System.Threading.Volatile.Read(ref {contextField}) ?? {createName}()";
+    /// <summary>The call of a pipeline's context accessor: the scope's context, created on first use (<see cref="WriteContextAccess" />).</summary>
+    private static string ContextRead(string getName) => getName + "()";
 
     /// <summary>
     ///     The body of a pipeline method with behaviors: the call of the outermost behavior method, after <c>var pipeline = ...;</c> when
@@ -597,17 +613,78 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The non-inlined method that creates a pipeline context on first use in a scope. Under concurrent first use every caller ends up with
-    ///     the context that won the exchange (ADR 0001, Mediator).
+    ///     The two methods that give a pipeline its scope's context (ADR 0001, Mediator): the accessor, inlined into the pipeline method, reads
+    ///     the mediator's scope state (<c>Volatile.Read(ref __state) ?? __ResolveState()</c>) and then the state's field for this pipeline
+    ///     with <c>Volatile.Read</c>; the non-inlined create method, on first use in the scope, stores a new context there with
+    ///     <c>Interlocked.CompareExchange</c>, so under concurrent first use every caller in the scope, through any mediator of the scope, ends
+    ///     up with the context that won the exchange. The state is <c>internal</c> (<c>AddKeryx()</c> registers it) and the context classes
+    ///     are private, so its fields are <see cref="object" /> and the accessor reinterprets the field with <c>Unsafe.As</c>, which is safe
+    ///     because the field only ever holds that context.
     /// </summary>
-    private static void WriteCreateContext(CodeWriter writer, string contextName, string contextField, string createName)
+    /// <param name="writer">The writer, in the mediator's body.</param>
+    /// <param name="contextName">The context class.</param>
+    /// <param name="contextField">The scope state's field for the context.</param>
+    /// <param name="getName">The accessor.</param>
+    /// <param name="createName">The create method.</param>
+    private static void WriteContextAccess(CodeWriter writer, string contextName, string contextField, string getName, string createName)
     {
+        writer.Member();
+        writer.Line(CodeWriter.AggressiveInliningAttribute);
+        writer.Line($"private {contextName} {getName}()");
+        writer.Open();
+        writer.Line($"var state = {Volatile}.Read(ref {ScopeStateField}) ?? {ResolveStateName}();");
+        writer.Line($"return {Unsafe}.As<{contextName}?>({Volatile}.Read(ref state.{contextField})) ?? {createName}(state);");
+        writer.Close();
+
         writer.Member();
         writer.Line(CodeWriter.NoInliningAttribute);
         writer.Arrow(
-            $"private {contextName} {createName}()",
-            $"global::System.Threading.Interlocked.CompareExchange(ref {contextField}, new {contextName}(__serviceProvider), null) ?? {contextField}!"
+            $"private {contextName} {createName}({ScopeStateName} state)",
+            $"{Unsafe}.As<{contextName}>({Interlocked}.CompareExchange(ref state.{contextField}, new {contextName}(__serviceProvider), null) ?? state.{contextField})"
         );
+    }
+
+    /// <summary>
+    ///     The non-inlined method that resolves the scope state from the mediator's provider on the first call that needs a pipeline context,
+    ///     and keeps it: every mediator resolved in the scope gets the same state (it is scoped), so a race between two callers of one
+    ///     mediator stores the same instance twice.
+    /// </summary>
+    private static void WriteResolveState(CodeWriter writer)
+    {
+        writer.Member();
+        writer.Line(CodeWriter.NoInliningAttribute);
+        writer.Line($"private {ScopeStateName} {ResolveStateName}()");
+        writer.Open();
+        writer.Line($"var state = {ServiceProviderExtensions}.GetRequiredService<{ScopeStateName}>(__serviceProvider);");
+        writer.Line($"{Volatile}.Write(ref {ScopeStateField}, state);");
+        writer.Line("return state;");
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     The scope state (owner decision 46): the pipeline contexts of one scope, registered scoped by <c>AddKeryx()</c> and shared by every
+    ///     mediator of the scope, one field per pipeline with a context. Owner decision 47 asked for a size-bounded layout chosen by
+    ///     measurement; a cache of four write-once slots measured slower on the long-lived scope's generic <c>Send</c> with behaviors, so
+    ///     the fields stay one per pipeline (open-questions, "The mediator is transient over a scoped state", and OQ-78).
+    /// </summary>
+    private static void WriteScopeState(CodeWriter writer, List<string> contextFields)
+    {
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    The pipeline contexts of one scope, shared by every mediator of the scope (registered scoped by",
+            "    <see cref=\"KeryxServiceCollectionExtensions.AddKeryx\" />): one field per pipeline with a context, set once, on first use.",
+            "</summary>"
+        );
+        writer.Line($"internal sealed class {ScopeStateName}");
+        writer.Open();
+        foreach (var field in contextFields)
+        {
+            writer.Member(plainField: true);
+            writer.Line($"public object? {field};");
+        }
+
+        writer.Close();
     }
 
     /// <summary>
@@ -977,6 +1054,23 @@ internal static partial class HostEmitter
     /// <summary>The label of the switch section of jump-table position <paramref name="position" />.</summary>
     private static string Case(int position) => "case " + Digits(position) + ":";
 
+    private const string Volatile = "global::System.Threading.Volatile";
+    private const string Interlocked = "global::System.Threading.Interlocked";
+
+    /// <summary>The scope state class, nested in the mediator (<see cref="WriteScopeState" />).</summary>
+    private const string ScopeStateName = "__KeryxScopeState";
+
+    /// <summary>The mediator's field that keeps the scope state once a call has resolved it.</summary>
+    private const string ScopeStateField = "__state";
+
+    private const string ResolveStateName = "__ResolveState";
+
+    /// <summary>Whether the host has a pipeline with a context, and so a scope state.</summary>
+    private static bool HasScopeState(HostComposition composition) =>
+        composition.Requests.Any(HasContext)
+     || composition.Streams.Any(HasContext)
+     || composition.Notifications.Any(static n => n.IsActive && HasContext(n));
+
     /// <summary>The context field that holds the scope's provider for the behavior methods that inject the unkeyed <c>IServiceProvider</c> (OQ-63).</summary>
     private const string ServiceProviderField = "ServiceProvider";
 
@@ -988,6 +1082,8 @@ internal static partial class HostEmitter
     private static string ContextName(int index) => "__Pipeline" + Digits(index);
 
     private static string ContextField(int index) => "__pipeline" + Digits(index);
+
+    private static string GetContextName(int index) => "__GetPipeline" + Digits(index);
 
     private static string CreateContextName(int index) => "__CreatePipeline" + Digits(index);
 

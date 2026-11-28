@@ -127,6 +127,37 @@ public class HostGeneratorTests : HostTest
     }
 
     [Test]
+    public async Task Should_Give_The_Scope_State_One_Field_Per_Pipeline_With_A_Context(CancellationToken cancellationToken)
+    {
+        // Two request pipelines, a stream and a publish pipeline with a context (handlers with an injected service), and one request
+        // pipeline without (a static handler): the scope state's fields, in pipeline order, and how each pipeline reads its own (owner
+        // decision 46).
+        var result = await HostBuilder.AddSources(
+                                           Usings
+                                         + """
+                                           namespace Sample;
+
+                                           public sealed class Clock { }
+                                           public sealed record Q0 : IRequest<int>;
+                                           public partial class Q0Handler { private static int Handle(Q0 request, Clock clock) => 0; }
+                                           public sealed record Q1 : IRequest<int>;
+                                           public static partial class Q1Handler { private static int Handle(Q1 request) => 1; }
+                                           public sealed record Q2 : IRequest<int>;
+                                           public partial class Q2Handler { private static int Handle(Q2 request, Clock clock) => 2; }
+                                           public sealed record Items : IStreamRequest<int>;
+                                           public partial class ItemsHandler { private static IAsyncEnumerable<int> Handle(Items request, Clock clock) => null!; }
+                                           public sealed record Rang : INotification;
+                                           public partial class RangHandler { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+                                           """
+                                       )
+                                      .Build()
+                                      .GenerateAsync(cancellationToken);
+
+        result.AssertCompilationWasSuccessful();
+        await VerifyHost(result);
+    }
+
+    [Test]
     public async Task Should_Generate_An_Empty_Mediator_For_A_Host_Without_Handlers(CancellationToken cancellationToken)
     {
         var result = await HostBuilder.AddSources(Usings).Build().GenerateAsync(cancellationToken);

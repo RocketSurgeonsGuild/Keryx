@@ -350,7 +350,7 @@ public class NotificationBehaviorTests : HostTest
         AddKeryx(host, services);
 
         await Assert.That(services.Select(static d => d.ServiceType.Name).Order(StringComparer.Ordinal).ToArray())
-                    .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator"], CollectionOrdering.Matching);
+                    .IsEquivalentTo(["IMediator", "IPublisher", "ISender", "KeryxMediator", "__KeryxScopeState"], CollectionOrdering.Matching);
     }
 
     [Test]

@@ -67,6 +67,33 @@ public class HostRuntimeTests : HostTest
         public sealed record WhoAmI : IRequest<int>;
         public partial class WhoAmIHandler { private static int Handle(WhoAmI request, Identity identity) => identity.Id; }
 
+        /// <summary>A stream pipeline with a context: its handler yields the <c>Identity</c> it was constructed with.</summary>
+        public sealed record CountMe(int Times) : IStreamRequest<int>;
+        public partial class CountMeHandler
+        {
+            private static IAsyncEnumerable<int> Handle(CountMe request, Identity identity) => Repeat(identity.Id, request.Times);
+
+            private static async IAsyncEnumerable<int> Repeat(int value, int times)
+            {
+                for (var i = 0; i < times; i++)
+                {
+                    await Task.Yield();
+                    yield return value;
+                }
+            }
+        }
+
+        /// <summary>A publish pipeline with a context: its handler records the <c>Identity</c> it was constructed with.</summary>
+        public sealed record SeenBy(System.Collections.Concurrent.ConcurrentQueue<int> Ids) : INotification;
+        public partial class SeenByHandler
+        {
+            private static ValueTask Handle(SeenBy notification, Identity identity)
+            {
+                notification.Ids.Enqueue(identity.Id);
+                return default;
+            }
+        }
+
         public sealed record Inspect : IRequest<string>;
         public partial class InspectHandler
         {
@@ -86,8 +113,8 @@ public class HostRuntimeTests : HostTest
                     limit?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none",
                     count,
                     fallback?.Greet("x") ?? "none",
-                    ReferenceEquals(mediator, sender) && ReferenceEquals(sender, publisher),
-                    ReferenceEquals(services.GetService(typeof(IMediator)), mediator)
+                    mediator is KeryxMediator && sender is KeryxMediator && publisher is KeryxMediator,
+                    services.GetService(typeof(IMediator)) is KeryxMediator
                 );
         }
 
@@ -283,11 +310,11 @@ public class HostRuntimeTests : HostTest
     }
 
     [Test]
-    public async Task AddKeryx_Registers_One_Scoped_Mediator_Behind_Every_Interface(CancellationToken cancellationToken)
+    public async Task AddKeryx_Registers_Transient_Mediators_Over_One_Scope_State(CancellationToken cancellationToken)
     {
         var host = await CompileHostAsync(Source, cancellationToken);
         var services = new ServiceCollection();
-        Registrations(host)(services);
+        RegistrationsWithTransientIdentityHandlers(host)(services);
         var registered = services.Count;
         AddKeryx(host, services);
         var count = services.Count;
@@ -298,42 +325,90 @@ public class HostRuntimeTests : HostTest
         var keryx = services.Skip(registered).ToArray();
         await Assert.That(keryx.All(static d => d.ImplementationFactory is not null)).IsTrue();
 
-        // The mediator and the handlers are scoped; IMediator, ISender and IPublisher are transient factories that forward to the scope's
-        // KeryxMediator, so resolving them adds no entry to the scope (OQ-74).
-        Type[] forwarders = [typeof(IMediator), typeof(ISender), typeof(IPublisher)];
-        await Assert.That(keryx.Where(d => forwarders.Contains(d.ServiceType)).Select(static d => d.Lifetime).ToArray())
-                    .IsEquivalentTo([ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient]);
-        await Assert.That(keryx.Where(d => !forwarders.Contains(d.ServiceType)).All(static d => d.Lifetime == ServiceLifetime.Scoped)).IsTrue();
+        // KeryxMediator, IMediator, ISender and IPublisher are transient factories that each create a mediator (owner decision 46); the
+        // scope state that holds the pipeline contexts, and the handlers, are scoped.
+        var mediatorType = host.GetType("Sample.KeryxMediator", throwOnError: true)!;
+        var stateType = mediatorType.GetNestedType("__KeryxScopeState", BindingFlags.NonPublic)!;
+        Type[] mediators = [mediatorType, typeof(IMediator), typeof(ISender), typeof(IPublisher)];
+        await Assert.That(keryx.Where(d => mediators.Contains(d.ServiceType)).Select(static d => d.Lifetime).ToArray())
+                    .IsEquivalentTo([ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient]);
+        await Assert.That(keryx.Single(d => d.ServiceType == stateType).Lifetime).IsEqualTo(ServiceLifetime.Scoped);
+        await Assert.That(keryx.Where(d => !mediators.Contains(d.ServiceType)).All(static d => d.Lifetime == ServiceLifetime.Scoped)).IsTrue();
 
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
-        await using var first = provider.CreateAsyncScope();
-        await using var second = provider.CreateAsyncScope();
-        var mediatorType = host.GetType("Sample.KeryxMediator", throwOnError: true)!;
-        var mediator = first.ServiceProvider.GetRequiredService(mediatorType);
-        var other = second.ServiceProvider.GetRequiredService(mediatorType);
-        await Assert.That(other).IsNotSameReferenceAs(mediator);
+        var whoAmI = (IRequest<int>)Create(host, "Sample.WhoAmI");
+        var state = mediatorType.GetField("__state", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        // One mediator per scope behind all four service types, whichever is resolved first.
-        foreach (var serviceType in forwarders)
+        // Every resolve is a new mediator of the same class; the mediators of one scope share the scope's state and so its pipeline contexts
+        // (the transient handler registered above makes each context construction a new identity), whichever mediator first uses a context.
+        int first, firstStream, firstPublish;
+        object firstState;
+        await using (var scope = provider.CreateAsyncScope())
         {
-            await Assert.That(first.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(mediator).Because(serviceType.Name);
-            await Assert.That(first.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(mediator).Because(serviceType.Name);
-            await Assert.That(second.ServiceProvider.GetRequiredService(serviceType)).IsSameReferenceAs(other).Because(serviceType.Name);
+            var resolved = mediators.Select(t => scope.ServiceProvider.GetRequiredService(t)).Append(scope.ServiceProvider.GetRequiredService(mediatorType)).ToArray();
+            await Assert.That(resolved.All(m => m.GetType() == mediatorType)).IsTrue();
+            await Assert.That(resolved.Distinct(ReferenceEqualityComparer.Instance).Count()).IsEqualTo(resolved.Length);
+            await Assert.That(resolved.All(m => state.GetValue(m) is null)).IsTrue();
+
+            var identities = new List<int>();
+            foreach (var mediator in Enumerable.Reverse(resolved))
+            {
+                identities.Add(await ( (ISender)mediator ).Send(whoAmI, cancellationToken));
+            }
+
+            await Assert.That(identities.Distinct()).HasSingleItem();
+            first = identities[0];
+            firstState = scope.ServiceProvider.GetRequiredService(stateType);
+            await Assert.That(resolved.All(m => ReferenceEquals(state.GetValue(m), firstState))).IsTrue();
+
+            // A mediator resolved after the context exists uses it too.
+            await Assert.That(await scope.ServiceProvider.GetRequiredService<ISender>().Send(whoAmI, cancellationToken)).IsEqualTo(first);
+
+            // The stream and publish contexts are the scope's too (their accessors come from other emitters): each mediator, whichever
+            // streams or publishes first, reaches the same one, and it is not the request pipeline's.
+            var streamed = new List<int>();
+            var published = new List<int>();
+            foreach (var mediator in resolved)
+            {
+                streamed.Add(await StreamIdentityAsync(host, (ISender)mediator, cancellationToken));
+                published.Add(await PublishIdentityAsync(host, (IPublisher)mediator, cancellationToken));
+            }
+
+            await Assert.That(streamed.Distinct()).HasSingleItem();
+            await Assert.That(published.Distinct()).HasSingleItem();
+            await Assert.That(new[] { first, streamed[0], published[0] }.Distinct().Count()).IsEqualTo(3);
+            firstStream = streamed[0];
+            firstPublish = published[0];
         }
 
-        await using (var third = provider.CreateAsyncScope())
+        // Another scope has its own state and contexts.
+        await using (var scope = provider.CreateAsyncScope())
         {
-            var publisher = third.ServiceProvider.GetRequiredService<IPublisher>();
-            await Assert.That(publisher).IsNotSameReferenceAs(mediator).And.IsNotSameReferenceAs(other);
-            await Assert.That(third.ServiceProvider.GetRequiredService<ISender>()).IsSameReferenceAs(publisher);
-            await Assert.That(third.ServiceProvider.GetRequiredService<IMediator>()).IsSameReferenceAs(publisher);
-            await Assert.That(third.ServiceProvider.GetRequiredService(mediatorType)).IsSameReferenceAs(publisher);
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            await Assert.That(await mediator.Send(whoAmI, cancellationToken)).IsNotEqualTo(first);
+            await Assert.That(state.GetValue(mediator)).IsNotNull().And.IsNotSameReferenceAs(firstState);
+            var other = scope.ServiceProvider.GetRequiredService<IPublisher>();
+            await Assert.That(await StreamIdentityAsync(host, mediator, cancellationToken)).IsNotEqualTo(firstStream);
+            await Assert.That(await PublishIdentityAsync(host, other, cancellationToken)).IsNotEqualTo(firstPublish);
+            await Assert.That(state.GetValue(other)).IsSameReferenceAs(state.GetValue(mediator));
         }
 
-        // Scope validation still sees the scoped mediator behind a forwarder resolved from the root.
-        foreach (var serviceType in forwarders)
+        // From the root provider a mediator resolves, as any transient does; under scope validation its first call that needs a pipeline
+        // context throws, because the scope state is scoped, for a send, a stream and a publish alike. A pipeline without a context still
+        // runs.
+        var countMe = (IStreamRequest<int>)Create(host, "Sample.CountMe", 1);
+        var seenBy = (INotification)Create(host, "Sample.SeenBy", new System.Collections.Concurrent.ConcurrentQueue<int>());
+        foreach (var serviceType in mediators)
         {
-            await Assert.That(() => provider.GetRequiredService(serviceType)).Throws<InvalidOperationException>().Because(serviceType.Name);
+            var root = provider.GetRequiredService(serviceType);
+            await Assert.That(await ( (ISender)root ).Send((IRequest<string>)Create(host, "Sample.Ping"), cancellationToken)).IsEqualTo("pong").Because(serviceType.Name);
+            var exception = ThrowsSynchronously<InvalidOperationException>(() => Ignore(( (ISender)root ).Send(whoAmI, cancellationToken)));
+            await Assert.That(exception.Message).Contains("__KeryxScopeState").Because(serviceType.Name);
+            var streamException = ThrowsSynchronously<InvalidOperationException>(() => Ignore(( (ISender)root ).Stream(countMe, cancellationToken)));
+            await Assert.That(streamException.Message).Contains("__KeryxScopeState").Because(serviceType.Name);
+            var publishException = ThrowsSynchronously<InvalidOperationException>(() => Ignore(( (IPublisher)root ).Publish(seenBy, cancellationToken)));
+            await Assert.That(publishException.Message).Contains("__KeryxScopeState").Because(serviceType.Name);
+            await Assert.That(state.GetValue(root)).IsNull().Because(serviceType.Name);
         }
 
         // Handlers without injected parameters are never registered; the others are, with factories.
@@ -342,11 +417,12 @@ public class HostRuntimeTests : HostTest
     }
 
     [Test]
-    public async Task A_Singleton_Taking_A_Mediator_Interface_Passes_Build_Validation_And_Fails_When_Resolved(CancellationToken cancellationToken)
+    public async Task A_Singleton_Taking_A_Mediator_Fails_At_Its_First_Pipeline_Context(CancellationToken cancellationToken)
     {
-        // The documented cost of the transient forwarders (OQ-74, OQ-76): ValidateOnBuild cannot see inside a factory, so a singleton that
-        // captures IMediator, ISender or IPublisher is no longer reported when the provider is built. ValidateScopes still rejects it the first
-        // time it is resolved, because the forwarder then resolves the scoped KeryxMediator from the root provider.
+        // The documented cost of transient mediators (owner decision 46, which supersedes decisions 35 and 38): a singleton that captures
+        // KeryxMediator, IMediator, ISender or IPublisher passes ValidateOnBuild and resolves, with a mediator over the root provider; with
+        // ValidateScopes its first call that needs a pipeline context throws, because the scope state is scoped. A call through a pipeline
+        // without a context needs no state and runs.
         var host = await CompileHostAsync(Source, cancellationToken);
         var services = new ServiceCollection();
         Registrations(host)(services);
@@ -357,14 +433,35 @@ public class HostRuntimeTests : HostTest
 
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
         await using var scope = provider.CreateAsyncScope();
+        var ping = (IRequest<string>)Create(host, "Sample.Ping");
+        var greet = (IRequest<string>)Create(host, "Sample.Greet", "keryx");
 
-        foreach (var captive in (Type[])[typeof(CapturesMediator), typeof(CapturesSender), typeof(CapturesPublisher)])
+        var senders = new (string Name, ISender Sender)[]
         {
-            await Assert.That(() => scope.ServiceProvider.GetRequiredService(captive))
-                        .Throws<InvalidOperationException>()
-                        .WithMessageContaining("KeryxMediator")
-                        .Because(captive.Name);
+            (nameof(CapturesMediator), scope.ServiceProvider.GetRequiredService<CapturesMediator>().Mediator),
+            (nameof(CapturesSender), scope.ServiceProvider.GetRequiredService<CapturesSender>().Sender),
+        };
+        foreach (var (name, sender) in senders)
+        {
+            await Assert.That(await sender.Send(ping, cancellationToken)).IsEqualTo("pong").Because(name);
+            var exception = ThrowsSynchronously<InvalidOperationException>(() => Ignore(sender.Send(greet, cancellationToken)));
+            await Assert.That(exception.Message).Contains("__KeryxScopeState").Because(name);
         }
+
+        // A stream with a context fails the same way, through either captured sender.
+        var countMe = (IStreamRequest<int>)Create(host, "Sample.CountMe", 1);
+        foreach (var (name, sender) in senders)
+        {
+            var exception = ThrowsSynchronously<InvalidOperationException>(() => Ignore(sender.Stream(countMe, cancellationToken)));
+            await Assert.That(exception.Message).Contains("__KeryxScopeState").Because(name);
+        }
+
+        // A captured publisher: a notification without a publish pipeline needs no state, one whose publish pipeline has a context throws.
+        var publisher = scope.ServiceProvider.GetRequiredService<CapturesPublisher>().Publisher;
+        await publisher.Publish(new ForeignNotification(), cancellationToken);
+        var seenBy = (INotification)Create(host, "Sample.SeenBy", new System.Collections.Concurrent.ConcurrentQueue<int>());
+        var publishException = ThrowsSynchronously<InvalidOperationException>(() => Ignore(publisher.Publish(seenBy, cancellationToken)));
+        await Assert.That(publishException.Message).Contains("__KeryxScopeState").Because(nameof(CapturesPublisher));
     }
 
     [Test]
@@ -401,7 +498,7 @@ public class HostRuntimeTests : HostTest
 
         // With a transient handler every context construction (and every per-call resolution) gets a new Identity, so equal identities in
         // one scope prove that the scope built its context once and reused it.
-        await using var provider = BuildProvider(host, RegistrationsWithTransientWhoAmIHandler(host));
+        await using var provider = BuildProvider(host, RegistrationsWithTransientIdentityHandlers(host));
         var whoAmI = (IRequest<int>)Create(host, "Sample.WhoAmI");
 
         int first, again, other;
@@ -453,17 +550,41 @@ public class HostRuntimeTests : HostTest
     internal static Action<IServiceCollection> Registrations(Assembly host) => services => Call<object?>(host, "Sample.Registrations", "Required", services);
 
     /// <summary>
-    ///     <see cref="Registrations" />, plus <c>WhoAmIHandler</c> registered as transient before <c>AddKeryx()</c> (which keeps it): each
-    ///     resolution then constructs a new handler with a new <c>Identity</c>, so tests can count pipeline context constructions.
+    ///     <see cref="Registrations" />, plus <c>WhoAmIHandler</c>, <c>CountMeHandler</c> and <c>SeenByHandler</c> registered as transient
+    ///     before <c>AddKeryx()</c> (which keeps them): each resolution then constructs a new handler with a new <c>Identity</c>, so tests can
+    ///     count pipeline context constructions (requests, streams and publishes).
     /// </summary>
-    internal static Action<IServiceCollection> RegistrationsWithTransientWhoAmIHandler(Assembly host) =>
+    internal static Action<IServiceCollection> RegistrationsWithTransientIdentityHandlers(Assembly host) =>
         services =>
         {
             Registrations(host)(services);
-            var handlerType = host.GetType("Sample.WhoAmIHandler", throwOnError: true)!;
             var identityType = host.GetType("Sample.Identity", throwOnError: true)!;
-            services.AddTransient(handlerType, provider => Activator.CreateInstance(handlerType, provider.GetRequiredService(identityType))!);
+            foreach (var name in (string[])["Sample.WhoAmIHandler", "Sample.CountMeHandler", "Sample.SeenByHandler"])
+            {
+                var handlerType = host.GetType(name, throwOnError: true)!;
+                services.AddTransient(handlerType, provider => Activator.CreateInstance(handlerType, provider.GetRequiredService(identityType))!);
+            }
         };
+
+    /// <summary>Streams <c>Sample.CountMe</c> once through <paramref name="sender" /> and answers the one identity it yields.</summary>
+    internal static async Task<int> StreamIdentityAsync(Assembly host, ISender sender, CancellationToken cancellationToken)
+    {
+        var ids = new List<int>();
+        await foreach (var id in sender.Stream((IStreamRequest<int>)Create(host, "Sample.CountMe", 2), cancellationToken))
+        {
+            ids.Add(id);
+        }
+
+        return ids.Distinct().Single();
+    }
+
+    /// <summary>Publishes <c>Sample.SeenBy</c> once through <paramref name="publisher" /> and answers the identity its handler recorded.</summary>
+    internal static async Task<int> PublishIdentityAsync(Assembly host, IPublisher publisher, CancellationToken cancellationToken)
+    {
+        var ids = new System.Collections.Concurrent.ConcurrentQueue<int>();
+        await publisher.Publish((INotification)Create(host, "Sample.SeenBy", ids), cancellationToken);
+        return ids.Single();
+    }
 
     private static async Task<T> SendTyped<T>(object mediator, object request, CancellationToken cancellationToken)
     {
