@@ -31,7 +31,8 @@ and 28, the same day). "Real-world benchmark scenarios" (decision 30, 2026-11-27
 the same day) follow; OQ-72 was raised while implementing the first and OQ-73 while implementing the second. "Full benchmark run"
 (decision 32, the same day) follows; OQ-74 and OQ-75 were raised while doing it. OQ-74, decided by the owner on 2026-11-27 (decision 35),
 follows; OQ-76 was raised while implementing it, and is open. OQ-72, OQ-73 and OQ-75, decided by the owner the same day (decisions 33, 34
-and 36), come last.
+and 36), come last. Decision 37's run (the same day) is recorded in "Full benchmark run" and in those entries; OQ-77 was raised while
+doing it, and is open.
 
 ## Open
 
@@ -56,6 +57,25 @@ Neither OQ-74 nor decision 35 named this trade-off.
 - **Proposal:** accept the trade-off, as MediatR does, and keep the caveat documented. Alternative: have the host generator report a
   singleton consumer where it can see one (a `services.AddSingleton<T>()` in the host whose `T` takes one of the interfaces), as a
   warning; it cannot see registrations made elsewhere or by reflection. Needs a decision.
+
+### OQ-77: BenchmarkDotNet cannot measure the direct call's NativeAOT `Publish` to one handler (2026-11-27)
+
+Decision 37's NativeAOT run ("Full benchmark run", at the end) could not measure `PublishTo1.Baseline` with the README's job. With the
+verification probe compiled out (decision 34, OQ-73) the benchmark, `B.Handlers.Publish(_baseline)`, is a call to a handler that returns
+`default`. BenchmarkDotNet 0.15.8's pilot stage measured its first 16 calls as 0 ns (`WorkloadPilot 1: 16 op, 0.00 ns`, below the
+clock's resolution) and threw `System.OverflowException` ("Negating the minimum value of a twos complement number is invalid.") in
+`EnginePilotStageSpecific.GetShouldRunIteration`; the benchmark process exited with code 255, the class's eight other benchmarks ran, the
+report shows the row as NA and the run exits 1. Decision 32's run measured it (0.17 ns, with the probe's field load and branch in the
+call), and so does the JIT (0.01 ns; there the pilot read 1,125 ns for its first 16 calls). CI does not see it:
+`--job Dry` runs one invocation and no pilot. So a full NativeAOT run of `--filter '*Comparison*'` with the README's settings now fails
+on this one benchmark.
+
+- **Interim:** the README's cell comes from a run of that benchmark alone with `--invocationCount 160000000`, which skips the pilot
+  (decision 32's pilot chose 158,640,064 calls per iteration for it), the rest of the job unchanged: 0.06 ns, 0 B. The other eight rows
+  are from the class's run with the README's job, and the README says so.
+- **Proposal:** have `Program.cs`'s config give NativeAOT jobs of `PublishTo1.Baseline` a fixed invocation count (the README's job
+  otherwise), so a full run measures every benchmark with no manual step and exits 0, and say so in the README. Alternative: keep the
+  manual step, documented, until a BenchmarkDotNet release handles a 0 ns pilot measurement. Needs a decision.
 
 ## Decided
 
@@ -1948,6 +1968,8 @@ then decide whether it needs work). No code changed. Folded into the ADR (status
 `StreamDepth0` measured 637.8 ns through `IMediator` (standard deviation 5.0 ns), 631.9 ns through the typed overload (2.4 ns) and 632.5 ns
 for the direct call (1.8 ns): 6 ns (1%) between generic and typed, and all three below the 649 to 661 ns the reruns measured before the
 type patterns. That run is not an interleaved before-and-after comparison, so the item stays on the before-release list as decided.
+Decision 37's run at 3575a50 (the same day) does not show it either: `IMediator` 639.2 ns (3.3 ns), typed 648.2 ns (3.1 ns), direct call
+645.8 ns (2.2 ns).
 
 ### OQ-61: Apps whose `OutputType` is not `Exe` or `WinExe` (2026-11-27)
 
@@ -2288,6 +2310,41 @@ Done:
   the behavior rows under NativeAOT for the type names in the log messages (OQ-75); both open then, measured as they are (since decided:
   owner decisions 35 and 36).
 
+**Second run** (decision 37, session default, 2026-11-27): after decisions 34 to 36 landed, the full comparison suite again under the JIT
+and then NativeAOT, with the README's settings, from a clean `git archive` of 3575a50 (HEAD: decision 35 is 3e36d59, decisions 34 and 36 are
+3575a50), on the same machine and SDK; every README table and note those decisions affect is refreshed from it. Done:
+
+- **`--verify` first:** 238 passed under the JIT; in the NativeAOT publish, 215 passed and 23 n/a (MediatR).
+- **JIT:** `--filter '*Comparison*'` (238 benchmarks, 25 min 33 s, exit 0). Another session on the machine (a different repository)
+  built and benchmarked from 18:01:29 to about 18:08, over the end of the run, so the five classes it overlapped (`SendYieldDepth1`, `3`
+  and `8`, `StreamDepth0`, `StreamDepth3`, 53 benchmarks; `SendYieldDepth1` only in its last seconds) were run again on their own. No
+  other build ran during the rest of the run (no `bin/` assembly under the development folders or the scratchpads was written between
+  17:39:50 and 18:01:20). The first attempt at those reruns also overlapped that session's tests and benchmarks and was discarded.
+- **Guarded runs.** From then on each class ran on its own (`bench-final-2/run3.sh`, then `run4.sh`): it waited until no dotnet-related
+  process was busy for three samples 10 s apart, a watcher sampled every 3 s for any busy build, test or benchmark process outside the
+  script's own process tree, and a class was run again whenever the watcher saw one during it (`SendYieldDepth1` took 3 attempts,
+  `SendYieldDepth8` 7, NativeAOT `SendSyncDepth1` 2; some JIT repeats were the runner's own reused MSBuild nodes, which `run4.sh` turns
+  off; every kept run has no sample). The JIT reruns took 6 min 5 s; the NativeAOT run, class
+  by class (each class builds its own NativeAOT executable), 215 benchmarks in 40 min 53 s of runs, MediatR's 23 left out.
+- **OQ-77 (open):** under NativeAOT, BenchmarkDotNet could not measure `PublishTo1.Baseline` with the job (its pilot read 0 ns and
+  threw); that cell is from a run of that benchmark alone with a fixed invocation count, and the other eight rows of the class are from
+  the class's run (`merge_publishto1.py` writes the merged report the tables read).
+- **Reports.** In the session scratchpad: `bench-final-2/jit` (the whole-suite run's `BenchmarkRun-20261127-174001.log`, the per-class
+  logs of the reruns, `results`, and `results-first-run` with the overlapped first reports) and `bench-final-2/aot` (`results`, the
+  per-class logs, `publishto1-baseline`, and `tables-input`, the merged input), with `status.txt` and `overlap.log`. The tables come from
+  `bench-final-2/tables.py`, `bench-final/tables.py` with one change: it also reads the logs of one-class runs, a class's latest run
+  winning, so the exact bytes are again the `// GC:` lines of the run each CSV report comes from. `check_readme.py` checks that each of
+  the README's 16 Benchmarks tables (148 rows) is one of the generated tables, row for row.
+- **What it shows.** OQ-74: Keryx's `IMediator` rows with a scope per request allocate what the typed rows allocate, under both runtimes
+  (`RealWorldPublish1ScopePerRequest` and `5`: 560 B and 1,336 B, against 920 B and 2,136 B before); `IMediator` `Ping` per request
+  measures 67.9 ns against the typed overload's 55.1 ns (80.4 against 54.3 ns before), and the publishes 172 and 580 ns against 164 and
+  570 ns (219 and 634 ns before). OQ-73: under NativeAOT Keryx's typed `Send` measures 1.40 to 1.41 ns at every depth (1.59 to 2.67 ns
+  with the probe) and the direct call's floor 1.34 to 1.35 ns (1.49 to 1.52 ns). OQ-75: Keryx's behavior rows allocate the same under
+  NativeAOT as under the JIT (520 B, 1,408 B, 712 B, 1,488 B; 96 B more each before), and the other libraries' behavior rows lost the same
+  96 B. Generic `Stream` at depth 0 does not show decision 22's slowdown (`IMediator` 639.2 ns, typed 648.2 ns, direct call 645.8 ns).
+  Most JIT times that do not depend on these changes moved by a few percent between the two runs (the SQLite rows about 7% slower, the
+  yielding ones by a few hundred nanoseconds), the allocations not at all.
+
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
 
 ### OQ-74: `IMediator`, `ISender` and `IPublisher` each take a scope entry (2026-11-27)
@@ -2331,8 +2388,10 @@ the class. A scope that resolves fewer services (`RealWorldPingScopePerRequest`)
   two entries do not cross it), so they alone would not catch a return to scoped forwarders; the rows that fail are "all four" (736 B
   against 376 B) and every send and publish row, `IMediator` and `ISender` then `Send`, `IMediator` and `IPublisher` then `Publish` (808 B
   against 448 B). With the transient forwarders every row matches its baseline. A consequence for `ValidateOnBuild` was found while
-  implementing this and is OQ-76 (open). The README's
-  scope-per-request and `IMediator` rows are from decision 32's run, before this change; decision 37's run refreshes them.
+  implementing this and is OQ-76 (open). Measured in decision 37's run ("Full benchmark run", at the end): with a scope per request
+  Keryx's `IMediator` rows allocate what its typed rows allocate under the JIT and NativeAOT (`RealWorldPublish1ScopePerRequest` and `5`
+  560 B and 1,336 B, against 920 B and 2,136 B in decision 32's run), and measure 172 ns and 580 ns against 164 ns and 570 ns (219 ns and
+  634 ns before); `RealWorldPingScopePerRequest` through `IMediator` 67.9 ns against 55.1 ns typed (80.4 ns against 54.3 ns before).
 
 Folded into the ADR (status; Injected parameters; DI registration), the brief (the host), the README (Hosts, Injected parameters,
 Benchmarks notes) and whats-left.md.
@@ -2541,7 +2600,9 @@ statics, not from an observation.
       passes (238 under the JIT, net10.0 and net11.0; 215 and 23 n/a in the NativeAOT publish), and `--filter '*RealWorldPing.*' --job Dry
       --inProcess` fails with that message.
 
-    Nothing was measured: the README's NativeAOT numbers are still decision 32's, which include the probe, until decision 37's run.
+    Measured in decision 37's run ("Full benchmark run", above): under NativeAOT, Keryx's typed `Send` with a synchronous handler
+    measures 1.40 to 1.41 ns at depths 0 to 8 (1.59 to 2.67 ns in decision 32's run, with the probe), `IMediator` 3.10 to 3.17 ns (3.26
+    to 5.19 ns) and the direct call 1.34 to 1.35 ns (1.49 to 1.52 ns).
 
 Folded into the ADR (status; Benchmarks), the brief (Phase 8), the README (Benchmarks) and whats-left.md.
 
@@ -2569,6 +2630,9 @@ benchmark code, not to the library.
   types (`MessageName<TypicalPing>.Value` in `TypicalPingHandler`, `MessageName<TypicalPinged1>.Value` and
   `MessageName<TypicalPinged5>.Value` in the two logged publishers), so no row allocates for the name under either runtime. The strings
   are the same as before, so `--verify`'s results and hit counts are unchanged (238 passed under the JIT, 215 and 23 n/a in the NativeAOT
-  publish). Nothing was measured; decision 37's run re-measures the behavior rows.
+  publish). Measured in decision 37's run ("Full benchmark run", above): under NativeAOT Keryx's behavior rows allocate what they
+  allocate under the JIT (`RealWorldBehaviors` 520 B, `RealWorldBehaviorsScopePerRequest` 1,408 B,
+  `RealWorldPublishBehavior1ScopePerRequest` 712 B and `5` 1,488 B; 96 B more each in decision 32's run), and the other libraries'
+  behavior rows are 96 B smaller than then.
 
 Folded into the ADR (status; Benchmarks), the README (Benchmarks) and whats-left.md.

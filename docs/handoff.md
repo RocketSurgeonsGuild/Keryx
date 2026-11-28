@@ -515,7 +515,11 @@ The README's tables come from one full local run of the comparison suite under t
 nothing else running; the README states the date, commit and environment and shows the NativeAOT times beside the JIT times); the run of
 2026-11-27 at 1652e50 is recorded in open-questions ("Full benchmark run") and raised OQ-74 (the `IMediator` forwarding registration's
 scope entry; decided: transient forwarders, owner decision 35) and OQ-75 (the benchmark behaviors' type names under NativeAOT; decided:
-`MessageName<T>`, owner decision 36). Decision 37's full run, under the JIT and then NativeAOT, refreshes the tables these changes affect.
+`MessageName<T>`, owner decision 36). The current tables are decision 37's full run (2026-11-27, at 3575a50, after decisions 34 to 36,
+recorded in the same entry): with a scope per request Keryx's `IMediator` rows allocate what its typed rows allocate, and under NativeAOT
+the typed `Send` stays at 1.40 to 1.41 ns at every depth and the behavior rows allocate what they allocate under the JIT. It raised OQ-77
+(open): BenchmarkDotNet 0.15.8 cannot measure the direct call's NativeAOT `Publish` to one handler with the job (its pilot reads 0 ns), so
+that one benchmark is run alone with a fixed invocation count.
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
@@ -523,7 +527,7 @@ wrapping the whole publish, examples with the message constraint, attaching per 
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the scoped mediator
 creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
-through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT, decision 32). A short "what is left" note in
+through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, decision 37's run at 3575a50). A short "what is left" note in
 `docs/whats-left.md`.
 
 **Done when:** benchmarks run locally and in CI with `--job Dry`, under the JIT and under NativeAOT, and `Keryx.Benchmarks --verify`

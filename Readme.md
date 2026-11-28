@@ -520,8 +520,12 @@ generic method; n/a marks a scenario the library has no API for. How each librar
 
 Each cell is the mean time per call and the bytes allocated per call (exact: BenchmarkDotNet's reports round them to KB once a column
 reaches 1 KB, so they are taken from its log, total bytes over operations). One local run of the whole comparison suite on 2026-11-27, at
-commit `1652e50` (built from a clean `git archive` of it), with nothing else running on the machine (owner decision 32), first under the
-JIT and then under NativeAOT ([below](#nativeaot)), with the settings below:
+commit `3575a50` (built from a clean `git archive` of it, after owner decisions 34 to 36; decision 37), first under the JIT and then under
+NativeAOT ([below](#nativeaot)), with the settings below. Every number comes from a run with no other build, test or benchmark busy on
+the machine: another session there started some during the JIT run, so the five classes it overlapped (`SendYieldDepth1`, `3` and `8`,
+`StreamDepth0` and `StreamDepth3`) were run again on their own, and the NativeAOT run went one class at a time, each started only when
+nothing else was busy and run again when something started while it ran. "Decision 32's run" in the notes is the previous full run,
+earlier the same day at `1652e50` on the same machine, before decisions 34 to 36.
 
 ```
 BenchmarkDotNet v0.15.8, macOS 27.2.1 (26B131) [Darwin 27.2.0]
@@ -538,9 +542,10 @@ How to read them:
 - Times under about 0.5 ns are below what BenchmarkDotNet resolves: the JIT inlined the whole call, pipeline included, into the
   benchmark (the direct call's synchronous `Send` at every depth and its `Publish` to one handler, Keryx's typed `Send` at every depth
   and its typed `Publish`, and Mediator singleton's `Mediator` class at depth 0). Compare those rows by order of magnitude.
-- With a yielding handler, the time is the thread-pool hop of `Task.Yield()` and varies by a few hundred nanoseconds from run to run (844
-  to 1,384 ns in the table below, with no pattern by library or depth); the allocation column is the meaningful one. The direct call's
-  113 to 114 B (averaged over thread-pool work) is the handler's own async state machine, so a library that shows the same adds nothing.
+- With a yielding handler, the time is the thread-pool hop of `Task.Yield()` and varies by a few hundred nanoseconds from run to run
+  (1,101 to 1,771 ns in the table below, 844 to 1,384 ns in decision 32's run, with no pattern by library or depth); the allocation
+  column is the meaningful one. The direct call's 112 B (averaged over thread-pool work, so it moves by a byte or two between runs) is the
+  handler's own async state machine, so a library that shows the same adds nothing.
 - In the stream scenarios the direct call's 120 B is the handler's iterator. Each stream behavior adds its own iterator.
 - In the real-world scenarios the handler's work (the `Pong` it allocates, the log messages, the query) is in every row, the direct call
   included, so compare each row with the direct call rather than with zero.
@@ -549,59 +554,60 @@ How to read them:
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 0.02 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B |
-| **Keryx**, typed overload | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.47 ns · 0 B |
-| **Keryx**, `IMediator` | 2.44 ns · 0 B | 2.70 ns · 0 B | 2.69 ns · 0 B | 2.74 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 25.3 ns · 64 B | 45.1 ns · 160 B | 67.2 ns · 352 B | 122 ns · 832 B |
-| Mediator 3.0.2 scoped, `IMediator` | 26.6 ns · 64 B | 44.6 ns · 160 B | 66.9 ns · 352 B | 120 ns · 832 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 0.35 ns · 0 B | 1.36 ns · 0 B | 5.11 ns · 0 B | 13.4 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 4.12 ns · 0 B | 4.56 ns · 0 B | 8.94 ns · 0 B | 18.2 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 33.3 ns · 200 B | 68.5 ns · 440 B | 102 ns · 728 B | 189 ns · 1,448 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 7.82 ns · 0 B | 9.04 ns · 0 B | 9.58 ns · 0 B | 13.8 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 9.46 ns · 0 B | 12.6 ns · 0 B | 9.74 ns · 0 B | 14.7 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 20.5 ns · 24 B | 26.9 ns · 24 B | 21.5 ns · 24 B | 22.0 ns · 24 B |
+| Hand-written direct call | 0.01 ns · 0 B | 0.01 ns · 0 B | 0.01 ns · 0 B | 0.00 ns · 0 B |
+| **Keryx**, typed overload | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.00 ns · 0 B | 0.45 ns · 0 B |
+| **Keryx**, `IMediator` | 3.27 ns · 0 B | 3.37 ns · 0 B | 2.69 ns · 0 B | 3.03 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 29.0 ns · 64 B | 44.6 ns · 160 B | 68.2 ns · 352 B | 123 ns · 832 B |
+| Mediator 3.0.2 scoped, `IMediator` | 32.9 ns · 64 B | 48.9 ns · 160 B | 71.3 ns · 352 B | 122 ns · 832 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 0.40 ns · 0 B | 1.26 ns · 0 B | 5.47 ns · 0 B | 14.9 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 3.89 ns · 0 B | 4.89 ns · 0 B | 9.87 ns · 0 B | 18.6 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 31.5 ns · 200 B | 71.7 ns · 440 B | 103 ns · 728 B | 188 ns · 1,448 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 8.26 ns · 0 B | 8.31 ns · 0 B | 10.3 ns · 0 B | 36.3 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 14.2 ns · 0 B | 10.3 ns · 0 B | 11.1 ns · 0 B | 16.8 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 22.6 ns · 24 B | 24.4 ns · 24 B | 25.9 ns · 24 B | 25.3 ns · 24 B |
 
 Generic dispatch tests each sealed request type with a type pattern (open-questions, "Requests are sealed"): Keryx's `IMediator` rows
-measure 2.44 to 2.74 ns here, against 3.22 to 3.51 ns in the previous run (2026-11-26, before the type patterns).
+measure 2.69 to 3.37 ns here, 2.44 to 2.74 ns in decision 32's run and 3.22 to 3.51 ns in the run of 2026-11-26, before the type
+patterns (at this scale a nanosecond moves between runs).
 
 ### Send, handler awaits `Task.Yield()`
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 971 ns · 113 B | 851 ns · 113 B | 972 ns · 113 B | 933 ns · 114 B |
-| **Keryx**, typed overload | 1,115 ns · 113 B | 980 ns · 113 B | 864 ns · 113 B | 887 ns · 113 B |
-| **Keryx**, `IMediator` | 846 ns · 113 B | 924 ns · 113 B | 906 ns · 113 B | 871 ns · 113 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 933 ns · 176 B | 941 ns · 273 B | 931 ns · 464 B | 977 ns · 944 B |
-| Mediator 3.0.2 scoped, `IMediator` | 1,153 ns · 176 B | 991 ns · 272 B | 891 ns · 464 B | 983 ns · 944 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 1,234 ns · 112 B | 916 ns · 113 B | 936 ns · 113 B | 876 ns · 113 B |
-| Mediator 3.0.2 singleton, `IMediator` | 1,265 ns · 112 B | 907 ns · 113 B | 891 ns · 113 B | 866 ns · 113 B |
-| MediatR 15.0.0, `IMediator` | 1,297 ns · 232 B | 909 ns · 472 B | 844 ns · 760 B | 970 ns · 1,480 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 1,384 ns · 373 B | 894 ns · 372 B | 891 ns · 371 B | 876 ns · 373 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 890 ns · 246 B | 906 ns · 245 B | 927 ns · 244 B | 943 ns · 246 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 990 ns · 278 B | 976 ns · 279 B | 985 ns · 278 B | 867 ns · 279 B |
+| Hand-written direct call | 1,328 ns · 112 B | 1,391 ns · 112 B | 1,358 ns · 112 B | 1,291 ns · 112 B |
+| **Keryx**, typed overload | 1,297 ns · 113 B | 1,242 ns · 113 B | 1,266 ns · 113 B | 1,259 ns · 112 B |
+| **Keryx**, `IMediator` | 1,730 ns · 113 B | 1,304 ns · 112 B | 1,385 ns · 112 B | 1,338 ns · 112 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 1,750 ns · 176 B | 1,405 ns · 272 B | 1,341 ns · 464 B | 1,416 ns · 944 B |
+| Mediator 3.0.2 scoped, `IMediator` | 1,365 ns · 176 B | 1,293 ns · 272 B | 1,303 ns · 464 B | 1,262 ns · 944 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 1,373 ns · 113 B | 1,227 ns · 113 B | 1,119 ns · 113 B | 1,162 ns · 112 B |
+| Mediator 3.0.2 singleton, `IMediator` | 1,382 ns · 113 B | 1,220 ns · 112 B | 1,186 ns · 112 B | 1,138 ns · 112 B |
+| MediatR 15.0.0, `IMediator` | 1,628 ns · 232 B | 1,206 ns · 472 B | 1,129 ns · 760 B | 1,101 ns · 1,480 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 1,771 ns · 373 B | 1,255 ns · 372 B | 1,274 ns · 373 B | 1,137 ns · 373 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,365 ns · 246 B | 1,215 ns · 245 B | 1,175 ns · 246 B | 1,215 ns · 246 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,393 ns · 279 B | 1,227 ns · 279 B | 1,286 ns · 279 B | 1,176 ns · 279 B |
 
 ### Stream of 100 items
 
 | Subject | 0 stream behaviors | 3 stream behaviors |
 | --- | ---: | ---: |
-| Hand-written direct call | 632 ns · 120 B | 636 ns · 120 B |
-| **Keryx**, typed overload | 632 ns · 120 B | 2,741 ns · 648 B |
-| **Keryx**, `IMediator` | 638 ns · 120 B | 2,700 ns · 648 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 662 ns · 184 B | 2,784 ns · 1,048 B |
-| Mediator 3.0.2 scoped, `IMediator` | 659 ns · 184 B | 2,810 ns · 1,048 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 634 ns · 120 B | 2,718 ns · 696 B |
-| Mediator 3.0.2 singleton, `IMediator` | 630 ns · 120 B | 2,715 ns · 696 B |
-| MediatR 15.0.0, `IMediator` | 1,291 ns · 512 B | 7,698 ns · 2,336 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 640 ns · 120 B | 2,757 ns · 672 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 630 ns · 120 B | n/a |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 651 ns · 144 B | n/a |
+| Hand-written direct call | 646 ns · 120 B | 644 ns · 120 B |
+| **Keryx**, typed overload | 648 ns · 120 B | 2,732 ns · 648 B |
+| **Keryx**, `IMediator` | 639 ns · 120 B | 2,804 ns · 648 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 681 ns · 184 B | 2,867 ns · 1,048 B |
+| Mediator 3.0.2 scoped, `IMediator` | 666 ns · 184 B | 2,804 ns · 1,048 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 639 ns · 120 B | 2,723 ns · 696 B |
+| Mediator 3.0.2 singleton, `IMediator` | 643 ns · 120 B | 2,759 ns · 696 B |
+| MediatR 15.0.0, `IMediator` | 1,341 ns · 512 B | 7,599 ns · 2,336 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 638 ns · 120 B | 2,726 ns · 672 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 640 ns · 120 B | n/a |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 638 ns · 144 B | n/a |
 
-With 3 stream behaviors Keryx allocates 648 B per `Stream` (typed and `IMediator`), 32 B less than the previous run's 680 B: a pipeline
+With 3 stream behaviors Keryx allocates 648 B per `Stream` (typed and `IMediator`), 32 B less than the 680 B before OQ-65: a pipeline
 that resolves nothing has no pipeline context and its `next` links hold only the request (open-questions OQ-65). The generic `Stream`
 slowdown with no stream behaviors that interleaved reruns found after the type patterns (20 to 60 ns, 3 to 9%; owner decision 22) does not
-show in this run: `IMediator` measured 637.8 ns (standard deviation 5.0 ns), the typed overload 631.9 ns (2.4 ns) and the direct call
-632.5 ns (1.8 ns), and all three are below the 649 to 661 ns those reruns measured before the type patterns. It stays on the
-release checklist ([whats-left.md](docs/whats-left.md)).
+show in this run either: `IMediator` measured 639.2 ns (standard deviation 3.3 ns), the typed overload 648.2 ns (3.1 ns) and the direct
+call 645.8 ns (2.2 ns), all three below the 649 to 661 ns those reruns measured before the type patterns. It stays on the release
+checklist ([whats-left.md](docs/whats-left.md)).
 
 ### Real-world Ping → Pong
 
@@ -625,34 +631,35 @@ Requests:
 
 | Subject | `Ping` | `Ping`, scope per request | Behaviors | Behaviors, scope per request | SQLite query |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 2.30 ns · 32 B | 53.4 ns · 368 B | 119 ns · 520 B | 217 ns · 920 B | 1,285 ns · 1,144 B |
-| **Keryx**, typed overload | 2.65 ns · 32 B | 54.3 ns · 448 B | 128 ns · 520 B | 321 ns · 1,408 B | 1,287 ns · 1,144 B |
-| **Keryx**, `IMediator` | 6.02 ns · 32 B | 80.4 ns · 448 B | 134 ns · 520 B | 353 ns · 1,408 B | 1,362 ns · 1,144 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 29.4 ns · 96 B | 97.0 ns · 472 B | 209 ns · 776 B | 380 ns · 1,648 B | 1,353 ns · 1,208 B |
-| Mediator 3.0.2 scoped, `IMediator` | 29.3 ns · 96 B | 94.4 ns · 472 B | 204 ns · 776 B | 404 ns · 1,648 B | 1,335 ns · 1,208 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 2.75 ns · 32 B | 24.9 ns · 160 B | n/a | n/a | 1,288 ns · 1,144 B |
-| Mediator 3.0.2 singleton, `IMediator` | 7.85 ns · 32 B | 30.5 ns · 160 B | n/a | n/a | 1,286 ns · 1,144 B |
-| MediatR 15.0.0, `IMediator` | 36.8 ns · 232 B | 74.7 ns · 432 B | 258 ns · 1,176 B | 322 ns · 1,608 B | 1,342 ns · 1,344 B |
-| Immediate.Handlers 4.4.0, `Handler` class | 12.6 ns · 32 B | 80.7 ns · 400 B | 145 ns · 520 B | 299 ns · 1,400 B | 1,318 ns · 1,144 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 21.3 ns · 32 B | n/a | n/a | n/a | 1,286 ns · 1,168 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 24.9 ns · 56 B | 52.7 ns · 208 B | 187 ns · 544 B | 260 ns · 928 B | 1,330 ns · 1,168 B |
+| Hand-written direct call | 2.34 ns · 32 B | 50.4 ns · 368 B | 120 ns · 520 B | 221 ns · 920 B | 1,378 ns · 1,144 B |
+| **Keryx**, typed overload | 2.38 ns · 32 B | 55.1 ns · 448 B | 126 ns · 520 B | 328 ns · 1,408 B | 1,398 ns · 1,144 B |
+| **Keryx**, `IMediator` | 6.61 ns · 32 B | 67.9 ns · 448 B | 133 ns · 520 B | 339 ns · 1,408 B | 1,452 ns · 1,144 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 31.9 ns · 96 B | 93.0 ns · 472 B | 205 ns · 776 B | 394 ns · 1,648 B | 1,465 ns · 1,208 B |
+| Mediator 3.0.2 scoped, `IMediator` | 30.2 ns · 96 B | 97.6 ns · 472 B | 196 ns · 776 B | 412 ns · 1,648 B | 1,451 ns · 1,208 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 2.94 ns · 32 B | 26.0 ns · 160 B | n/a | n/a | 1,417 ns · 1,144 B |
+| Mediator 3.0.2 singleton, `IMediator` | 7.98 ns · 32 B | 33.4 ns · 160 B | n/a | n/a | 1,402 ns · 1,144 B |
+| MediatR 15.0.0, `IMediator` | 38.5 ns · 232 B | 75.5 ns · 432 B | 262 ns · 1,176 B | 333 ns · 1,608 B | 1,418 ns · 1,344 B |
+| Immediate.Handlers 4.4.0, `Handler` class | 11.8 ns · 32 B | 83.1 ns · 400 B | 142 ns · 520 B | 301 ns · 1,400 B | 1,417 ns · 1,144 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 21.0 ns · 32 B | n/a | n/a | n/a | 1,423 ns · 1,168 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 24.8 ns · 56 B | 54.1 ns · 208 B | 192 ns · 544 B | 252 ns · 928 B | 1,403 ns · 1,168 B |
 
-- `Ping` from the long-lived scope: Keryx's typed overload is within half a nanosecond of the direct call (the 32 B is the `Pong`).
-- Scope per request: Keryx's typed overload measures 54.3 ns against the direct call's 53.4 ns and allocates 80 B more: the scoped
+- `Ping` from the long-lived scope: Keryx's typed overload is within a tenth of a nanosecond of the direct call (the 32 B is the `Pong`).
+- Scope per request: Keryx's typed overload measures 55.1 ns against the direct call's 50.4 ns and allocates 80 B more: the scoped
   `KeryxMediator` (one field per pipeline context, 104 B in this host) where the direct call resolves a handler object without fields.
   Mediator singleton allocates least here because nothing scoped is resolved.
-- Behaviors from the long-lived scope: Keryx's typed overload measures 128 ns against the direct call's 119 ns, with the same 520 B; the
-  other libraries measure 145 to 258 ns.
-- Behaviors with a scope per request: Keryx's typed overload measures 321 ns and 1,408 B against the direct call's 217 ns and 920 B: the
+- Behaviors from the long-lived scope: Keryx's typed overload measures 126 ns against the direct call's 120 ns, with the same 520 B; the
+  other libraries measure 142 to 262 ns.
+- Behaviors with a scope per request: Keryx's typed overload measures 328 ns and 1,408 B against the direct call's 221 ns and 920 B: the
   first call in a scope creates the mediator and the pipeline context, which resolves the handler's and the behaviors' services. The other
-  libraries measure 260 to 404 ns; ZeroAlloc.Mediator, whose behaviors resolve their services from the provider on every call, is the
-  fastest here (260 ns), while from the long-lived scope it measures 187 ns, behind Immediate.Handlers (145 ns) and Keryx (128 to
-  134 ns).
-- The SQLite query (about 1.3 µs and 1,144 B) is most of every row in the last column.
-- `IMediator` with a scope per request is slower than the typed overload in this run because `AddKeryx()` then registered `IMediator` as
-  its own scoped service forwarding to `KeryxMediator`, so resolving it ran a second factory and added an entry to the scope. `AddKeryx()`
-  now registers the interfaces as transient forwarders, which add nothing to the scope (open-questions OQ-74); these rows are from the
-  run before that change and are refreshed by the next full run.
+  libraries measure 252 to 412 ns; ZeroAlloc.Mediator, whose behaviors resolve their services from the provider on every call, is the
+  fastest here (252 ns), while from the long-lived scope it measures 192 ns, behind Immediate.Handlers (142 ns) and Keryx (126 to
+  133 ns).
+- The SQLite query (about 1.4 µs and 1,144 B) is most of every row in the last column.
+- `IMediator` with a scope per request allocates what the typed overload allocates (448 B for `Ping`, 1,408 B with the behaviors):
+  `AddKeryx()` registers `IMediator`, `ISender` and `IPublisher` as transient factories that forward to the scoped `KeryxMediator`, so
+  resolving one adds nothing to the scope (open-questions OQ-74). `Ping` per request measures 67.9 ns against the typed overload's
+  55.1 ns (80.4 ns against 54.3 ns in decision 32's run, with the scoped forwarders); 4.2 ns of that is the generic dispatch (6.61 ns
+  against 2.38 ns from the long-lived scope), and the rest is resolving `IMediator`, whose factory then resolves `KeryxMediator`.
 
 Notifications, each to 1 and to 5 handlers:
 
@@ -673,36 +680,36 @@ Per request scope:
 
 | Subject | 1 handler | 5 handlers | 1 handler + behavior | 5 handlers + behavior |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 124 ns · 456 B | 450 ns · 1,232 B | 201 ns · 608 B | 520 ns · 1,384 B |
-| **Keryx**, typed overload | 161 ns · 560 B | 557 ns · 1,336 B | 246 ns · 712 B | 638 ns · 1,488 B |
-| **Keryx**, `IMediator` | 219 ns · 920 B | 634 ns · 2,136 B | 298 ns · 1,072 B | 709 ns · 2,288 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 232 ns · 888 B | 680 ns · 2,104 B | n/a | n/a |
-| Mediator 3.0.2 scoped, `IMediator` | 238 ns · 888 B | 714 ns · 2,104 B | n/a | n/a |
-| MediatR 15.0.0, `IMediator` | 234 ns · 1,248 B | 640 ns · 2,496 B | n/a | n/a |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 127 ns · 456 B | 372 ns · 840 B | n/a | n/a |
+| Hand-written direct call | 128 ns · 456 B | 457 ns · 1,232 B | 208 ns · 608 B | 536 ns · 1,384 B |
+| **Keryx**, typed overload | 164 ns · 560 B | 570 ns · 1,336 B | 251 ns · 712 B | 672 ns · 1,488 B |
+| **Keryx**, `IMediator` | 172 ns · 560 B | 580 ns · 1,336 B | 256 ns · 712 B | 673 ns · 1,488 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 242 ns · 888 B | 701 ns · 2,104 B | n/a | n/a |
+| Mediator 3.0.2 scoped, `IMediator` | 244 ns · 888 B | 716 ns · 2,104 B | n/a | n/a |
+| MediatR 15.0.0, `IMediator` | 245 ns · 1,248 B | 665 ns · 2,496 B | n/a | n/a |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 128 ns · 456 B | 376 ns · 840 B | n/a | n/a |
 
 Handlers that await the SQLite query, from the long-lived scope:
 
 | Subject | Sequential, 1 handler | Sequential, 5 handlers | Parallel, 1 handler | Parallel, 5 handlers |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 1,322 ns · 1,176 B | 6,748 ns · 5,880 B | 1,355 ns · 1,176 B | 6,743 ns · 5,880 B |
-| **Keryx**, typed overload | 1,370 ns · 1,176 B | 6,647 ns · 5,880 B | 1,326 ns · 1,176 B | 6,914 ns · 5,880 B |
-| **Keryx**, `IMediator` | 1,353 ns · 1,176 B | 6,892 ns · 5,880 B | 1,352 ns · 1,176 B | 6,686 ns · 5,880 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 1,378 ns · 1,176 B | 6,732 ns · 5,880 B | n/a | n/a |
-| Mediator 3.0.2 scoped, `IMediator` | 1,383 ns · 1,176 B | 6,907 ns · 5,880 B | n/a | n/a |
-| Mediator 3.0.2 singleton, `Mediator` class | 1,352 ns · 1,176 B | 6,817 ns · 5,880 B | 1,347 ns · 1,176 B | 7,348 ns · 5,880 B |
-| Mediator 3.0.2 singleton, `IMediator` | 1,406 ns · 1,176 B | 6,694 ns · 5,880 B | 1,353 ns · 1,176 B | 6,943 ns · 5,880 B |
-| MediatR 15.0.0, `IMediator` | 1,514 ns · 1,952 B | 7,380 ns · 7,648 B | 1,588 ns · 2,232 B | 7,297 ns · 8,032 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,354 ns · 1,208 B | 7,301 ns · 6,040 B | 1,376 ns · 1,208 B | 7,011 ns · 6,040 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,385 ns · 1,208 B | 6,826 ns · 6,040 B | 1,428 ns · 1,208 B | 6,900 ns · 6,040 B |
+| Hand-written direct call | 1,482 ns · 1,176 B | 7,226 ns · 5,880 B | 1,455 ns · 1,176 B | 7,381 ns · 5,880 B |
+| **Keryx**, typed overload | 1,451 ns · 1,176 B | 7,459 ns · 5,880 B | 1,481 ns · 1,176 B | 7,378 ns · 5,880 B |
+| **Keryx**, `IMediator` | 1,499 ns · 1,176 B | 7,267 ns · 5,880 B | 1,495 ns · 1,176 B | 7,434 ns · 5,880 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 1,534 ns · 1,176 B | 7,368 ns · 5,880 B | n/a | n/a |
+| Mediator 3.0.2 scoped, `IMediator` | 1,533 ns · 1,176 B | 7,500 ns · 5,880 B | n/a | n/a |
+| Mediator 3.0.2 singleton, `Mediator` class | 1,455 ns · 1,176 B | 7,515 ns · 5,880 B | 1,442 ns · 1,176 B | 7,290 ns · 5,880 B |
+| Mediator 3.0.2 singleton, `IMediator` | 1,471 ns · 1,176 B | 7,456 ns · 5,880 B | 1,515 ns · 1,176 B | 7,336 ns · 5,880 B |
+| MediatR 15.0.0, `IMediator` | 1,634 ns · 1,952 B | 8,020 ns · 7,648 B | 1,665 ns · 2,232 B | 7,900 ns · 8,032 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,475 ns · 1,208 B | 7,630 ns · 6,040 B | 1,514 ns · 1,208 B | 7,470 ns · 6,040 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,502 ns · 1,208 B | 7,434 ns · 6,040 B | 1,519 ns · 1,208 B | 7,484 ns · 6,040 B |
 
-- Per request scope, Keryx's typed overload measures 161 ns (1 handler) and 557 ns (5 handlers) against the direct call's 124 ns and
-  450 ns. Its `IMediator` rows allocate 360 B and 800 B more than the typed ones, all of it the scope entry of the scoped forwarding
-  `IMediator` registration this run measured (a probe resolving the same registrations from a bare container allocates exactly 360 B and
-  800 B more per scope through `IMediator`, and nothing more when the forwarding registration is transient). `AddKeryx()` now registers it
-  transient (OQ-74); these rows are refreshed by the next full run.
+- Per request scope, Keryx's typed overload measures 164 ns (1 handler) and 570 ns (5 handlers) against the direct call's 128 ns and
+  457 ns. Its `IMediator` rows allocate what the typed ones allocate (560 B and 1,336 B; 712 B and 1,488 B with the notification
+  behavior) and measure 172 ns and 580 ns (256 ns and 673 ns with the behavior). In decision 32's run, with the scoped forwarding
+  `IMediator` registration, they allocated 360 B and 800 B more and measured 219 ns and 634 ns: the scope entry that registration added
+  (OQ-74), which the transient forwarders no longer add.
 - SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
-  handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 8% of its sequential
+  handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 3% of its sequential
   publish. Keryx allocates what the direct call allocates in all four columns.
 
 Here the direct call is a hand-written handler class (or a publisher class taking the handler classes) resolved from DI that does the
@@ -725,9 +732,9 @@ libraries are left out: this checks Keryx's contract, not a comparison.
 
 | Subject | `async ValueTask` handler | `async Task` handler |
 | --- | ---: | ---: |
-| Hand-written direct call | 1,199 ns · 97 B | 840 ns · 96 B |
-| **Keryx**, typed overload | 1,184 ns · 96 B | 1,269 ns · 96 B |
-| **Keryx**, `IMediator` | 931 ns · 96 B | 1,312 ns · 96 B |
+| Hand-written direct call | 1,195 ns · 97 B | 907 ns · 96 B |
+| **Keryx**, typed overload | 1,229 ns · 96 B | 1,202 ns · 96 B |
+| **Keryx**, `IMediator` | 1,465 ns · 96 B | 1,337 ns · 96 B |
 
 ### Publish, sequential, synchronous handlers
 
@@ -737,27 +744,27 @@ resolves.
 
 | Subject | 1 handler | 5 handlers |
 | --- | ---: | ---: |
-| Hand-written direct call | 0.00 ns · 0 B | 0.61 ns · 0 B |
-| **Keryx**, typed overload | 0.34 ns · 0 B | 0.44 ns · 0 B |
-| **Keryx**, `IMediator` | 3.19 ns · 0 B | 3.93 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 16.1 ns · 0 B | 31.7 ns · 0 B |
-| Mediator 3.0.2 scoped, `IMediator` | 20.2 ns · 0 B | 25.9 ns · 0 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 3.09 ns · 0 B | 15.7 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 8.79 ns · 0 B | 17.4 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 120 ns · 768 B | 326 ns · 1,728 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.28 ns · 0 B | 8.68 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 18.2 ns · 24 B | 58.5 ns · 120 B |
+| Hand-written direct call | 0.01 ns · 0 B | 0.53 ns · 0 B |
+| **Keryx**, typed overload | 0.44 ns · 0 B | 0.48 ns · 0 B |
+| **Keryx**, `IMediator` | 3.31 ns · 0 B | 4.07 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 16.6 ns · 0 B | 33.7 ns · 0 B |
+| Mediator 3.0.2 scoped, `IMediator` | 18.2 ns · 0 B | 27.6 ns · 0 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 3.07 ns · 0 B | 15.4 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 10.5 ns · 0 B | 20.8 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 123 ns · 768 B | 322 ns · 1,728 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.80 ns · 0 B | 8.82 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 26.7 ns · 24 B | 55.6 ns · 120 B |
 
 A publish whose handlers are all static and whose behaviors inject nothing (every row here) has no pipeline context and its publish
-strategy is static (open-questions OQ-70): Keryx's typed overload measures 0.34 ns and 0.44 ns (0.65 and 0.84 ns in the previous run),
-inlined like the direct call, and `IMediator` 3.19 ns and 3.93 ns (3.11 and 3.27 ns in the previous run; at this scale a nanosecond
-moves between runs), all 0 B.
+strategy is static (open-questions OQ-70): Keryx's typed overload measures 0.44 ns and 0.48 ns (0.34 and 0.44 ns in decision 32's run,
+0.65 and 0.84 ns before OQ-70), inlined like the direct call, and `IMediator` 3.31 ns and 4.07 ns (3.19 and 3.93 ns in decision 32's run;
+at this scale a nanosecond moves between runs), all 0 B.
 
 ### NativeAOT
 
 The same comparison scenarios also run with BenchmarkDotNet's NativeAOT toolchain on net10.0 (owner decision 29), each benchmark compiled
-ahead of time instead of JIT-compiled with tiering and Dynamic PGO. That run followed the JIT run above, from the same build, with the
-same settings:
+ahead of time instead of JIT-compiled with tiering and Dynamic PGO. That run followed the JIT run above, from the same copy of the
+commit, with the same settings, one class at a time (above):
 
 ```
 NativeAOT 10.0 : .NET 10.0.15, Arm64 NativeAOT armv8.0-a
@@ -776,154 +783,162 @@ Each cell is the JIT time and the NativeAOT time, then the bytes allocated (both
 three things in mind:
 
 - In the `Send` scenarios nothing is inlined into the benchmark the way the JIT inlines it, so the direct call's synchronous `Send`
-  measures 1.49 to 1.52 ns at every depth: that is the floor of a NativeAOT `Send` row, and the sub-nanosecond JIT `Send` rows have no
-  NativeAOT equivalent. The `Publish` rows of the direct call and Keryx's typed overload still measure about a nanosecond or less
-  (the direct call 0.17 ns and 1.20 ns, Keryx 0.87 ns and 1.85 ns), so compare those by order of magnitude.
-- In this run's NativeAOT builds the call counter `--verify` uses was not compiled away as it is under the JIT, so each handler and
-  behavior call carried a field load and a branch, in every subject's rows alike and growing with the depth. Since owner decision 34
-  the builds BenchmarkDotNet makes have no counter at all, under either runtime (the runner sets `KeryxBenchmarksProbe=false` before they
-  build, and every comparison benchmark's setup fails a build that still has it, so CI's Dry runs check it; OQ-73); the next full run
-  (decision 37) replaces these numbers.
-- In this run the behaviors' log messages took the request or notification type's name from `typeof(T).Name`, which allocates a new
-  string on every read under NativeAOT (48 B for `TypicalPing`, checked with a NativeAOT probe; nothing under the JIT), while the direct
-  call used `nameof`. That is Keryx's extra 96 B in the behavior rows under NativeAOT (two messages), and the same reads are in every other
-  library's behavior rows. Since owner decision 36 every behavior and the direct call read it once per type, through `MessageName<T>`
-  (OQ-75); the next full run re-measures those rows. In the scope-per-request rows, Microsoft.Extensions.DependencyInjection resolves
-  without generated IL under NativeAOT, so every row's scope cost changes, the direct call's included.
+  measures 1.34 to 1.35 ns at every depth: that is the floor of a NativeAOT `Send` row, and the sub-nanosecond JIT `Send` rows have no
+  NativeAOT equivalent. The `Publish` rows of the direct call and Keryx's typed overload measure under a nanosecond (the direct call
+  0.06 ns and 0.67 ns, Keryx 0.68 ns both), so compare those by order of magnitude. The direct call's `Publish` to one handler is a
+  call that returns `default`, and BenchmarkDotNet 0.15.8 could not measure it with the job above: its pilot stage read 0 ns for the
+  first 16 calls and threw (open-questions OQ-77). That one cell comes from a run of that benchmark alone with a fixed invocation
+  count (160,000,000 calls per iteration, which skips the pilot), the job otherwise the same.
+- The builds BenchmarkDotNet makes have no verification probe (owner decision 34, OQ-73: the runner sets `KeryxBenchmarksProbe=false`
+  before they build, and every comparison benchmark's setup fails a build that still has it, so CI's Dry runs check it). Decision 32's
+  run still had it under NativeAOT, where it was not compiled away as under the JIT: each handler and behavior call carried a field load
+  and a branch, so Keryx's typed `Send` grew from 1.59 to 2.67 ns between depth 0 and depth 8 and its `IMediator` `Send` from 3.26 to
+  5.19 ns. Without it they measure 1.40 to 1.41 ns and 3.10 to 3.17 ns at every depth, and the direct call's floor moved from 1.49 to
+  1.52 ns down to 1.34 to 1.35 ns.
+- The behaviors and the direct call read the message type's name once per type, through `MessageName<T>` (owner decision 36, OQ-75).
+  Under NativeAOT `typeof(T).Name` allocates a new string on every read (48 B for `TypicalPing`; nothing under the JIT), and in decision
+  32's run the behaviors read it for both log messages while the direct call used `nameof`, which put 96 B more in every library's
+  behavior rows under NativeAOT. In this run Keryx's behavior rows allocate what they allocate under the JIT (520 B, 1,408 B per request
+  scope, 712 B and 1,488 B for the notification behavior; 616 B, 1,504 B, 808 B and 1,584 B then), and the other libraries' behavior rows
+  lost the same 96 B. In the scope-per-request rows, Microsoft.Extensions.DependencyInjection resolves without generated IL under
+  NativeAOT, so every row's scope cost changes, the direct call's included.
 
 Send, synchronous handler:
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 0.02 ns → 1.49 ns · 0 B | 0.00 ns → 1.52 ns · 0 B | 0.00 ns → 1.49 ns · 0 B | 0.00 ns → 1.52 ns · 0 B |
-| **Keryx**, typed overload | 0.00 ns → 1.59 ns · 0 B | 0.00 ns → 2.09 ns · 0 B | 0.00 ns → 2.12 ns · 0 B | 0.47 ns → 2.67 ns · 0 B |
-| **Keryx**, `IMediator` | 2.44 ns → 3.26 ns · 0 B | 2.70 ns → 3.45 ns · 0 B | 2.69 ns → 3.97 ns · 0 B | 2.74 ns → 5.19 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 25.3 ns · 64 B → 52.6 ns · 48 B | 45.1 ns · 160 B → 79.1 ns · 128 B | 67.2 ns · 352 B → 101 ns · 288 B | 122 ns · 832 B → 158 ns · 688 B |
-| Mediator 3.0.2 scoped, `IMediator` | 26.6 ns · 64 B → 58.4 ns · 48 B | 44.6 ns · 160 B → 82.6 ns · 128 B | 66.9 ns · 352 B → 102 ns · 288 B | 120 ns · 832 B → 161 ns · 688 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 0.35 ns → 1.95 ns · 0 B | 1.36 ns → 3.40 ns · 0 B | 5.11 ns → 6.76 ns · 0 B | 13.4 ns → 20.2 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 4.12 ns → 5.01 ns · 0 B | 4.56 ns → 6.38 ns · 0 B | 8.94 ns → 10.2 ns · 0 B | 18.2 ns → 23.4 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 33.3 ns · 200 B → n/a | 68.5 ns · 440 B → n/a | 102 ns · 728 B → n/a | 189 ns · 1,448 B → n/a |
-| Immediate.Handlers 4.4.0, `Handler` class | 7.82 ns → 20.8 ns · 0 B | 9.04 ns → 20.6 ns · 0 B | 9.58 ns → 22.1 ns · 0 B | 13.8 ns → 26.2 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 9.46 ns → 17.9 ns · 0 B | 12.6 ns → 18.2 ns · 0 B | 9.74 ns → 20.5 ns · 0 B | 14.7 ns → 25.7 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 20.5 ns → 38.8 ns · 24 B | 26.9 ns → 41.2 ns · 24 B | 21.5 ns → 43.7 ns · 24 B | 22.0 ns → 49.0 ns · 24 B |
+| Hand-written direct call | 0.01 ns → 1.34 ns · 0 B | 0.01 ns → 1.34 ns · 0 B | 0.01 ns → 1.34 ns · 0 B | 0.00 ns → 1.35 ns · 0 B |
+| **Keryx**, typed overload | 0.00 ns → 1.40 ns · 0 B | 0.00 ns → 1.41 ns · 0 B | 0.00 ns → 1.41 ns · 0 B | 0.45 ns → 1.41 ns · 0 B |
+| **Keryx**, `IMediator` | 3.27 ns → 3.11 ns · 0 B | 3.37 ns → 3.10 ns · 0 B | 2.69 ns → 3.16 ns · 0 B | 3.03 ns → 3.17 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 29.0 ns · 64 B → 51.8 ns · 48 B | 44.6 ns · 160 B → 79.2 ns · 128 B | 68.2 ns · 352 B → 99.0 ns · 288 B | 123 ns · 832 B → 153 ns · 688 B |
+| Mediator 3.0.2 scoped, `IMediator` | 32.9 ns · 64 B → 55.4 ns · 48 B | 48.9 ns · 160 B → 82.7 ns · 128 B | 71.3 ns · 352 B → 102 ns · 288 B | 122 ns · 832 B → 156 ns · 688 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 0.40 ns → 1.99 ns · 0 B | 1.26 ns → 2.89 ns · 0 B | 5.47 ns → 5.61 ns · 0 B | 14.9 ns → 17.1 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 3.89 ns → 4.77 ns · 0 B | 4.89 ns → 5.88 ns · 0 B | 9.87 ns → 8.90 ns · 0 B | 18.6 ns → 20.3 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 31.5 ns · 200 B → n/a | 71.7 ns · 440 B → n/a | 103 ns · 728 B → n/a | 188 ns · 1,448 B → n/a |
+| Immediate.Handlers 4.4.0, `Handler` class | 8.26 ns → 20.7 ns · 0 B | 8.31 ns → 19.9 ns · 0 B | 10.3 ns → 21.8 ns · 0 B | 36.3 ns → 24.7 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 14.2 ns → 18.0 ns · 0 B | 10.3 ns → 18.6 ns · 0 B | 11.1 ns → 20.4 ns · 0 B | 16.8 ns → 25.5 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 22.6 ns → 38.9 ns · 24 B | 24.4 ns → 40.6 ns · 24 B | 25.9 ns → 43.8 ns · 24 B | 25.3 ns → 48.0 ns · 24 B |
 
 Send, handler awaits `Task.Yield()` (the time is the thread-pool hop under both runtimes; compare the allocations):
 
 | Subject | 0 behaviors | 1 behavior | 3 behaviors | 8 behaviors |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 971 ns · 113 B → 872 ns · 114 B | 851 ns · 113 B → 848 ns · 114 B | 972 ns · 113 B → 791 ns · 114 B | 933 ns → 842 ns · 114 B |
-| **Keryx**, typed overload | 1,115 ns · 113 B → 748 ns · 114 B | 980 ns → 782 ns · 113 B | 864 ns → 787 ns · 113 B | 887 ns → 768 ns · 113 B |
-| **Keryx**, `IMediator` | 846 ns → 738 ns · 113 B | 924 ns → 774 ns · 113 B | 906 ns → 778 ns · 113 B | 871 ns → 801 ns · 113 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 933 ns · 176 B → 841 ns · 162 B | 941 ns · 273 B → 867 ns · 240 B | 931 ns · 464 B → 840 ns · 400 B | 977 ns · 944 B → 867 ns · 800 B |
-| Mediator 3.0.2 scoped, `IMediator` | 1,153 ns · 176 B → 765 ns · 161 B | 991 ns · 272 B → 828 ns · 240 B | 891 ns · 464 B → 826 ns · 400 B | 983 ns · 944 B → 889 ns · 800 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 1,234 ns · 112 B → 836 ns · 113 B | 916 ns → 764 ns · 113 B | 936 ns → 780 ns · 113 B | 876 ns → 803 ns · 113 B |
-| Mediator 3.0.2 singleton, `IMediator` | 1,265 ns · 112 B → 760 ns · 114 B | 907 ns → 795 ns · 113 B | 891 ns · 113 B → 806 ns · 114 B | 866 ns → 813 ns · 113 B |
-| MediatR 15.0.0, `IMediator` | 1,297 ns · 232 B → n/a | 909 ns · 472 B → n/a | 844 ns · 760 B → n/a | 970 ns · 1,480 B → n/a |
-| Immediate.Handlers 4.4.0, `Handler` class | 1,384 ns → 870 ns · 373 B | 894 ns → 881 ns · 372 B | 891 ns → 947 ns · 371 B | 876 ns · 373 B → 893 ns · 372 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 890 ns → 837 ns · 246 B | 906 ns · 245 B → 877 ns · 246 B | 927 ns · 244 B → 823 ns · 247 B | 943 ns → 921 ns · 246 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 990 ns · 278 B → 793 ns · 279 B | 976 ns → 842 ns · 279 B | 985 ns → 926 ns · 278 B | 867 ns · 279 B → 838 ns · 280 B |
+| Hand-written direct call | 1,328 ns · 112 B → 791 ns · 114 B | 1,391 ns → 738 ns · 112 B | 1,358 ns · 112 B → 808 ns · 114 B | 1,291 ns · 112 B → 778 ns · 114 B |
+| **Keryx**, typed overload | 1,297 ns → 757 ns · 113 B | 1,242 ns → 803 ns · 113 B | 1,266 ns → 748 ns · 113 B | 1,259 ns · 112 B → 815 ns · 113 B |
+| **Keryx**, `IMediator` | 1,730 ns · 113 B → 758 ns · 114 B | 1,304 ns · 112 B → 770 ns · 113 B | 1,385 ns · 112 B → 774 ns · 113 B | 1,338 ns · 112 B → 805 ns · 113 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 1,750 ns · 176 B → 792 ns · 161 B | 1,405 ns · 272 B → 828 ns · 240 B | 1,341 ns · 464 B → 909 ns · 400 B | 1,416 ns · 944 B → 857 ns · 800 B |
+| Mediator 3.0.2 scoped, `IMediator` | 1,365 ns · 176 B → 770 ns · 161 B | 1,293 ns · 272 B → 839 ns · 240 B | 1,303 ns · 464 B → 868 ns · 400 B | 1,262 ns · 944 B → 871 ns · 800 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 1,373 ns · 113 B → 762 ns · 114 B | 1,227 ns → 802 ns · 113 B | 1,119 ns → 808 ns · 113 B | 1,162 ns · 112 B → 726 ns · 113 B |
+| Mediator 3.0.2 singleton, `IMediator` | 1,382 ns · 113 B → 783 ns · 114 B | 1,220 ns · 112 B → 820 ns · 113 B | 1,186 ns · 112 B → 771 ns · 113 B | 1,138 ns · 112 B → 1,011 ns · 113 B |
+| MediatR 15.0.0, `IMediator` | 1,628 ns · 232 B → n/a | 1,206 ns · 472 B → n/a | 1,129 ns · 760 B → n/a | 1,101 ns · 1,480 B → n/a |
+| Immediate.Handlers 4.4.0, `Handler` class | 1,771 ns · 373 B → 852 ns · 374 B | 1,255 ns · 372 B → 876 ns · 371 B | 1,274 ns · 373 B → 889 ns · 372 B | 1,137 ns · 373 B → 915 ns · 369 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,365 ns → 833 ns · 246 B | 1,215 ns · 245 B → 830 ns · 246 B | 1,175 ns · 246 B → 804 ns · 247 B | 1,215 ns → 800 ns · 246 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,393 ns · 279 B → 813 ns · 280 B | 1,227 ns · 279 B → 818 ns · 280 B | 1,286 ns → 828 ns · 279 B | 1,176 ns → 832 ns · 279 B |
 
 Send of an `IRequest`, handler awaits `Task.Yield()` (Keryx only):
 
 | Subject | `async ValueTask` handler | `async Task` handler |
 | --- | ---: | ---: |
-| Hand-written direct call | 1,199 ns → 710 ns · 97 B | 840 ns → 720 ns · 96 B |
-| **Keryx**, typed overload | 1,184 ns → 841 ns · 96 B | 1,269 ns → 820 ns · 96 B |
-| **Keryx**, `IMediator` | 931 ns → 773 ns · 96 B | 1,312 ns → 800 ns · 96 B |
+| Hand-written direct call | 1,195 ns → 786 ns · 97 B | 907 ns → 716 ns · 96 B |
+| **Keryx**, typed overload | 1,229 ns → 867 ns · 96 B | 1,202 ns → 773 ns · 96 B |
+| **Keryx**, `IMediator` | 1,465 ns → 792 ns · 96 B | 1,337 ns → 776 ns · 96 B |
 
 Stream of 100 items:
 
 | Subject | 0 stream behaviors | 3 stream behaviors |
 | --- | ---: | ---: |
-| Hand-written direct call | 632 ns → 901 ns · 120 B | 636 ns → 910 ns · 120 B |
-| **Keryx**, typed overload | 632 ns → 895 ns · 120 B | 2,741 ns → 4,086 ns · 648 B |
-| **Keryx**, `IMediator` | 638 ns → 901 ns · 120 B | 2,700 ns → 4,183 ns · 648 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 662 ns · 184 B → 973 ns · 168 B | 2,784 ns · 1,048 B → 4,328 ns · 984 B |
-| Mediator 3.0.2 scoped, `IMediator` | 659 ns · 184 B → 963 ns · 168 B | 2,810 ns · 1,048 B → 4,285 ns · 984 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 634 ns → 894 ns · 120 B | 2,718 ns → 4,297 ns · 696 B |
-| Mediator 3.0.2 singleton, `IMediator` | 630 ns → 913 ns · 120 B | 2,715 ns → 4,145 ns · 696 B |
-| MediatR 15.0.0, `IMediator` | 1,291 ns · 512 B → n/a | 7,698 ns · 2,336 B → n/a |
-| Immediate.Handlers 4.4.0, `Handler` class | 640 ns → 928 ns · 120 B | 2,757 ns → 4,203 ns · 672 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 630 ns → 907 ns · 120 B | n/a |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 651 ns → 940 ns · 144 B | n/a |
+| Hand-written direct call | 646 ns → 960 ns · 120 B | 644 ns → 914 ns · 120 B |
+| **Keryx**, typed overload | 648 ns → 926 ns · 120 B | 2,732 ns → 4,208 ns · 648 B |
+| **Keryx**, `IMediator` | 639 ns → 959 ns · 120 B | 2,804 ns → 4,184 ns · 648 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 681 ns · 184 B → 955 ns · 168 B | 2,867 ns · 1,048 B → 4,098 ns · 984 B |
+| Mediator 3.0.2 scoped, `IMediator` | 666 ns · 184 B → 953 ns · 168 B | 2,804 ns · 1,048 B → 4,356 ns · 984 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 639 ns → 913 ns · 120 B | 2,723 ns → 4,066 ns · 696 B |
+| Mediator 3.0.2 singleton, `IMediator` | 643 ns → 940 ns · 120 B | 2,759 ns → 4,148 ns · 696 B |
+| MediatR 15.0.0, `IMediator` | 1,341 ns · 512 B → n/a | 7,599 ns · 2,336 B → n/a |
+| Immediate.Handlers 4.4.0, `Handler` class | 638 ns → 934 ns · 120 B | 2,726 ns → 4,276 ns · 672 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 640 ns → 928 ns · 120 B | n/a |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 638 ns → 965 ns · 144 B | n/a |
 
 Publish, sequential, synchronous handlers:
 
 | Subject | 1 handler | 5 handlers |
 | --- | ---: | ---: |
-| Hand-written direct call | 0.00 ns → 0.17 ns · 0 B | 0.61 ns → 1.20 ns · 0 B |
-| **Keryx**, typed overload | 0.34 ns → 0.87 ns · 0 B | 0.44 ns → 1.85 ns · 0 B |
-| **Keryx**, `IMediator` | 3.19 ns → 6.50 ns · 0 B | 3.93 ns → 6.88 ns · 0 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 16.1 ns → 37.6 ns · 0 B | 31.7 ns → 56.3 ns · 0 B |
-| Mediator 3.0.2 scoped, `IMediator` | 20.2 ns → 41.0 ns · 0 B | 25.9 ns → 60.5 ns · 0 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 3.09 ns → 10.6 ns · 0 B | 15.7 ns → 25.5 ns · 0 B |
-| Mediator 3.0.2 singleton, `IMediator` | 8.79 ns → 12.1 ns · 0 B | 17.4 ns → 25.0 ns · 0 B |
-| MediatR 15.0.0, `IMediator` | 120 ns · 768 B → n/a | 326 ns · 1,728 B → n/a |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.28 ns → 16.7 ns · 0 B | 8.68 ns → 18.4 ns · 0 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 18.2 ns → 56.0 ns · 24 B | 58.5 ns → 164 ns · 120 B |
+| Hand-written direct call | 0.01 ns → 0.06 ns · 0 B | 0.53 ns → 0.67 ns · 0 B |
+| **Keryx**, typed overload | 0.44 ns → 0.68 ns · 0 B | 0.48 ns → 0.68 ns · 0 B |
+| **Keryx**, `IMediator` | 3.31 ns → 6.26 ns · 0 B | 4.07 ns → 6.48 ns · 0 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 16.6 ns → 41.1 ns · 0 B | 33.7 ns → 55.1 ns · 0 B |
+| Mediator 3.0.2 scoped, `IMediator` | 18.2 ns → 43.9 ns · 0 B | 27.6 ns → 58.1 ns · 0 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 3.07 ns → 11.4 ns · 0 B | 15.4 ns → 21.7 ns · 0 B |
+| Mediator 3.0.2 singleton, `IMediator` | 10.5 ns → 14.8 ns · 0 B | 20.8 ns → 23.7 ns · 0 B |
+| MediatR 15.0.0, `IMediator` | 123 ns · 768 B → n/a | 322 ns · 1,728 B → n/a |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 8.80 ns → 16.8 ns · 0 B | 8.82 ns → 18.4 ns · 0 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 26.7 ns → 54.6 ns · 24 B | 55.6 ns → 165 ns · 120 B |
 
 Real-world requests (`Ping`, from the long-lived scope and per request, the behavior pair and the SQLite query):
 
 | Subject | `Ping` | `Ping`, scope per request | Behaviors | Behaviors, scope per request | SQLite query |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 2.30 ns → 3.69 ns · 32 B | 53.4 ns → 85.3 ns · 368 B | 119 ns → 138 ns · 520 B | 217 ns · 920 B → 332 ns · 968 B | 1,285 ns · 1,144 B → 1,295 ns · 1,128 B |
-| **Keryx**, typed overload | 2.65 ns → 3.76 ns · 32 B | 54.3 ns → 85.4 ns · 448 B | 128 ns · 520 B → 205 ns · 616 B | 321 ns · 1,408 B → 510 ns · 1,504 B | 1,287 ns · 1,144 B → 1,301 ns · 1,128 B |
-| **Keryx**, `IMediator` | 6.02 ns → 5.32 ns · 32 B | 80.4 ns → 132 ns · 448 B | 134 ns · 520 B → 206 ns · 616 B | 353 ns · 1,408 B → 551 ns · 1,504 B | 1,362 ns · 1,144 B → 1,306 ns · 1,128 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 29.4 ns · 96 B → 56.5 ns · 80 B | 97.0 ns · 472 B → 195 ns · 488 B | 209 ns · 776 B → 310 ns · 824 B | 380 ns · 1,648 B → 736 ns · 1,824 B | 1,353 ns · 1,208 B → 1,377 ns · 1,176 B |
-| Mediator 3.0.2 scoped, `IMediator` | 29.3 ns · 96 B → 59.9 ns · 80 B | 94.4 ns · 472 B → 197 ns · 488 B | 204 ns · 776 B → 322 ns · 824 B | 404 ns · 1,648 B → 732 ns · 1,824 B | 1,335 ns · 1,208 B → 1,383 ns · 1,176 B |
-| Mediator 3.0.2 singleton, `Mediator` class | 2.75 ns → 3.74 ns · 32 B | 24.9 ns → 39.7 ns · 160 B | n/a | n/a | 1,288 ns · 1,144 B → 1,314 ns · 1,128 B |
-| Mediator 3.0.2 singleton, `IMediator` | 7.85 ns → 6.66 ns · 32 B | 30.5 ns → 43.9 ns · 160 B | n/a | n/a | 1,286 ns · 1,144 B → 1,312 ns · 1,128 B |
-| MediatR 15.0.0, `IMediator` | 36.8 ns · 232 B → n/a | 74.7 ns · 432 B → n/a | 258 ns · 1,176 B → n/a | 322 ns · 1,608 B → n/a | 1,342 ns · 1,344 B → n/a |
-| Immediate.Handlers 4.4.0, `Handler` class | 12.6 ns → 19.8 ns · 32 B | 80.7 ns · 400 B → 139 ns · 432 B | 145 ns · 520 B → 222 ns · 616 B | 299 ns · 1,400 B → 540 ns · 1,640 B | 1,318 ns · 1,144 B → 1,339 ns · 1,128 B |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 21.3 ns → 21.1 ns · 32 B | n/a | n/a | n/a | 1,286 ns · 1,168 B → 1,378 ns · 1,184 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 24.9 ns → 44.2 ns · 56 B | 52.7 ns · 208 B → 127 ns · 240 B | 187 ns · 544 B → 331 ns · 672 B | 260 ns · 928 B → 495 ns · 1,088 B | 1,330 ns · 1,168 B → 1,386 ns · 1,184 B |
+| Hand-written direct call | 2.34 ns → 3.41 ns · 32 B | 50.4 ns → 81.7 ns · 368 B | 120 ns → 137 ns · 520 B | 221 ns · 920 B → 318 ns · 968 B | 1,378 ns · 1,144 B → 1,316 ns · 1,128 B |
+| **Keryx**, typed overload | 2.38 ns → 3.52 ns · 32 B | 55.1 ns → 84.3 ns · 448 B | 126 ns → 150 ns · 520 B | 328 ns → 445 ns · 1,408 B | 1,398 ns · 1,144 B → 1,305 ns · 1,128 B |
+| **Keryx**, `IMediator` | 6.61 ns → 5.00 ns · 32 B | 67.9 ns → 110 ns · 448 B | 133 ns → 155 ns · 520 B | 339 ns → 471 ns · 1,408 B | 1,452 ns · 1,144 B → 1,319 ns · 1,128 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 31.9 ns · 96 B → 54.1 ns · 80 B | 93.0 ns · 472 B → 188 ns · 488 B | 205 ns · 776 B → 248 ns · 728 B | 394 ns · 1,648 B → 673 ns · 1,728 B | 1,465 ns · 1,208 B → 1,392 ns · 1,176 B |
+| Mediator 3.0.2 scoped, `IMediator` | 30.2 ns · 96 B → 58.7 ns · 80 B | 97.6 ns · 472 B → 196 ns · 488 B | 196 ns · 776 B → 249 ns · 728 B | 412 ns · 1,648 B → 696 ns · 1,728 B | 1,451 ns · 1,208 B → 1,384 ns · 1,176 B |
+| Mediator 3.0.2 singleton, `Mediator` class | 2.94 ns → 3.62 ns · 32 B | 26.0 ns → 39.9 ns · 160 B | n/a | n/a | 1,417 ns · 1,144 B → 1,311 ns · 1,128 B |
+| Mediator 3.0.2 singleton, `IMediator` | 7.98 ns → 6.34 ns · 32 B | 33.4 ns → 43.3 ns · 160 B | n/a | n/a | 1,402 ns · 1,144 B → 1,311 ns · 1,128 B |
+| MediatR 15.0.0, `IMediator` | 38.5 ns · 232 B → n/a | 75.5 ns · 432 B → n/a | 262 ns · 1,176 B → n/a | 333 ns · 1,608 B → n/a | 1,418 ns · 1,344 B → n/a |
+| Immediate.Handlers 4.4.0, `Handler` class | 11.8 ns → 20.2 ns · 32 B | 83.1 ns · 400 B → 143 ns · 432 B | 142 ns → 170 ns · 520 B | 301 ns · 1,400 B → 483 ns · 1,544 B | 1,417 ns · 1,144 B → 1,332 ns · 1,128 B |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 21.0 ns → 20.9 ns · 32 B | n/a | n/a | n/a | 1,423 ns · 1,168 B → 1,381 ns · 1,184 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 24.8 ns → 42.7 ns · 56 B | 54.1 ns · 208 B → 124 ns · 240 B | 192 ns · 544 B → 280 ns · 576 B | 252 ns · 928 B → 432 ns · 992 B | 1,403 ns · 1,168 B → 1,383 ns · 1,184 B |
 
 Real-world publish per request scope:
 
 | Subject | 1 handler | 5 handlers | 1 handler + behavior | 5 handlers + behavior |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 124 ns · 456 B → 238 ns · 528 B | 450 ns · 1,232 B → 789 ns · 1,496 B | 201 ns · 608 B → 326 ns · 688 B | 520 ns · 1,384 B → 880 ns · 1,656 B |
-| **Keryx**, typed overload | 161 ns → 257 ns · 560 B | 557 ns → 899 ns · 1,336 B | 246 ns · 712 B → 414 ns · 808 B | 638 ns · 1,488 B → 1,040 ns · 1,584 B |
-| **Keryx**, `IMediator` | 219 ns → 338 ns · 920 B | 634 ns → 1,019 ns · 2,136 B | 298 ns · 1,072 B → 492 ns · 1,168 B | 709 ns · 2,288 B → 1,151 ns · 2,384 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 232 ns · 888 B → 497 ns · 960 B | 680 ns · 2,104 B → 1,447 ns · 2,336 B | n/a | n/a |
-| Mediator 3.0.2 scoped, `IMediator` | 238 ns · 888 B → 508 ns · 960 B | 714 ns · 2,104 B → 1,412 ns · 2,336 B | n/a | n/a |
-| MediatR 15.0.0, `IMediator` | 234 ns · 1,248 B → n/a | 640 ns · 2,496 B → n/a | n/a | n/a |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 127 ns · 456 B → 271 ns · 528 B | 372 ns · 840 B → 779 ns · 1,072 B | n/a | n/a |
+| Hand-written direct call | 128 ns · 456 B → 228 ns · 528 B | 457 ns · 1,232 B → 778 ns · 1,496 B | 208 ns · 608 B → 325 ns · 688 B | 536 ns · 1,384 B → 904 ns · 1,656 B |
+| **Keryx**, typed overload | 164 ns → 252 ns · 560 B | 570 ns → 876 ns · 1,336 B | 251 ns → 360 ns · 712 B | 672 ns → 986 ns · 1,488 B |
+| **Keryx**, `IMediator` | 172 ns → 281 ns · 560 B | 580 ns → 920 ns · 1,336 B | 256 ns → 381 ns · 712 B | 673 ns → 1,031 ns · 1,488 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 242 ns · 888 B → 480 ns · 960 B | 701 ns · 2,104 B → 1,338 ns · 2,336 B | n/a | n/a |
+| Mediator 3.0.2 scoped, `IMediator` | 244 ns · 888 B → 492 ns · 960 B | 716 ns · 2,104 B → 1,348 ns · 2,336 B | n/a | n/a |
+| MediatR 15.0.0, `IMediator` | 245 ns · 1,248 B → n/a | 665 ns · 2,496 B → n/a | n/a | n/a |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 128 ns · 456 B → 271 ns · 528 B | 376 ns · 840 B → 784 ns · 1,072 B | n/a | n/a |
 
 Real-world publish to handlers that await the SQLite query:
 
 | Subject | Sequential, 1 handler | Sequential, 5 handlers | Parallel, 1 handler | Parallel, 5 handlers |
 | --- | ---: | ---: | ---: | ---: |
-| Hand-written direct call | 1,322 ns · 1,176 B → 1,435 ns · 1,160 B | 6,748 ns · 5,880 B → 7,218 ns · 5,800 B | 1,355 ns · 1,176 B → 1,396 ns · 1,160 B | 6,743 ns · 5,880 B → 6,932 ns · 5,800 B |
-| **Keryx**, typed overload | 1,370 ns · 1,176 B → 1,498 ns · 1,160 B | 6,647 ns · 5,880 B → 7,104 ns · 5,800 B | 1,326 ns · 1,176 B → 1,381 ns · 1,160 B | 6,914 ns · 5,880 B → 6,944 ns · 5,800 B |
-| **Keryx**, `IMediator` | 1,353 ns · 1,176 B → 1,420 ns · 1,160 B | 6,892 ns · 5,880 B → 7,229 ns · 5,800 B | 1,352 ns · 1,176 B → 1,379 ns · 1,160 B | 6,686 ns · 5,880 B → 6,847 ns · 5,800 B |
-| Mediator 3.0.2 scoped, `Mediator` class | 1,378 ns · 1,176 B → 1,479 ns · 1,160 B | 6,732 ns · 5,880 B → 7,273 ns · 5,800 B | n/a | n/a |
-| Mediator 3.0.2 scoped, `IMediator` | 1,383 ns · 1,176 B → 1,514 ns · 1,160 B | 6,907 ns · 5,880 B → 7,364 ns · 5,800 B | n/a | n/a |
-| Mediator 3.0.2 singleton, `Mediator` class | 1,352 ns · 1,176 B → 1,427 ns · 1,160 B | 6,817 ns · 5,880 B → 7,154 ns · 5,800 B | 1,347 ns · 1,176 B → 1,426 ns · 1,160 B | 7,348 ns · 5,880 B → 6,873 ns · 5,800 B |
-| Mediator 3.0.2 singleton, `IMediator` | 1,406 ns · 1,176 B → 1,435 ns · 1,160 B | 6,694 ns · 5,880 B → 6,998 ns · 5,800 B | 1,353 ns · 1,176 B → 1,397 ns · 1,160 B | 6,943 ns · 5,880 B → 6,977 ns · 5,800 B |
-| MediatR 15.0.0, `IMediator` | 1,514 ns · 1,952 B → n/a | 7,380 ns · 7,648 B → n/a | 1,588 ns · 2,232 B → n/a | 7,297 ns · 8,032 B → n/a |
-| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,354 ns · 1,208 B → 1,504 ns · 1,232 B | 7,301 ns · 6,040 B → 7,508 ns · 6,160 B | 1,376 ns · 1,208 B → 1,459 ns · 1,232 B | 7,011 ns · 6,040 B → 7,355 ns · 6,160 B |
-| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,385 ns · 1,208 B → 1,554 ns · 1,232 B | 6,826 ns · 6,040 B → 7,379 ns · 6,160 B | 1,428 ns · 1,208 B → 1,462 ns · 1,232 B | 6,900 ns · 6,040 B → 7,268 ns · 6,160 B |
+| Hand-written direct call | 1,482 ns · 1,176 B → 1,402 ns · 1,160 B | 7,226 ns · 5,880 B → 6,996 ns · 5,800 B | 1,455 ns · 1,176 B → 1,429 ns · 1,160 B | 7,381 ns · 5,880 B → 7,078 ns · 5,800 B |
+| **Keryx**, typed overload | 1,451 ns · 1,176 B → 1,396 ns · 1,160 B | 7,459 ns · 5,880 B → 7,019 ns · 5,800 B | 1,481 ns · 1,176 B → 1,443 ns · 1,160 B | 7,378 ns · 5,880 B → 7,133 ns · 5,800 B |
+| **Keryx**, `IMediator` | 1,499 ns · 1,176 B → 1,407 ns · 1,160 B | 7,267 ns · 5,880 B → 7,040 ns · 5,800 B | 1,495 ns · 1,176 B → 1,414 ns · 1,160 B | 7,434 ns · 5,880 B → 7,113 ns · 5,800 B |
+| Mediator 3.0.2 scoped, `Mediator` class | 1,534 ns · 1,176 B → 1,460 ns · 1,160 B | 7,368 ns · 5,880 B → 7,222 ns · 5,800 B | n/a | n/a |
+| Mediator 3.0.2 scoped, `IMediator` | 1,533 ns · 1,176 B → 1,474 ns · 1,160 B | 7,500 ns · 5,880 B → 7,228 ns · 5,800 B | n/a | n/a |
+| Mediator 3.0.2 singleton, `Mediator` class | 1,455 ns · 1,176 B → 1,420 ns · 1,160 B | 7,515 ns · 5,880 B → 7,137 ns · 5,800 B | 1,442 ns · 1,176 B → 1,447 ns · 1,160 B | 7,290 ns · 5,880 B → 7,017 ns · 5,800 B |
+| Mediator 3.0.2 singleton, `IMediator` | 1,471 ns · 1,176 B → 1,441 ns · 1,160 B | 7,456 ns · 5,880 B → 7,319 ns · 5,800 B | 1,515 ns · 1,176 B → 1,438 ns · 1,160 B | 7,336 ns · 5,880 B → 7,182 ns · 5,800 B |
+| MediatR 15.0.0, `IMediator` | 1,634 ns · 1,952 B → n/a | 8,020 ns · 7,648 B → n/a | 1,665 ns · 2,232 B → n/a | 7,900 ns · 8,032 B → n/a |
+| ZeroAlloc.Mediator 7.0.1, static `Mediator` | 1,475 ns · 1,208 B → 1,485 ns · 1,232 B | 7,630 ns · 6,040 B → 7,685 ns · 6,160 B | 1,514 ns · 1,208 B → 1,575 ns · 1,232 B | 7,470 ns · 6,040 B → 7,478 ns · 6,160 B |
+| ZeroAlloc.Mediator 7.0.1, `IMediator` | 1,502 ns · 1,208 B → 1,528 ns · 1,232 B | 7,434 ns · 6,040 B → 7,421 ns · 6,160 B | 1,519 ns · 1,208 B → 1,541 ns · 1,232 B | 7,484 ns · 6,040 B → 7,579 ns · 6,160 B |
 
-- Without behaviors, Keryx's typed overload stays at the direct call's floor: 1.59 ns against 1.49 ns at depth 0, 1.85 ns against
-  1.20 ns for a publish to 5 handlers, 3.76 ns against 3.69 ns for the real-world `Ping` and 85.4 ns against 85.3 ns for it per request
-  scope. Each behavior adds a little (2.67 ns at depth 8), still 0 B; Mediator singleton measures 1.95 to 23.4 ns over the same depths
-  (class and `IMediator`), the other libraries 17.9 to 161 ns.
-- Outside the yielding scenarios, Keryx allocates exactly what it allocates under the JIT, except in the behavior rows (96 B more: the
-  type names above) and in the SQLite and async-handler rows (16 B less per query), where the direct call's allocations change by the
-  same amount.
-- With a yielding handler every subject measured 738 to 947 ns under NativeAOT. Keryx allocates 113 to 114 B as under the JIT and as the
-  direct call. Mediator scoped allocates less than under the JIT (161 to 162, 240, 400 and 800 B at depths 0, 1, 3 and 8, against 176,
-  272 to 273, 464 and 944 B), as in its synchronous rows; Mediator singleton, Immediate.Handlers and ZeroAlloc.Mediator stay within 3 B
-  of their JIT allocations. With an `IRequest` handler Keryx allocates 96 B, as the direct call does (96 to 97 B).
-- Streams cost 40 to 60% more for every subject (the direct call 632 ns under the JIT, 901 ns under NativeAOT); Keryx's allocations do
+- Without behaviors, Keryx's typed overload stays at the direct call's floor: 1.40 ns against 1.34 ns at depth 0, 0.68 ns against
+  0.67 ns for a publish to 5 handlers, 3.52 ns against 3.41 ns for the real-world `Ping` and 84.3 ns against 81.7 ns for it per request
+  scope. Behaviors add nothing measurable (1.41 ns at depth 8), still 0 B; Mediator singleton measures 1.99 to 20.3 ns over the same
+  depths (class and `IMediator`), the other libraries 18.0 to 156 ns.
+- Outside the yielding scenarios, Keryx allocates exactly what it allocates under the JIT, the behavior rows included, except in the
+  SQLite and async-handler rows (16 B less per query), where the direct call's allocations change by the same amount.
+- Per request scope, Keryx's `IMediator` rows allocate what its typed rows allocate here too; `Ping` per request measures 110 ns against
+  84.3 ns, and a publish to 1 and 5 handlers 281 ns and 920 ns against 252 ns and 876 ns (decision 32's run, with the scoped forwarders:
+  132 ns against 85.4 ns, and 338 ns and 1,019 ns with 360 B and 800 B more).
+- With a yielding handler every subject measured 726 to 1,011 ns under NativeAOT. Keryx allocates 113 to 114 B, as the direct call does
+  (112 to 114 B). Mediator scoped allocates less than under the JIT (161, 240, 400 and 800 B at depths 0, 1, 3 and 8, against 176, 272,
+  464 and 944 B), as in its synchronous rows; Mediator singleton, Immediate.Handlers and ZeroAlloc.Mediator stay within 4 B of their JIT
+  allocations. With an `IRequest` handler Keryx allocates 96 B, as the direct call does (96 to 97 B).
+- Streams cost 40 to 60% more for every subject (the direct call 646 ns under the JIT, 960 ns under NativeAOT); Keryx's allocations do
   not change.
-- The real-world behavior rows: Keryx's typed overload measures 205 ns from the long-lived scope (the direct call 138 ns) and 510 ns per
-  request (332 ns); the other libraries 222 to 331 ns and 495 to 736 ns.
+- The real-world behavior rows: Keryx's typed overload measures 150 ns from the long-lived scope (the direct call 137 ns) and 445 ns per
+  request (318 ns); the other libraries 170 to 280 ns and 432 to 696 ns.
 
-Run them yourself (the JIT run took 25 minutes and the NativeAOT run 22 minutes with these settings; `--verify` checks that every
-library really runs each scenario's handlers and behaviors, with a call counter that the benchmark runs compile out: the runner sets the
-MSBuild property `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds):
+Run them yourself (a JIT run of the whole suite took 25 minutes with these settings, and decision 32's NativeAOT run of it 22 minutes;
+decision 37's NativeAOT run, one class at a time, built a NativeAOT executable per class and took 42 minutes of runs; `--verify` checks
+that every library really runs each scenario's handlers and behaviors, with a call counter that the benchmark runs compile out: the
+runner sets the MSBuild property `KeryxBenchmarksProbe=false` in its environment before BenchmarkDotNet builds):
 
 ```bash
 cd test/Keryx.Benchmarks
@@ -939,6 +954,13 @@ benchmarks and the JIT-only pipeline prototype are left out of the NativeAOT job
 dotnet publish -c Release -f net10.0 --use-current-runtime -p:KeryxBenchmarksNativeAot=true -o aot
 aot/Keryx.Benchmarks --verify
 dotnet run -c Release -f net10.0 -- --filter '*Comparison*' --runtimes nativeaot10.0 --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
+```
+
+Until OQ-77 is decided, that run reports `PublishTo1.Baseline` as NA and exits 1 (BenchmarkDotNet's pilot throws on it, see above);
+this run measures that one cell, with a fixed invocation count:
+
+```bash
+dotnet run -c Release -f net10.0 -- --filter '*Comparison.PublishTo1.Baseline' --runtimes nativeaot10.0 --invocationCount 160000000 --launchCount 1 --warmupCount 5 --iterationCount 15 --iterationTime 200
 ```
 
 Run it on its own: `--runtimes net10.0 nativeaot10.0` runs both in one summary, but BenchmarkDotNet then takes the JIT job's `Baseline`

@@ -1605,15 +1605,16 @@ NativeAOT breakage fails the pull
 request. Numbers are never published from shared runners. The README's numbers come from local runs, with the machine and job stated:
 since owner decision 32 (2026-11-27), one full run of the comparison suite (`--filter '*Comparison*'`, IterationCount=15,
 IterationTime=200ms, LaunchCount=1, WarmupCount=5) under the JIT and right after it under NativeAOT, built from a clean copy of the commit
-it measures, with nothing else running on the machine; the README states the date, the commit and BenchmarkDotNet's environment block,
-shows the NativeAOT times beside the JIT times, and notes anything in the numbers that is not the library's. Since owner decisions 34
-and 36 neither the verification probe nor the log messages' type names is in them; decision 32's run, measured before, included both
-under NativeAOT (OQ-73, OQ-75), and the next full run (decision 37) replaces those numbers.
+it measures, with no other build, test or benchmark running on the machine (a class that one overlaps is run again on its own); the
+README states the date, the commit and BenchmarkDotNet's environment block, shows the NativeAOT times beside the JIT times, and notes
+anything in the numbers that is not the library's. The current tables are decision 37's run (2026-11-27, at 3575a50, after owner
+decisions 34 to 36), so neither the verification probe nor the log messages' type names is in them; decision 32's run, before them,
+included both under NativeAOT (OQ-73, OQ-75).
 Before a release the comparison benchmarks are re-run on the release candidate; that run also checks generic `Stream` with no stream
 behaviors, which measured 20 to 60 ns (3 to 9%) slower after the type-pattern dispatch for a reason not found in its code (owner decision
 22, 2026-11-27: tracked for the release, not investigated now; open-questions, "Generic `Stream` at depth 0 is tracked for the release").
-Decision 32's full run did not show it (generic 637.8 ns, typed 631.9 ns, direct call 632.5 ns), but it was not a before-and-after
-comparison, so the release candidate's run checks it again.
+The full runs of decisions 32 and 37 did not show it (generic 637.8 and 639.2 ns, typed 631.9 and 648.2 ns, direct call 632.5 and
+645.8 ns), but neither was a before-and-after comparison, so the release candidate's run checks it again.
 
 ## AOT verification
 
