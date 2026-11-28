@@ -163,7 +163,7 @@ namespace Sample
         }
 
         private global::System.Threading.Tasks.ValueTask<int> __Send0(global::Sample.Q0 request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetPipeline0().Handler.InvokeAsync(request, cancellationToken);
+            global::Sample.Q0Handler.__keryx_InvokeAsync(request, __GetPipeline0().HandlerService0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline0 __GetPipeline0()
@@ -180,7 +180,7 @@ namespace Sample
             global::Sample.Q1Handler.InvokeAsync(request, cancellationToken);
 
         private global::System.Threading.Tasks.ValueTask<int> __Send2(global::Sample.Q2 request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetPipeline2().Handler.InvokeAsync(request, cancellationToken);
+            global::Sample.Q2Handler.__keryx_InvokeAsync(request, __GetPipeline2().HandlerService0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline2 __GetPipeline2()
@@ -194,7 +194,7 @@ namespace Sample
             global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline2>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline2, new __Pipeline2(__serviceProvider), null) ?? state.__pipeline2);
 
         private global::System.Collections.Generic.IAsyncEnumerable<int> __Stream0(global::Sample.Items request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetStreamPipeline0().Handler.InvokeAsync(request, cancellationToken);
+            global::Sample.ItemsHandler.__keryx_InvokeAsync(request, __GetStreamPipeline0().HandlerService0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __StreamPipeline0 __GetStreamPipeline0()
@@ -248,47 +248,47 @@ namespace Sample
             public object? __notification0;
         }
 
-        /// <summary>The pipeline context of <c>Sample.Q0</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Q0</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.Q0Handler Handler;
+            public readonly global::Sample.Clock HandlerService0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Q0Handler>(serviceProvider);
+                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
-        /// <summary>The pipeline context of <c>Sample.Q2</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Q2</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline2
         {
-            public readonly global::Sample.Q2Handler Handler;
+            public readonly global::Sample.Clock HandlerService0;
 
             public __Pipeline2(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Q2Handler>(serviceProvider);
+                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
-        /// <summary>The stream pipeline context of <c>Sample.Items</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The stream pipeline context of <c>Sample.Items</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __StreamPipeline0
         {
-            public readonly global::Sample.ItemsHandler Handler;
+            public readonly global::Sample.Clock HandlerService0;
 
             public __StreamPipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.ItemsHandler>(serviceProvider);
+                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Rang</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Rang</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.RangHandler Handler0;
+            public readonly global::Sample.Clock Handler0Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.RangHandler>(serviceProvider);
+                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -298,7 +298,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = Handler0.InvokeAsync(notification, cancellationToken);
+                    task = global::Sample.RangHandler.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -344,16 +344,16 @@ namespace Sample
 
 namespace Sample
 {
-    /// <summary>Registers this host's Keryx mediator and handlers.</summary>
+    /// <summary>Registers this host's Keryx mediator.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
         ///     Registers <see cref="KeryxMediator" />, <see cref="global::Keryx.IMediator" />, <see cref="global::Keryx.ISender" /> and
         ///     <see cref="global::Keryx.IPublisher" /> as transient factories that each create a mediator over the provider that resolves
-        ///     it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a
-        ///     pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are
-        ///     static and are not registered.
+        ///     it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every
+        ///     mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the
+        ///     services they inject, call this host's own handlers through their static entries and construct referenced handlers.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -366,10 +366,6 @@ namespace Sample
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator.__KeryxScopeState());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.ItemsHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Q0Handler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.Q2Handler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.RangHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider)));
             return services;
         }
     }

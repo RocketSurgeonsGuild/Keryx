@@ -307,6 +307,94 @@ public class HostAllocationTests : HostTest
         await Assert.That(allocated["publish: two mediators"] - allocated["publish: KeryxMediator"]).IsEqualTo(scopes * mediator);
     }
 
+    /// <summary>
+    ///     Two requests whose contexts each hold one scoped <c>Clock</c>: <c>Handled</c>'s for its handler (the host's own, called through
+    ///     its static entry), <c>Behaved</c>'s for its behavior. A ping without a context is the baseline of a scope that resolves the
+    ///     mediator and sends.
+    /// </summary>
+    private const string HandlerServices = """
+        namespace Sample;
+
+        public sealed class Clock { }
+
+        public sealed record Ping : IRequest<int>;
+        public static partial class PingHandler { private static int Handle(Ping request) => 1; }
+
+        public sealed record Handled : IRequest<int>;
+        public partial class HandledHandler { private static int Handle(Handled request, Clock clock) => 1; }
+
+        public sealed record Behaved : IRequest<int>;
+        public static partial class BehavedHandler { [Behavior(typeof(Clocked))] private static int Handle(Behaved request) => 1; }
+
+        [RequestBehavior]
+        public static class Clocked
+        {
+            public static ValueTask<int> Handle<TNext>(Behaved request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TNext : struct, INext<int> =>
+                next.InvokeAsync(cancellationToken);
+        }
+
+        public static class Registrations
+        {
+            public static void Required(IServiceCollection services) => services.AddScoped(static _ => new Clock());
+        }
+
+        public static class HandlerProbe
+        {
+            public static global::System.Collections.Generic.Dictionary<string, long> Measure(IServiceProvider root)
+            {
+                var scopes = root.GetRequiredService<IServiceScopeFactory>();
+                return new()
+                {
+                    ["ping"] = Region(scopes, static mediator => mediator.Send(new Ping())),
+                    ["handler service"] = Region(scopes, static mediator => mediator.Send(new Handled())),
+                    ["behavior service"] = Region(scopes, static mediator => mediator.Send(new Behaved())),
+                };
+            }
+
+            /// <summary>The bytes of 1,000 scopes that each send once, the smallest of five repeats after a warm-up.</summary>
+            private static long Region(IServiceScopeFactory scopes, Func<KeryxMediator, ValueTask<int>> send)
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    using var scope = scopes.CreateScope();
+                    _ = send(scope.ServiceProvider.GetRequiredService<KeryxMediator>()).Result;
+                }
+
+                var smallest = long.MaxValue;
+                for (var repeat = 0; repeat < 5; repeat++)
+                {
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    for (var i = 0; i < 1_000; i++)
+                    {
+                        using var scope = scopes.CreateScope();
+                        var sent = send(scope.ServiceProvider.GetRequiredService<KeryxMediator>());
+                        _ = sent.IsCompletedSuccessfully ? sent.Result : throw new InvalidOperationException("The send did not complete synchronously.");
+                    }
+
+                    smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
+                }
+
+                return smallest;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task An_Own_Handler_With_Services_Costs_A_Scope_What_A_Behavior_With_Them_Costs(CancellationToken cancellationToken)
+    {
+        // Owner decisions 42 and 44: the host's own handler is not registered and never constructed. Its context holds the Clock it injects
+        // and calls its static entry, so a scope that sends it allocates exactly what one that sends a request whose behavior injects the
+        // Clock does (the scope state, a context of one field, the Clock and its scope entry): no handler object, no scope entry for one.
+        var host = await CompileHostAsync(HandlerServices, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.HandlerProbe", "Measure", provider);
+
+        await Assert.That(allocated["handler service"]).IsEqualTo(allocated["behavior service"]);
+        await Assert.That(allocated["handler service"]).IsGreaterThan(allocated["ping"]);
+    }
+
     [Test]
     public async Task FrozenDictionary_Dispatch_Allocates_Nothing_After_Warm_Up(CancellationToken cancellationToken)
     {

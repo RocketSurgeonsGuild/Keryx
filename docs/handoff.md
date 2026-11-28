@@ -27,11 +27,14 @@ question, the interim behavior you are using and a proposal, continue with the s
   `netstandard2.0` targets stay supported.
 - Handlers are `private static Handle`/`HandleAsync` methods on `partial` classes (`public` outside a host). The generator emits the other
   half: a constructor for injected dependencies, a public `InvokeAsync` (handler only, no behaviors) and a `[KeryxHandler]` manifest
-  attribute.
+  attribute; in a host, a handler with injected parameters also gets `internal static __keryx_InvokeAsync`, the invoker with the
+  services as parameters, which the host's pipelines call (owner decision 44). A handler class that implements `IDisposable` or
+  `IAsyncDisposable` is KRX025 (owner decision 45).
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
   net10.0 or later, OQ-61 and OQ-62) gets an internal transient `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
-  exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers handlers and the mediator with generated factory
-  lambdas (nothing for behaviors); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
+  exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers the mediator with generated factory
+  lambdas (nothing for handlers or behaviors: a pipeline context resolves the services the host's own handler injects and calls its
+  static entry, and constructs a referenced handler with `new`, owner decision 42); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
   mediator over the scope (`sp => new KeryxMediator(sp)`), and the pipeline contexts live in a scoped `KeryxMediator.__KeryxScopeState`
   that every mediator of the scope shares, resolved by the first call that needs a context, one `object?` field per pipeline with a
   context (owner decisions 46 and 47, superseding decision 35's one mediator per scope; the size-bounded layout decision 47 asked for
@@ -245,8 +248,9 @@ calls, owner decision 16 and OQ-67; a struct request's section has no designatio
 cancellationToken);`, and its arm takes `IRequest<TResponse>` and unboxes, so `Send` holds no struct local and every arm stays a tail call;
 a request or stream request type that is not sealed, reachable only with KRX024 suppressed, is never composed: no section, no typed overload,
 so sending it throws not-found, owner decision 18 and OQ-68; typed overloads of sealed requests have no runtime type check), `Unsafe.As` result reinterpretation, `FrozenDictionary` above
-the threshold, `KeryxHandlerNotFoundException`, `AddKeryx()` with factory registrations (including value-type and keyed optional
-parameters), host namespace from `RootNamespace` with the sanitised assembly-name fallback. The host's own request types are KRX001's (the
+the threshold, `KeryxHandlerNotFoundException`, `AddKeryx()` with factory registrations for the mediator, and pipeline contexts that
+resolve each handler's injected parameters (including value-type and keyed optional parameters; no handler registrations since owner
+decision 42), host namespace from `RootNamespace` with the sanitised assembly-name fallback. The host's own request types are KRX001's (the
 analyzer runs in hosts too), so the host generator does not collect them; KRX030 is Phase 7's, for referenced request types. Same-assembly
 handlers only. Like the handler generator, `HostGenerator` emits nothing when the parse options are below C# 14, so KRX022 stays the only
 error a host with an old `LangVersion` sees.
@@ -369,7 +373,7 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   receives the same instance of a transient, and every `IServiceProvider` (required or optional, of request, stream and publish behaviors
   and of request and notification handlers) receives the scope's provider; a snapshot of request, stream and publish pipelines whose
   behaviors inject only `IServiceProvider` shows one `ServiceProvider` field per context and no `ServiceN`, a keyed `IServiceProvider` is
-  a numbered keyed service beside it, and a handler's factory passes the scope's provider (OQ-63); services are numbered by type and key,
+  a numbered keyed service beside it, and a handler's context field holds the scope's provider (OQ-63); services are numbered by type and key,
   not first use, and adding a behavior that injects services the pipeline already shares, in any order, leaves the pipeline's context
   services (model and fields) unchanged (OQ-64);
 - the gate's three criteria are recorded in the phase summary and in `open-questions.md`. A failed gate does not block this line: if
@@ -529,10 +533,10 @@ a single case; it keeps the case in its class's logical group, so it stays the b
 benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
-C# 14, handler rules, quick start (`AddKeryx()` registers no behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
+C# 14, handler rules, quick start (`AddKeryx()` registers neither handlers nor behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`
 wrapping the whole publish, examples with the message constraint, attaching per target on a request or stream handler method or on the
 notification type), streaming (stream behaviors only), notifications (handlers have no behaviors of their own), hosts (the transient mediator over a
-scoped state creates only handler instances; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
+scoped state; pipeline contexts call the host's own handlers through their static entries and construct only referenced handlers; a host referenced by another host keeps the handlers it wants composed public, enforced by KRX030;
 KRX043), where requests are handled (their own assembly; KRX023) and what contracts assemblies hold (notifications), testing handlers
 through `InvokeAsync`, a diagnostics table matching the ADR with help links (KRX020 retired, KRX023, KRX024, KRX038 and KRX043 included), and benchmark results from a local run with machine details (JIT and NativeAOT; decision 32's rules, decision 37's run at 3575a50). A short "what is left" note in
 `docs/whats-left.md`.

@@ -14,8 +14,10 @@ namespace Keryx.Analyzers.Hosts;
 ///     request types, exact-type guards on notification types, a jump table above the threshold), lazy pipeline contexts for the pipelines
 ///     that resolve something, kept per scope in a scoped state (owner decision 46), and flat link structs that take only
 ///     what they read or pass on (ADR 0001, Generated pipeline shape), and
-///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c> with generated factory registrations for handlers. Behaviors are static: links call
-///     their behavior methods directly, and the pipeline contexts resolve their injected services.
+///     <c>KeryxServiceCollectionExtensions.AddKeryx()</c>, which registers the mediator and the scope state only. Behaviors are static: links
+///     call their behavior methods directly, and the pipeline contexts resolve their injected services. Handlers are not registered either
+///     (owner decisions 42 and 44): a context resolves the services the host's own handler injects and calls its static entry, and constructs
+///     a referenced handler with <c>new</c>.
 /// </summary>
 internal static partial class HostEmitter
 {
@@ -188,10 +190,10 @@ internal static partial class HostEmitter
 
     public static SourceText ServiceCollectionExtensions(HostSettings settings, HostComposition composition)
     {
-        var writer = new CodeWriter(capacity: 4096 + 512 * composition.ConstructedHandlers.Length);
+        var writer = new CodeWriter(capacity: 4096);
         writer.Namespace(settings.Namespace);
         writer.Member();
-        writer.Documentation("<summary>Registers this host's Keryx mediator and handlers.</summary>");
+        writer.Documentation("<summary>Registers this host's Keryx mediator.</summary>");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("internal static class KeryxServiceCollectionExtensions");
         writer.Open();
@@ -200,9 +202,9 @@ internal static partial class HostEmitter
             "<summary>",
             "    Registers <see cref=\"KeryxMediator\" />, <see cref=\"global::Keryx.IMediator\" />, <see cref=\"global::Keryx.ISender\" /> and",
             "    <see cref=\"global::Keryx.IPublisher\" /> as transient factories that each create a mediator over the provider that resolves",
-            "    it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a",
-            "    pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are",
-            "    static and are not registered.",
+            "    it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every",
+            "    mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the",
+            "    services they inject, call this host's own handlers through their static entries and construct referenced handlers.",
             "    Registrations that already exist are kept, so a second call does nothing.",
             "</summary>",
             "<param name=\"services\">The service collection.</param>",
@@ -223,17 +225,6 @@ internal static partial class HostEmitter
         if (HasScopeState(composition))
         {
             writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory($"new KeryxMediator.{ScopeStateName}()")});");
-        }
-
-        foreach (var handler in composition.ConstructedHandlers)
-        {
-            var creation = new StringBuilder(256).Append("new ").Append(handler.HandlerClass).Append('(');
-            for (var i = 0; i < handler.Services.Count; i++)
-            {
-                creation.Append(i == 0 ? "" : ", ").Append(Resolve(handler.Services[i], i));
-            }
-
-            writer.Line($"{DescriptorExtensions}.TryAddScoped(services, {Factory(creation.Append(')').ToString())});");
         }
 
         writer.Line("return services;");
@@ -503,10 +494,18 @@ internal static partial class HostEmitter
         var hasContext = HasContext(pipeline);
         var context = ContextRead(getName);
         writer.Member();
-        if (pipeline.Behaviors.IsEmpty)
+        if (pipeline.Behaviors.IsEmpty && request is { StaticEntry: true, Services.Count: > 1 })
         {
-            var target = hasContext ? $"{context}.Handler" : request.HandlerClass;
-            writer.Arrow(declaration, $"{target}.{HandlerAnalysis.InvokerName}(request, cancellationToken)");
+            // The static entry reads several of the context's fields: the context is read once.
+            writer.Line(declaration);
+            writer.Open();
+            writer.Line($"var {PipelineName} = {context};");
+            writer.Line($"return {HandlerInvocation(request, PipelineName + ".", HandlerFieldName, "request")};");
+            writer.Close();
+        }
+        else if (pipeline.Behaviors.IsEmpty)
+        {
+            writer.Arrow(declaration, HandlerInvocation(request, context + ".", HandlerFieldName, "request"));
         }
         else
         {
@@ -570,7 +569,7 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     What the end of a request or stream pipeline reads: the request, and the context when the handler is resolved into it (the
+    ///     What the end of a request or stream pipeline reads: the request, and the context when it holds the handler or its services (the
     ///     invoker is not static).
     /// </summary>
     private static Captures End(HostPipeline pipeline) => Captures.Message | ( pipeline.Handler.StaticInvoker ? Captures.None : Captures.Pipeline );
@@ -688,8 +687,9 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The pipeline context of one request: its handler (unless the invoker is static) and the injected services of its behavior methods,
-    ///     resolved once per scope, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
+    ///     The pipeline context of one request: the services its handler injects (the host's own handler, called through its static entry) or
+    ///     the referenced handler it constructs, unless the invoker is static, and the injected services of its behavior methods, resolved
+    ///     once per scope, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
     ///     <c>next</c> of behavior <c>k</c>: it calls behavior <c>k + 1</c>'s method with <c>Link{k + 1}</c>, and the last link calls the
     ///     handler's invoker. A pipeline with nothing to resolve (a static invoker and no injected services) has no context: its links are
     ///     nested in a static class of the same name and take only the request.
@@ -726,14 +726,9 @@ internal static partial class HostEmitter
             writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
             writer.Line($"private sealed class {contextName}");
             writer.Open();
-            var resolution = new List<string>(request.ContextServices.Count + 2);
-            if (!request.StaticInvoker)
-            {
-                writer.Member(plainField: true);
-                writer.Line($"public readonly {request.HandlerClass} Handler;");
-                resolution.Add($"Handler = {ServiceProviderExtensions}.GetRequiredService<{request.HandlerClass}>({ServiceProviderName});");
-            }
-
+            var resolution = new List<string>(request.ContextServices.Count + request.Services.Count + 1);
+            var variable = request.ContextServices.Count;
+            WriteHandlerFields(writer, request, HandlerFieldName, resolution, ref variable);
             WriteServiceFields(writer, request.ContextServices, request.ContextServiceProvider, resolution);
             WriteContextConstructor(writer, contextName, resolution);
         }
@@ -752,7 +747,7 @@ internal static partial class HostEmitter
             var isLast = k == pipeline.Behaviors.Length - 1;
             var body = !isLast
                 ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, linkName(k + 1), links[k + 1], "request")
-                : $"{( request.StaticInvoker ? request.HandlerClass : PipelineName + ".Handler" )}.{HandlerAnalysis.InvokerName}(request, cancellationToken)";
+                : HandlerInvocation(request, PipelineName + ".", HandlerFieldName, "request");
             WriteLink(
                 writer,
                 linkName(k),
@@ -770,6 +765,86 @@ internal static partial class HostEmitter
 
         writer.Close();
     }
+
+    /// <summary>
+    ///     What a pipeline context holds for a handler whose invoker is not static, with the statements that resolve it to
+    ///     <paramref name="resolution" />: for the host's own handler (<see cref="HostHandlerModel.StaticEntry" />), one field per service the
+    ///     handler injects (<c>{field}Service{j}</c>, the parameter's type), resolved by the rules of the generated constructor's parameters
+    ///     (<see cref="Resolve" />), which its static entry receives; for a referenced handler, the handler itself (<c>{field}</c>),
+    ///     constructed with <c>new</c> over the same resolutions (owner decision 42). Nothing for a static invoker.
+    /// </summary>
+    /// <param name="writer">The writer, in the context's body.</param>
+    /// <param name="handler">The handler.</param>
+    /// <param name="field">The handler's field, or the prefix of its services' fields.</param>
+    /// <param name="resolution">The context constructor's statements.</param>
+    /// <param name="variable">
+    ///     The next free index of a pattern variable (<c>__value{n}</c>) in the constructor: the shared services take the first ones.
+    /// </param>
+    private static void WriteHandlerFields(CodeWriter writer, HostHandlerModel handler, string field, List<string> resolution, ref int variable)
+    {
+        if (handler.StaticInvoker)
+        {
+            return;
+        }
+
+        if (handler.StaticEntry)
+        {
+            for (var j = 0; j < handler.Services.Count; j++)
+            {
+                writer.Member(plainField: true);
+                writer.Line($"public readonly {handler.Services[j].Type} {HandlerServiceField(field, j)};");
+                resolution.Add($"{HandlerServiceField(field, j)} = {Resolve(handler.Services[j], variable++)};");
+            }
+
+            return;
+        }
+
+        var creation = new StringBuilder(256).Append("new ").Append(handler.HandlerClass).Append('(');
+        for (var j = 0; j < handler.Services.Count; j++)
+        {
+            creation.Append(j == 0 ? "" : ", ").Append(Resolve(handler.Services[j], variable++));
+        }
+
+        writer.Member(plainField: true);
+        writer.Line($"public readonly {handler.HandlerClass} {field};");
+        resolution.Add($"{field} = {creation.Append(')')};");
+    }
+
+    /// <summary>
+    ///     The call of a handler from a pipeline: a static invoker on the class; the host's own handler's static entry
+    ///     (<c>__keryx_InvokeAsync</c>) on the class, with the services the context holds for it; a referenced handler's <c>InvokeAsync</c> on
+    ///     the instance the context holds.
+    /// </summary>
+    /// <param name="handler">The handler.</param>
+    /// <param name="context">How the context is reached, with the member access dot (<c>pipeline.</c>), or empty inside the context.</param>
+    /// <param name="field">The handler's field, or the prefix of its services' fields (<see cref="WriteHandlerFields" />).</param>
+    /// <param name="message">The message argument.</param>
+    private static string HandlerInvocation(HostHandlerModel handler, string context, string field, string message)
+    {
+        if (handler.StaticInvoker)
+        {
+            return $"{handler.HandlerClass}.{HandlerAnalysis.InvokerName}({message}, cancellationToken)";
+        }
+
+        if (!handler.StaticEntry)
+        {
+            return $"{context}{field}.{HandlerAnalysis.InvokerName}({message}, cancellationToken)";
+        }
+
+        var call = new StringBuilder(128).Append(handler.HandlerClass).Append('.').Append(HandlerAnalysis.StaticEntryName).Append('(').Append(message);
+        for (var j = 0; j < handler.Services.Count; j++)
+        {
+            call.Append(", ").Append(context).Append(HandlerServiceField(field, j));
+        }
+
+        return call.Append(", cancellationToken)").ToString();
+    }
+
+    /// <summary>The context field of a request or stream request pipeline's handler, or the prefix of its services' fields.</summary>
+    private const string HandlerFieldName = "Handler";
+
+    /// <summary>The context field of service <paramref name="index" /> of a handler with a static entry.</summary>
+    private static string HandlerServiceField(string field, int index) => field + "Service" + Digits(index);
 
     /// <summary>The constructor of a pipeline context, which resolves what it holds from the scope.</summary>
     private static void WriteContextConstructor(CodeWriter writer, string contextName, List<string> resolution)
@@ -930,10 +1005,15 @@ internal static partial class HostEmitter
     }
 
     /// <summary>What a pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
-    private static string Holds(HostHandlerModel handler) =>
-        handler.StaticInvoker ? "the injected services of its behaviors"
-        : handler.ContextServices.Count > 0 || handler.ContextServiceProvider ? "its handler and the injected services of its behaviors"
-        : "its handler";
+    private static string Holds(HostHandlerModel handler)
+    {
+        var own = handler.StaticInvoker ? null
+            : handler.StaticEntry ? "the services its handler injects"
+            : "its handler";
+        return own is null ? "the injected services of its behaviors"
+            : handler.ContextServices.Count > 0 || handler.ContextServiceProvider ? own + " and the injected services of its behaviors"
+            : own;
+    }
 
     /// <summary>
     ///     The <c>ServiceProvider</c> field when <paramref name="serviceProvider" /> (a behavior method injects the unkeyed
@@ -1042,8 +1122,8 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     Whether a request or stream pipeline has a context (created once per scope): it resolves something, its handler (the invoker is
-    ///     not static) or an injected service of its behaviors, or it holds the scope's provider for a behavior that injects the unkeyed
+    ///     Whether a request or stream pipeline has a context (created once per scope): it resolves something, its handler's services or its
+    ///     handler (the invoker is not static) or an injected service of its behaviors, or it holds the scope's provider for a behavior that injects the unkeyed
     ///     <c>IServiceProvider</c> (ADR 0001, Generated pipeline shape; OQ-63). A pipeline with nothing to resolve or hold has none: without
     ///     behaviors it calls the static invoker directly, with behaviors it calls the outermost behavior method directly and its links,
     ///     nested in a static class, take only the request.
@@ -1105,7 +1185,7 @@ internal static partial class HostEmitter
 internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<PipelineBehaviorModel> Behaviors);
 
 /// <summary>
-///     What the host dispatches and registers, composed from the handler models (ADR 0001, How the host reads it).
+///     What the host dispatches, composed from the handler models (ADR 0001, How the host reads it).
 /// </summary>
 /// <param name="Requests">The request pipelines, one per request type, ordered by request type.</param>
 /// <param name="Streams">The stream pipelines, one per stream request type, ordered by stream request type.</param>
@@ -1113,13 +1193,11 @@ internal sealed record HostPipeline(HostHandlerModel Handler, ImmutableArray<Pip
 ///     The notification pipelines, one per concrete notification type the host knows (whether or not anything runs for it), ordered by
 ///     notification type.
 /// </param>
-/// <param name="ConstructedHandlers">The handler classes with injected parameters, ordered by class, each once.</param>
 /// <param name="Cycles">The behaviors left in a <c>RunsAfter</c>/<c>RunsBefore</c> cycle, per pipeline and bucket (for KRX008).</param>
 internal sealed record HostComposition(
     ImmutableArray<HostPipeline> Requests,
     ImmutableArray<HostPipeline> Streams,
     ImmutableArray<NotificationPipeline> Notifications,
-    ImmutableArray<HostHandlerModel> ConstructedHandlers,
     ImmutableArray<ImmutableArray<PipelineBehaviorModel>> Cycles
 )
 {
@@ -1138,15 +1216,7 @@ internal sealed record HostComposition(
         var requests = Pipelines(all, HandlerKind.Request, cycles);
         var streams = Pipelines(all, HandlerKind.Stream, cycles);
         var notificationPipelines = NotificationPipelines(all, notifications, cycles);
-
-        var constructed = all
-                         .Where(static h => !h.StaticInvoker)
-                         .GroupBy(static h => h.HandlerClass, StringComparer.Ordinal)
-                         .Select(static g => g.First())
-                         .OrderBy(static h => h.HandlerClass, StringComparer.Ordinal)
-                         .ToImmutableArray();
-
-        return new(requests, streams, notificationPipelines, constructed, [.. cycles]);
+        return new(requests, streams, notificationPipelines, [.. cycles]);
     }
 
     /// <summary>

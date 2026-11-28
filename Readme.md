@@ -88,8 +88,9 @@ public partial class CreateOrder
 
 The generator writes the other half of `CreateOrder`: a constructor that takes `IOrderRepository`, a public `InvokeAsync` that runs the
 handler, and the metadata a host reads. In the host it writes `KeryxMediator` (with a typed `Send(CreateOrder.Command)` overload) and
-`AddKeryx()`, which registers the mediator and the handler class with generated factories. Behaviors are static methods, so there is
-nothing to register for them.
+`AddKeryx()`, which registers the mediator. Neither handlers nor behaviors are registered: the mediator's pipeline contexts resolve the
+services a handler injects and call it (in the host, through a generated static entry, so the mediator never constructs the class), and
+behaviors are static methods.
 
 ## Requests and handlers
 
@@ -120,7 +121,9 @@ A **handler** is a method named `Handle` (or `HandleAsync`) with the request as 
 
 The **handler class** contains exactly one handler ([KRX006](#krx006)), is `partial` all the way out, and is `public` outside a host
 ([KRX004](#krx004), with a code fix). It declares no instance constructor ([KRX007](#krx007)); Keryx generates one for the injected
-parameters. A `static partial` class is fine when nothing is injected ([KRX014](#krx014)). Group handlers with nested classes:
+parameters. A `static partial` class is fine when nothing is injected ([KRX014](#krx014)). A handler class must not implement
+`IDisposable` or `IAsyncDisposable` ([KRX025](#krx025)): handlers are stateless and Keryx never disposes one, so inject the disposable
+service instead. Group handlers with nested classes:
 
 ```csharp
 public static partial class Orders
@@ -171,8 +174,8 @@ from the test project, which makes it a host (a test project that targets `net10
 `ServiceCollection` and send through the mediator. A test host can reference the app host.
 
 A test swaps what a **request handler** does through the services it injects: it registers fakes for them (after the app's own
-registrations, if it reuses them: with Microsoft's container the last registration wins), and the handler's generated factory resolves
-the fakes.
+registrations, if it reuses them: with Microsoft's container the last registration wins), and the handler's pipeline context resolves
+the fakes. Registering the handler class itself changes nothing: the mediator does not resolve handler classes from the container.
 
 ```csharp
 var services = new ServiceCollection();
@@ -407,14 +410,17 @@ namespace:
   overload for each request and notification (`ValueTask<Guid> Send(CreateOrder.Command)`), which skips type dispatch;
 - `internal static IServiceCollection AddKeryx(this IServiceCollection services)`, which registers `KeryxMediator`, `IMediator`,
   `ISender` and `IPublisher` as transient factories that each create a mediator (`sp => new KeryxMediator(sp)`), a scoped state that
-  holds the scope's pipeline contexts, and every handler class with injected parameters (scoped), all with generated factories and
-  `TryAdd`. It registers no behavior types: behaviors are static.
+  holds the scope's pipeline contexts, with generated factories and `TryAdd`. It registers no handler class (owner decision 42) and no
+  behavior: a pipeline context resolves the services the host's own handler injects and calls the handler's generated
+  `internal static __keryx_InvokeAsync` (owner decision 44), so the mediator never constructs the host's handler classes; it constructs
+  a referenced (library) handler with `new`, once per scope and pipeline. A polymorphic notification handler gets one instance (or one
+  set of services) per publish pipeline.
 
 The mediator is **transient and small** (owner decision 46): it holds the scope's provider and, from its first call that needs a
 pipeline context, the **scope state**, which every mediator resolved in the scope shares. So each resolve is a new mediator, but the
 pipeline contexts are one per scope and pipeline, whichever mediator, or how many, the scope uses. Each pipeline context is
-created once per scope, lazily, and kept in the state; it holds the handler instance and the services the pipeline's behavior methods
-inject, and nothing creates a behavior instance. A request or stream pipeline with a static handler whose behaviors inject nothing, and a notification type whose
+created once per scope, lazily, and kept in the state; it holds the services the handler injects (or a referenced handler) and the
+services the pipeline's behavior methods inject, and nothing creates a behavior instance. A request or stream pipeline with a static handler whose behaviors inject nothing, and a notification type whose
 handlers are all static (or that has none) and whose behaviors inject nothing, have no context at all (open-questions OQ-65 and OQ-70):
 such a pipeline's entry calls the outermost behavior method, or the handler, or for a notification its static publish strategy, directly,
 and each `next` link holds only the request or notification. A scope that uses no context resolves no state and allocates only the 32 B
@@ -489,7 +495,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx012"></a>KRX012      | Error    | A request, stream request or notification is generic, nested in a generic type or a `ref struct`; or a handler class is generic.                             |
 | <a id="krx013"></a>KRX013      | Error    | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`. |
 | <a id="krx014"></a>KRX014      | Error    | A `static` handler class has injected parameters. Code fix: remove `static`.                                                                                  |
-| <a id="krx015"></a>KRX015      | Error    | A handler class declares a member named `InvokeAsync` or starting with `__keryx_`.                                                                            |
+| <a id="krx015"></a>KRX015      | Error    | A handler class declares a member named `InvokeAsync` or starting with `__keryx_` (the generated fields and static entry use it).                                                                            |
 | <a id="krx016"></a>KRX016      | Error    | Outside a host, a type a pipeline needs (request, response, notification, injected parameter type) or a behavior class or method is not public. In a host, one is narrower than `internal` or file-local. |
 | <a id="krx017"></a>KRX017      | Warning  | A handler's response type differs from the request's only in nullability.                                                                                     |
 | <a id="krx018"></a>KRX018      | Error    | A `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form. |
@@ -498,6 +504,7 @@ the IDE shows them with full-solution analysis on, and every build reports them.
 | <a id="krx022"></a>KRX022      | Error    | The project compiles with C# below 14. Remove the `LangVersion` setting or set it to 14 or later. The generators emit nothing until then.                     |
 | <a id="krx023"></a>KRX023      | Error    | A handler takes a request or stream request declared in another assembly. A request's handler lives in the request's own assembly; move the request or the handler. Notifications are not affected. |
 | <a id="krx024"></a>KRX024      | Error    | A request or stream request class or record is neither `sealed` nor abstract (or `closed`). Seal it, or make it an abstract base of sealed requests. Notifications are not affected. Code fix: make it `sealed`. |
+| <a id="krx025"></a>KRX025      | Error    | A handler class implements `IDisposable` or `IAsyncDisposable` (directly, or through a base type or an interface). Handlers are stateless and Keryx never disposes one: inject the disposable service instead. |
 | <a id="krx030"></a>KRX030      | Error    | A referenced request (including one declared in another host) has no handler in the host: a safety net for an internal handler of a referenced host, or a library built with KRX001 suppressed. The host's own requests are KRX001's. Reported without a location: change its severity in a `.globalconfig` or with `<NoWarn>`. |
 | <a id="krx031"></a>KRX031      | Error    | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. The host generator emits nothing there. Keryx defaults `KeryxHost` to `true` only on `net10.0` or later, so this means the project (or a file it imports) sets `<KeryxHost>true</KeryxHost>` itself ([Hosts](#hosts)). |
 | <a id="krx032"></a>KRX032      | Error    | A referenced assembly's manifest is newer than this Keryx understands. Upgrade Keryx in the host.                                                             |
@@ -532,10 +539,11 @@ the machine: another session there started some during the JIT run, so the five 
 nothing else was busy and run again when something started while it ran. "Decision 32's run" in the notes is the previous full run,
 earlier the same day at `1652e50` on the same machine, before decisions 34 to 36.
 
-The tables predate owner decision 46 (2026-11-28: a transient mediator over a scoped state), which changes Keryx's scope-per-request
-rows; the notes below give those rows as measured after it, on the same machine and settings (a run of the affected classes only,
-compared with a run of the code before it; open-questions, "The mediator is transient over a scoped state"). The next full run refreshes
-the tables.
+The tables predate owner decision 46 (2026-11-28: a transient mediator over a scoped state) and owner decisions 42 and 44 (2026-11-28:
+no handler registrations; the host's own handlers called through a static entry), which change Keryx's scope-per-request rows; the
+notes below give those rows as measured after each, on the same machine and settings (a run of the affected classes only, compared with
+a run of the code before it; open-questions, "The mediator is transient over a scoped state" and "Handlers are not registered"). The next
+full run refreshes the tables.
 
 ```
 BenchmarkDotNet v0.15.8, macOS 27.2.1 (26B131) [Darwin 27.2.0]
@@ -666,7 +674,10 @@ Requests:
   first call in a scope creates the mediator and the pipeline context, which resolves the handler's and the behaviors' services. Since
   decision 46 it also resolves the scope state (a 96 B object with a field per pipeline context, which takes the scope entry the scoped
   mediator had): 336 ns and 1,432 B typed, 339 ns and 1,432 B through `IMediator` (322 and 331 ns, 1,408 B, before it, in the same
-  session; the direct call 210 ns). The other
+  session; the direct call 210 ns). Since owner decisions 42 and 44 the handler is neither registered nor constructed (the context holds
+  the repository and calls the handler's static entry), so the scope's resolved services stay within their first arrays: 266 ns and
+  1,048 B typed, 270 ns and 1,048 B through `IMediator` (337 and 340 ns, 1,432 B, before it, in the same session; the direct call 212 ns,
+  ZeroAlloc.Mediator 247 ns and 928 B). The other
   libraries measure 252 to 412 ns; ZeroAlloc.Mediator, whose behaviors resolve their services from the provider on every call, is the
   fastest here (252 ns), while from the long-lived scope it measures 192 ns, behind Immediate.Handlers (142 ns) and Keryx (126 to
   133 ns).
@@ -725,7 +736,12 @@ Handlers that await the SQLite query, from the long-lived scope:
   (OQ-74), which the transient forwarders no longer add. Since decision 46 each of these scopes resolves the scope state (96 B) and a 32 B
   mediator, 24 B more than the 104 B scoped mediator they replace: typed, then `IMediator`, 174 and 180 ns with 584 B (1 handler), 579 and 566 ns with 1,360 B
   (5 handlers), 254 and 265 ns with 736 B and 639 and 646 ns with 1,512 B with the notification behavior (162 and 168 ns, 555 and 572 ns,
-  247 and 252 ns, 651 and 670 ns before it, in the same session; the direct call 124, 450, 200 and 520 ns).
+  247 and 252 ns, 651 and 670 ns before it, in the same session; the direct call 124, 450, 200 and 520 ns). Since owner decisions 42
+  and 44 no handler is registered or constructed (each context holds its handlers' services and calls their static entries): typed, then
+  `IMediator`, 143 and 147 ns with 560 B (1 handler), 405 and 402 ns with 880 B (5 handlers), 226 and 232 ns with 712 B and 481 and
+  486 ns with 1,032 B with the notification behavior (174 and 178 ns, 563 and 573 ns, 258 and 260 ns, 636 and 654 ns, and 584, 1,360,
+  736 and 1,512 B, before it, in the same session; the direct call 123, 446, 200 and 518 ns; ZeroAlloc.Mediator 128 ns and 456 B, 366 ns
+  and 840 B). With 5 handlers Keryx is now below the direct call (whose handlers are registered scoped).
 - SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
   handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 3% of its sequential
   publish. Keryx allocates what the direct call allocates in all four columns.

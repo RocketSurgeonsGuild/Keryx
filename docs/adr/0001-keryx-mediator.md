@@ -85,6 +85,12 @@ reverses decision 35's one-mediator-per-scope guarantee and changes decision 38'
 registration; Injected parameters; open-questions, "The mediator is transient over a scoped state"). The state keeps one field per
 pipeline with a context: the size-bounded slot cache decision 47 asked for measured slower on the long-lived scope, and the bound is
 OQ-78 (open).
+Amended a seventeenth time 2026-11-28 (owner decisions 42, 44 and 45, with 48): `AddKeryx()` registers no handler class. A pipeline
+context resolves the services the host's own handler injects and calls the handler's generated static entry `__keryx_InvokeAsync`, so
+the mediator never constructs the host's own handler classes, and constructs a referenced handler with `new` over the same resolutions;
+a handler class that implements `IDisposable` or `IAsyncDisposable` is the new error KRX025 (Handler classes; Example; Injected
+parameters; Generated pipeline shape; Mediator; DI registration; Diagnostics; open-questions, "Handlers are not registered"). An injected
+parameter named `InvokeAsync` collides with the static entry in a host, OQ-79 (open).
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -338,11 +344,12 @@ synchronous `void`.
   (KRX004). A handler class that has type parameters or is nested in a generic type is KRX012, because the host cannot construct it.
 - The class must not declare an instance constructor (KRX007). Static constructors are allowed. A record primary constructor counts as
   an instance constructor.
-- A handler class with injected parameters is constructed by the host's generated factory, so it must not be `abstract`, must not
-  declare or inherit `required` members (the generated constructor does not set them, and carries no `[SetsRequiredMembers]`), and must
-  derive from `object` or from a base type with an accessible parameterless instance constructor, because the generated constructor
-  calls `base()` (KRX007). The handler generator skips such a handler, and KRX001 and the host count its request as handled by a
-  malformed handler, so no KRX001 or KRX030 is added. A static invoker (no injected parameters) is never constructed, so none of this applies to it.
+- A handler class with injected parameters is constructed (with `new`, by the pipeline contexts of a host that references it, and by unit
+  tests), so it must not be `abstract`, must not declare or inherit `required` members (the generated constructor does not set them, and
+  carries no `[SetsRequiredMembers]`), and must derive from `object` or from a base type with an accessible parameterless instance
+  constructor, because the generated constructor calls `base()` (KRX007). The handler generator skips such a handler, and KRX001 and the
+  host count its request as handled by a malformed handler, so no KRX001 or KRX030 is added. A static invoker (no injected parameters) is
+  never constructed, so none of this applies to it.
 - Generated member accessibility follows the handler's signature alone: the constructor and `InvokeAsync` are `public` only when every
   type they mention is effectively public. Outside a host that is required (KRX016 covers injected parameter types and a polymorphic
   handler's parameter type too). In a host, a public handler class whose request, response or injected types are `internal` gets
@@ -356,7 +363,13 @@ synchronous `void`.
 - One handler per request type per application: one per assembly (KRX005), in the request's own assembly (KRX023). Notifications may have any number of handlers, including none.
 - Where the handler lives is a convention of the code fix only. Any class in the same assembly may host a request's handler.
 - A user member named `InvokeAsync` in a handler class is an error (KRX015). Generated fields use reserved names
-  (`__keryx_<parameterName>`).
+  (`__keryx_<parameterName>`), and so does the static entry a host gives its own handlers (`__keryx_InvokeAsync`; Example).
+- A handler class must not implement `IDisposable` or `IAsyncDisposable`, directly or through a base type or an interface (KRX025,
+  owner decision 45, 2026-11-28). Handlers are stateless, and nothing in Keryx disposes a handler object: a host never constructs its
+  own handler classes, and a referenced handler is constructed by a pipeline context that nothing disposes. A handler that needs a
+  disposable resource injects it into its handler method, and the container that created it disposes it. The handler generator skips
+  such a handler like any handler error; a host that reads a manifest entry whose class is disposable in the assemblies it resolves (a
+  base class from a contracts assembly built differently) leaves it out with KRX034.
 
 ### Example
 
@@ -403,8 +416,15 @@ public partial class CreateOrder
 - `[GeneratedCode]` goes on each generated member, never on the partial declaration of a user type. On a partial declaration it would
   apply to the whole type and mark the user's own `Handle` as generated code, hiding it from analyzers and coverage. Types Keryx owns
   outright (`KeryxMediator`, pipeline contexts, link structs, `KeryxServiceCollectionExtensions`) carry it at type level.
-- A handler with no injected parameters gets a `public static InvokeAsync` and no constructor. No-dependency handler classes are not
-  registered in DI.
+- A handler with no injected parameters gets a `public static InvokeAsync` and no constructor. No handler class is registered in DI
+  (owner decision 42, 2026-11-28).
+- **Static entry** (owner decision 44, 2026-11-28). In a host, a handler with injected parameters also gets
+  `internal static ValueTask<Guid> __keryx_InvokeAsync(CreateOrder.Command request, IOrderRepository __keryx_orders, CancellationToken cancellationToken)`:
+  the injected services as parameters, named like the fields, and the body of `InvokeAsync` (the same call of `Handle` and return
+  adaptation). The host's pipeline contexts hold the services and call it, so the mediator never constructs the host's own handler
+  classes or runs their constructors. It is `internal` whatever the class's accessibility and exists only in a host, so a library's
+  partials, public surface and manifest do not change; a host constructs a referenced handler with its public constructor instead (DI
+  registration).
 - `InvokeAsync` is supported public API: "runs the handler only, no behaviors". It has no `[EditorBrowsable(Never)]`. Unit tests call it
   directly (`new CreateOrder(fakeRepo).InvokeAsync(cmd, ct)`). Pipeline tests make the test project a host.
 - Return adaptation happens once, in `InvokeAsync`:
@@ -420,9 +440,9 @@ public partial class CreateOrder
 
 ### Injected parameters
 
-The host generates explicit factory registrations for handlers, and resolves behavior methods' injected parameters in generated
-pipeline contexts (see Behaviors). There is no reflection-based activation. The same rules apply to every injected parameter of a
-handler and of a behavior method.
+The host's generated pipeline contexts resolve the injected parameters of handlers and of behavior methods (see Generated pipeline
+shape); `AddKeryx()` registers neither (owner decision 42). There is no reflection-based activation. The same rules apply to every
+injected parameter of a handler and of a behavior method.
 
 | Parameter                            | Generated resolution                                                                                                                                                                                                                           |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -433,10 +453,10 @@ handler and of a behavior method.
 | `IMediator`, `ISender`, `IPublisher` | a new transient mediator over the same scope, which shares the scope's pipeline contexts (no cycle: handlers are resolved lazily)                                                                                                              |
 | `CancellationToken`                  | the call's token, never injected                                                                                                                                                                                                               |
 
-An injected service is stored in a field (of the handler class, or of the pipeline context for a behavior method), so an injected
-parameter that is a `ref struct` (`Span<T>`, `TypedReference`, any `ref struct`), a pointer or a function pointer is KRX013 and the
-handler or behavior is skipped. A parameter that breaks KRX013 for any reason does not count as an injected service, so a static
-handler class does not also get KRX014 and the base-constructor part of KRX007 does not apply.
+An injected service is stored in a field (of the pipeline context, and of the handler class when a referenced handler or a test constructs
+it), so an injected parameter that is a `ref struct` (`Span<T>`, `TypedReference`, any `ref struct`), a pointer or a function pointer is
+KRX013 and the handler or behavior is skipped. A parameter that breaks KRX013 for any reason does not count as an injected service, so a
+static handler class does not also get KRX014 and the base-constructor part of KRX007 does not apply.
 
 **Shared services in a pipeline context.** A pipeline context (request, stream or publish; see Generated pipeline shape) resolves each
 service its behavior methods inject **once**: it has one field per distinct service, not one per behavior parameter. A service is
@@ -462,14 +482,18 @@ only writes them out.
 optional, receives the scope's provider the context is built with: a pipeline context whose behavior methods inject it holds it in a
 dedicated `ServiceProvider` field, assigned from its constructor's provider and never resolved, outside the `ServiceN` fields, and shared by
 every behavior method that injects it; a context whose behaviors do not inject it has no such field. The rule is shared with handlers:
-wherever a handler's injected `IServiceProvider` is held, it is the provider directly (its generated factory passes the scope's provider
-to the constructor, and the handler's own field holds it), never a resolved or numbered service. A keyed `IServiceProvider`
-(`[FromKeyedServices(key)] IServiceProvider`) is an ordinary keyed service. `IServiceScope` has no special case: it is not injectable
-through DI, and an injected one is an ordinary resolved service.
+wherever a handler's injected `IServiceProvider` is held, it is the provider directly (the context's field for that handler service holds
+the scope's provider and passes it to the static entry, or to a referenced handler's constructor), never a resolved or numbered service. A
+keyed `IServiceProvider` (`[FromKeyedServices(key)] IServiceProvider`) is an ordinary keyed service. `IServiceScope` has no special case: it
+is not injectable through DI, and an injected one is an ordinary resolved service.
 
 **Consequence:** a transient service that several behavior methods of one pipeline inject is **one instance per pipeline context**, that
 is per scope and pipeline, not one per behavior method. Behaviors that need separate instances inject a factory (or
-`IServiceProvider`) and create them.
+`IServiceProvider`) and create them. A handler's injected services are resolved by the pipeline context too, once per scope and
+pipeline (owner decisions 42 and 44): its transient services behave as scoped within the pipeline, and a polymorphic notification handler
+that several publish pipelines run resolves them once per pipeline. Until decision 43 (a later step) the handler's services are kept
+apart from the behaviors' `ServiceN` fields (`HandlerServiceN`, `Handler{i}ServiceN`), so a service that both inject is resolved twice
+per context.
 
 Keyed services need `Microsoft.Extensions.DependencyInjection.Abstractions` 8.0 or newer, which the `Keryx` package brings on `net10.0`
 and `netstandard2.0` and the shared framework provides on `net11.0` (see Package and assemblies).
@@ -527,7 +551,7 @@ assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placemen
 | KRX012 | Error                | analyzer                            | A request, stream request or notification type has type parameters, is nested in a generic type, or is a `ref struct`; or a handler class has type parameters or is nested in a generic type.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | KRX013 | Error                | analyzer                            | A handler or behavior method parameter is `ref`, `in`, `out` or `params`, an injected parameter is a ref struct or a pointer, or there is more than one `CancellationToken`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | KRX014 | Error                | analyzer                            | `static` handler class has injected parameters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| KRX015 | Error                | analyzer                            | Handler class declares a member named `InvokeAsync` or a `__keryx_` member (generated fields and the static entry use the prefix).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | KRX016 | Error                | analyzer                            | Outside a host, a request, response (including generic arguments), notification, behavior class or behavior method that a pipeline needs, or a type the generated constructor or invoker mentions (injected parameter types, a polymorphic handler's parameter type), is not effectively public. In a host, such a type or behavior is narrower than `internal` ("must be at least internal"); file-local types count as narrower than `internal`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | KRX017 | Warning              | analyzer                            | Handler response type differs from the request's `TResponse` only in nullability.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | KRX018 | Error                | analyzer                            | `[FromKeyedServices]` key on a handler or behavior method parameter is not a compile-time constant, or uses the parameterless form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -537,6 +561,7 @@ assemblies), KRX030–KRX039 host-only rules, KRX040–KRX049 attribute placemen
 | KRX022 | Error                | analyzer                            | The project compiles with a C# language version below 14 (Keryx needs C# 14 or later; see Package and assemblies). Reported once per compilation (compilation end), in every project that references Keryx; the generators emit nothing there. Fix: remove the `LangVersion` setting (the package then defaults it to `latest`) or set it to 14 or later.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | KRX023 | Error                | analyzer                            | A handler takes a request or stream request type declared in another assembly. A request's one handler lives in the assembly that declares it, so that assembly checks it is handled (KRX001) and every host composes the same handler. Reported on the handler's request parameter, in libraries and hosts alike; the generators skip the handler, and a host counts it as handling its request (no KRX030 on top). Notifications are not affected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | KRX024 | Error                | analyzer                            | A request or stream request class or record is neither `sealed` nor abstract (or closed). A request hierarchy is an abstract or closed base with sealed cases; generic `Send` and `Stream` test each sealed type with a type pattern. Reported on the type, in libraries and hosts alike. Notifications are not affected. Code fix: make it `sealed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| KRX025 | Error                | analyzer                            | A handler class implements `IDisposable` or `IAsyncDisposable`, directly or through a base type or an interface. Handlers are stateless and Keryx never disposes a handler object; inject the disposable service instead. Reported on the class, in libraries and hosts alike; the handler generator skips the handler.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | KRX030 | Error (configurable) | host                                | A **referenced** request or stream request type has no handler anywhere in the composed set: a safety net, since each assembly checks its own requests (KRX001). Covers request types in referenced assemblies (from the scan), including types declared in another host; it catches an internal handler of a referenced host, or a library built with KRX001 suppressed. The host's own request types are KRX001's. Reported without a location (a referenced type has no source location), so its severity is set for the whole host: a global AnalyzerConfig file (`.globalconfig`, `is_global = true`), `<NoWarn>` or `<WarningsAsErrors>`, not a per-file `.editorconfig` section.                                                                                                                                                                                                                                                                                                                                                                          |
 | KRX031 | Error                | host                                | A host (`KeryxHost` is `true`) targets a framework older than `net10.0`. `KeryxHost` defaults to `true` only on `net10.0` or newer (Opting in), so this is a project that sets it to `true` itself; the message says to target `net10.0` or newer or stop setting `KeryxHost` to `true`. Reported without a location. The host generator emits nothing there (KRX030 is still reported).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | KRX032 | Error                | host                                | A referenced assembly's manifest has a newer `FormatVersion` than this Keryx understands. The message says to upgrade Keryx in this project.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -779,12 +804,14 @@ notification type that does not match is KRX009.
 
 For each pipeline the host emits:
 
-- a sealed **pipeline context** class, created lazily once per scope, that holds the handler instance (for a publish pipeline, those of
-  the notification type's handlers whose invokers are not static, and the publish strategy that runs them) and each distinct service the
+- a sealed **pipeline context** class, created lazily once per scope, that holds, for a handler whose invoker is not static, the
+  services it injects (`HandlerService0`, ... for the host's own handler, which it calls through the handler's static entry) or the
+  referenced handler, constructed with `new` (`Handler`); for a publish pipeline the same per handler (`Handler{i}Service{j}`,
+  `Handler{i}`) and the publish strategy that runs them; and each distinct service the
   pipeline's behavior methods inject, once (one `ServiceN` field per service type and key, numbered in a stable order and shared by every
   behavior method that injects it; see Injected parameters), resolved in its constructor; when a behavior method injects the unkeyed
   `IServiceProvider`, also a `ServiceProvider` field that holds the provider the context is built with (OQ-63). Fields are declared in that
-  order: handler(s), `ServiceProvider`, then `Service0`, `Service1`, .... Only a pipeline that resolves or holds something has one (decided 2026-11-26, OQ-65;
+  order: the handler's (or handlers') fields, `ServiceProvider`, then `Service0`, `Service1`, .... Only a pipeline that resolves or holds something has one (decided 2026-11-26, OQ-65;
   for publish pipelines with handlers, 2026-11-27, OQ-70): a request or stream pipeline whose handler's invoker is static and whose
   behaviors inject nothing has no context, nor does a publish pipeline whose handlers' invokers are all static (or that has no handlers)
   and whose behaviors inject nothing. A behavior that injects only the unkeyed `IServiceProvider` gives its pipeline a context. Such a pipeline has no `__pipelineN` (`__streamPipelineN`, `__notificationN`) field in the scope state and no
@@ -807,10 +834,11 @@ For each pipeline the host emits:
 
     Its `InvokeAsync(ct)` calls the behavior method at position k+1 with a target-typed `new(...)`, the next link, as `next` (the link type
     stays the explicit type argument for `TNext`) and that method's injected services read from the context; the last link calls the
-    handler's `InvokeAsync` (in a publish pipeline, it runs the handlers under the publish strategy). The entry of the pipeline calls the
+    handler (its static `InvokeAsync`, the host's own handler's `__keryx_InvokeAsync` with the services the context holds for it, or a
+    referenced handler's `InvokeAsync`; in a publish pipeline, it runs the handlers under the publish strategy). The entry of the pipeline calls the
     outermost behavior method the same way, after reading the context only when that call reads or passes it on. A link takes exactly the
-    parameters it reads or passes on (decided 2026-11-26, OQ-65): the context when its call injects a service, when the handler is resolved
-    into the context (its last link) or when the publish strategy runs on the context (the last link of a publish pipeline with a
+    parameters it reads or passes on (decided 2026-11-26, OQ-65): the context when its call injects a service, when the context holds
+    the handler or its services (its last link) or when the publish strategy runs on the context (the last link of a publish pipeline with a
     context), or when a later link takes the context; the message
     (`notification` in a publish pipeline) whenever anything after it runs, which is always except in the last link of a publish pipeline
     without handlers. So a link is `LinkK(__PipelineN pipeline, TRequest request)`, `LinkK(TRequest request)` (`new(request)`) or, as the
@@ -1118,16 +1146,17 @@ internal sealed partial class KeryxMediator : IMediator
   mediator holds two references: the provider that resolved it and, from its first call that needs a pipeline context, the scope state
   (`KeryxMediator.__KeryxScopeState`, registered scoped), which it resolves from that provider once (`__ResolveState()`, then
   `Volatile.Write` into its `__state` field). The state holds one lazily created pipeline context per pipeline that resolves something
-  (its handler, the handlers of a notification type whose invokers are not static, or the injected services of its behaviors), one
+  (its handler's services or a referenced handler, the same for the handlers of a notification type whose invokers are not static, or
+  the injected services of its behaviors), one
   `object?` field each; any other pipeline has no context and no field (Generated pipeline shape, OQ-65, OQ-70), and a host without any
   context has no state. Every mediator resolved in a scope shares the scope's state and so its contexts: mediator identity is per
   resolve, contexts are per scope and pipeline. After the first call in a scope, nothing is resolved or allocated per call; a mediator
   resolved later in the same scope resolves the state once more (the container returns the same scoped instance). A scope that uses no
   context allocates the 32 B mediator and nothing else for Keryx. Singletons and hosted services that need the mediator create a scope
   with `IServiceScopeFactory`; a singleton that captures one gets a mediator over the root provider (DI registration). A handler's
-  transient dependencies behave as scoped, because the handler is cached per scope, and so do a behavior method's, because its injected
-  services are cached in the pipeline context (once per scope and pipeline, one instance for every behavior method of the pipeline that
-  injects the service).
+  transient dependencies behave as scoped, because the pipeline context holds them (or the referenced handler it constructed), and so do
+  a behavior method's, because its injected services are cached in the pipeline context (once per scope and pipeline, one instance for
+  every behavior method of the pipeline that injects the service).
 - **Concurrent first use.** One scope can use its mediators concurrently (parallel publish, handlers that send in parallel, user
   `Task.WhenAll` over `Send`, several mediator instances of the scope). A pipeline reads its context through an inlined accessor,
   `__GetPipeline17()`: `var state = Volatile.Read(ref __state) ?? __ResolveState();` then
@@ -1220,8 +1249,19 @@ internal static class KeryxServiceCollectionExtensions
   result only when it is disposable, and `KeryxMediator` is not, so resolving a mediator adds no entry to the scope's resolved services
   (whose storage grows when the count crosses a capacity boundary), whichever service type and however many times;
 - `KeryxMediator.__KeryxScopeState`, scoped, when a pipeline has a context (Mediator): the scope's one Keryx entry, resolved by a
-  mediator's first call that needs a context, and not disposable either;
-- every handler class that has injected parameters, scoped.
+  mediator's first call that needs a context, and not disposable either.
+
+**Handler classes are not registered** (owner decision 42, 2026-11-28; before it, every handler class with injected parameters was
+registered scoped and the contexts resolved it). A pipeline context resolves what a handler injects itself: for the host's own handler
+it holds the services and calls the handler's static entry (owner decision 44), so no handler object exists; for a referenced handler
+it constructs one, `new H(<resolutions>)`, with the creation expression and resolution rules the registration's factory had (the
+generated public constructor; no manifest or `FormatVersion` change). Accepted consequences: the mediator's handler is not a DI instance
+(resolving a handler class from the container fails unless the application registers it); a polymorphic notification handler that
+several publish pipelines run gets one instance (or one set of services) per context; and a registration of a handler class, before or
+after `AddKeryx()`, no longer affects the mediator. To change what a handler does, register other implementations of the services it
+injects (Hosts, `ExcludeHandler`). A scope that uses a context no longer adds an entry per handler class to the container's resolved
+services, and constructs no own handler: per scope in the benchmark host, a request with behaviors allocates 384 B less and a publish to
+five handlers 480 B less (open-questions, "Handlers are not registered").
 
 A mediator resolved from the root provider resolves the state there. With `ValidateScopes` that throws `InvalidOperationException`
 ("Cannot resolve scoped service '…KeryxMediator+__KeryxScopeState' from root provider") at the mediator's first call that needs a
@@ -1343,7 +1383,7 @@ assemblies strip private members). That is why the generator copies everything t
   error KRX039, and the handler stays in the host. A request's one handler lives in its request's assembly, and a host's handler of a
   referenced request is KRX023 like anywhere else, so a host never replaces a request handler. A test changes what a request handler does
   through the services it injects: it registers other implementations of them in the service collection it builds the mediator from
-  (with Microsoft's container the last registration of a service wins), so the handler's generated factory resolves the test's. A test
+  (with Microsoft's container the last registration of a service wins), so the handler's pipeline context resolves the test's. A test
   host that cannot resolve a referenced request handler's types references the assembly that declares them, as the application does.
 - The host does not check that a request has one handler across assemblies (open-questions OQ-60). Since KRX023 a request's handler lives
   in the request's assembly, so generated manifests cannot make two assemblies handle one request and the host check (KRX005 across
@@ -1447,8 +1487,8 @@ These replace the draft's "minimal allocations" and the handoff's "must not allo
   provided the behaviors' own work completes synchronously. Holds for the typed overloads and, for class requests, the generic entry point,
   for value-type and reference-type responses. A struct request sent through `ISender` is boxed at the call site (KRX021); that box is not
   counted against Keryx. Behaviors are static methods, so no behavior instance is allocated, per scope or per call; the pipeline context,
-  created once per scope and pipeline, holds the handler and the behaviors' injected services, and a pipeline that resolves nothing has
-  none (open-questions OQ-65).
+  created once per scope and pipeline, holds the handler's services (or a referenced handler) and the behaviors' injected services, and
+  a pipeline that resolves nothing has none (open-questions OQ-65).
 - **Send, yielding handler:** Keryx-generated code allocates nothing beyond the state-machine boxes of async methods the user wrote
   (handler and behaviors). The only generated async path is `UnitAdapter.ToUnit` (non-generic `ValueTask`/`Task` → `ValueTask<Unit>`). It
   uses `PoolingAsyncValueTaskMethodBuilder` on net10+ and must add 0 bytes in steady state; a benchmark checks it. Typed `IRequest`
@@ -1836,6 +1876,11 @@ CI publishes the sample host with `PublishAot=true`, treats every IL2xxx/IL3xxx 
 ## Consequences
 
 - Handler classes must be `partial` (and `public` outside a host), and users cannot write instance constructors on them.
+- Handler classes are not registered in DI and cannot be disposable (KRX025; owner decisions 42, 44 and 45): the mediator never
+  constructs a host's own handler classes (their pipelines call a generated static entry with the services the context resolved) and
+  constructs a referenced handler once per scope and pipeline, so a polymorphic notification handler gets one instance per publish
+  pipeline, and registering a handler class does not change what the mediator runs; a test or an application swaps the services a
+  handler injects instead.
 - A request's handler lives in the request's own assembly (KRX023): requests cannot be shared through a contracts assembly and handled
   elsewhere, and a host cannot exclude or replace a request handler (KRX039, open-questions OQ-59); a test swaps what a request handler
   does through the services it injects. Notification handlers can be excluded and replaced.

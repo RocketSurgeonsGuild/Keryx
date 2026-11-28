@@ -58,5 +58,13 @@ namespace Sample
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> InvokeAsync(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
             new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
+
+        /// <summary>
+        ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
+        ///     context resolved, so they never construct this class. No behaviors run.
+        /// </summary>
+        [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
+        internal static global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __keryx_InvokeAsync(global::Sample.Lookup request, global::Sample.IGreeter __keryx_greeter, global::Sample.IGreeter? __keryx_backup, global::Sample.IClock? __keryx_clock, int __keryx_retries, int? __keryx_limit, global::Sample.Mode __keryx_mode, int __keryx_keyed, long? __keryx_required, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>>(Handle(request, __keryx_greeter, __keryx_backup, __keryx_clock, __keryx_retries, __keryx_limit, __keryx_mode, __keryx_keyed, __keryx_required));
     }
 }

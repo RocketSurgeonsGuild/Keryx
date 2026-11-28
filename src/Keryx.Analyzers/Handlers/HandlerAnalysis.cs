@@ -92,6 +92,13 @@ internal static class HandlerAnalysis
     public const string ReservedFieldPrefix = "__keryx_";
 
     /// <summary>
+    ///     The static entry the handler generator adds to a host's own handler with injected parameters (owner decision 44): the invoker with
+    ///     the injected services as parameters, which the host's pipelines call instead of constructing the class. Reserved by KRX015 through
+    ///     <see cref="ReservedFieldPrefix" />.
+    /// </summary>
+    public const string StaticEntryName = ReservedFieldPrefix + InvokerName;
+
+    /// <summary>
     ///     Whether a method is a handler candidate (ADR 0001, Which methods are handler candidates). Every other method is ignored.
     /// </summary>
     public static bool IsCandidate(IMethodSymbol method, KeryxSymbols symbols)
@@ -359,7 +366,7 @@ internal static class HandlerAnalysis
 
     /// <summary>
     ///     The class-level rules for a type with handler candidates: KRX004 (not a class), KRX006, KRX007, KRX012 (handler class), KRX014,
-    ///     KRX015.
+    ///     KRX015, KRX025.
     /// </summary>
     public static void AnalyzeClass(INamedTypeSymbol type, IReadOnlyList<HandlerSignature> handlers, KeryxSymbols symbols, IssueCollector issues)
     {
@@ -431,7 +438,8 @@ internal static class HandlerAnalysis
 
         if (!type.IsStatic && type.TypeKind == TypeKind.Class && injected.Length > 0)
         {
-            // OQ-34: the host constructs a handler class with injected parameters with `new` in a generated factory.
+            // OQ-34: a host's pipeline context constructs a referenced handler class with injected parameters with `new` (owner decision
+            // 42), and unit tests construct any handler class; the host calls its own through the static entry instead (owner decision 44).
             if (type.IsAbstract)
             {
                 issues.Add(
@@ -451,6 +459,12 @@ internal static class HandlerAnalysis
                     $"has injected parameters, so a host constructs it, but it has required members ({string.Join(", ", required.Select(static m => $"'{m}'"))}) that the generated constructor does not set"
                 );
             }
+        }
+
+        // KRX025: handlers are stateless and Keryx never disposes a handler object (owner decision 45).
+        if (DisposableInterface(type) is { } disposable)
+        {
+            issues.Add(Descriptors.DisposableHandlerClass, typeLocation, typeName, disposable.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
         }
 
         foreach (var member in type.GetMembers())
@@ -551,6 +565,16 @@ internal static class HandlerAnalysis
         AnalyzeClass(type, [signature], symbols, issues);
         return signature;
     }
+
+    /// <summary>
+    ///     <c>System.IDisposable</c> or <c>System.IAsyncDisposable</c> when the type implements it, directly or through a base type or another
+    ///     interface (KRX025), else <see langword="null" />.
+    /// </summary>
+    public static INamedTypeSymbol? DisposableInterface(INamedTypeSymbol type) =>
+        type.AllInterfaces.FirstOrDefault(
+            static i => i.SpecialType == SpecialType.System_IDisposable
+             || i is { Name: "IAsyncDisposable", Arity: 0, ContainingType: null, ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
+        );
 
     /// <summary>The required fields and properties of a type and its base types, by name, nearest first.</summary>
     private static List<string> RequiredMembers(INamedTypeSymbol type)

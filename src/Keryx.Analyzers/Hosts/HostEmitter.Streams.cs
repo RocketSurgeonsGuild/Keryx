@@ -81,8 +81,8 @@ internal static partial class HostEmitter
         );
 
     /// <summary>
-    ///     The pipeline context of one stream request: its handler (unless the invoker is static) and the injected services of its stream
-    ///     behaviors, resolved once per scope, and one flat link struct per stream behavior (<c>StreamLink{k}</c>, the <c>next</c> of behavior
+    ///     The pipeline context of one stream request: its handler's services or its handler (unless the invoker is static) and the injected
+    ///     services of its stream behaviors, resolved once per scope, and one flat link struct per stream behavior (<c>StreamLink{k}</c>, the <c>next</c> of behavior
     ///     <c>k</c>). A stream pipeline with nothing to resolve has no context: its links are nested in a static class and take only the
     ///     request.
     /// </summary>

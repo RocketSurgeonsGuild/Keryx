@@ -100,7 +100,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one). With injected parameters a host constructs the class, so it is not abstract, it and its base types declare no required members, and its base type has an accessible parameterless constructor.",
+        description: "Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one). With injected parameters the class is constructed (by a host that references it, and by unit tests), so it is not abstract, it and its base types declare no required members, and its base type has an accessible parameterless constructor.",
         helpLinkUri: HelpLinkBase + "krx007"
     );
 
@@ -207,7 +207,7 @@ internal static class Descriptors
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator and AddKeryx() use them from outside their containing types.",
+        description: "Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator uses them from outside their containing types.",
         helpLinkUri: HelpLinkBase + "krx016"
     );
 
@@ -287,6 +287,17 @@ internal static class Descriptors
         isEnabledByDefault: true,
         description: "Every non-abstract request and stream request type is sealed (a struct always is). An abstract or closed (C# 15) type may implement a request interface as the base of sealed request types; it is never a request itself, needs no handler and cannot have one (KRX003). Generic Send and Stream test each sealed request type with a type pattern, which the JIT compiles to one method-table compare. Notifications are not affected.",
         helpLinkUri: HelpLinkBase + "krx024"
+    );
+
+    public static readonly DiagnosticDescriptor DisposableHandlerClass = new(
+        "KRX025",
+        "Handler class is disposable",
+        "Handler class '{0}' implements '{1}'; a handler class is stateless and is never disposed, so inject the disposable service instead",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Keryx never disposes a handler object: a host calls its own handlers through a static entry without constructing them, and constructs a referenced handler with new in a pipeline context that nothing disposes. A handler class that implements IDisposable or IAsyncDisposable, directly or through a base type or interface, would leak what it holds. Inject the disposable service into the handler method instead; the container that created it disposes it.",
+        helpLinkUri: HelpLinkBase + "krx025"
     );
 
     public static readonly DiagnosticDescriptor UnhandledRequestInHost = new(

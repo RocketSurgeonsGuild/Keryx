@@ -487,16 +487,162 @@ public partial class SharedServiceTests : HostTest
             cancellationToken
         );
 
-        // The handler's factory passes the scope's provider itself to the unkeyed parameter and resolves the keyed one; the handler holds
-        // what it receives. No behavior injects IServiceProvider, so the pipeline context holds only the handler.
-        var addKeryx = TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName);
-        await Assert.That(addKeryx).Contains(
-            "static serviceProvider => new global::Sample.ProbeHandler(serviceProvider, global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\"))"
-        );
+        // The pipeline context holds the scope's provider itself for the unkeyed parameter and resolves the keyed one, and passes both to the
+        // handler's static entry (owner decision 44). No behavior injects IServiceProvider, so the context has no ServiceProvider field and
+        // no shared services; AddKeryx() registers no handler (owner decision 42).
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).Contains("HandlerService0 = serviceProvider;");
+        await Assert.That(mediator).Contains(
+            "HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\");"
+        );
+        await Assert.That(mediator).Contains("global::Sample.ProbeHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, cancellationToken)");
         await Assert.That(mediator).DoesNotContain("ServiceProvider ServiceProvider;");
         await Assert.That(Fields(mediator)).IsEmpty();
+        await Assert.That(TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("ProbeHandler");
     }
+
+    [Test]
+    public async Task Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable(CancellationToken cancellationToken)
+    {
+        // A context constructor resolves its behaviors' shared services and each handler's injected parameters in one body, so an optional
+        // value type of a behavior, of the host's own handlers (static entries) and of a referenced handler (constructed with new) each
+        // declares its own __valueN: the shared services take the first numbers, the handlers continue after them in order. A repeated
+        // name would be CS0128 in generated code.
+        var library = await CompileLibraryAsync("Values", ValuesLibrary, cancellationToken);
+        var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + ValuesHost).Build().GenerateAsync(cancellationToken);
+        result.AssertCompilationWasSuccessful();
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
+
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        // The Ping context: the behavior's int? limit is shared service 0, the own handler's int retries continues at 1.
+        await Assert.That(mediator).Contains("Service0 = serviceProvider.GetService(typeof(int?)) is int __value0 ? (int?)__value0 : null;");
+        await Assert.That(mediator).Contains("HandlerService0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 3;");
+        // The Noted context: two own handlers, then the referenced one, numbered in handler order from 0 (no behaviors).
+        await Assert.That(mediator).Contains("Handler0Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? __value0 : 3;");
+        await Assert.That(mediator).Contains("Handler1Service0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 4;");
+        await Assert.That(mediator).Contains("Handler2 = new global::Values.NotedHandler(serviceProvider.GetService(typeof(long?)) is long __value2 ? (long?)__value2 : null);");
+        await Assert.That(mediator).Contains("the services its handlers inject, its referenced handlers and the injected services of its behaviors");
+        await VerifyHost(result);
+
+        // Each call site applies its own default when nothing is registered, and every one receives the registered value otherwise.
+        var host = result.Assembly!;
+        await Assert.That(await SendAndPublish(host, library.Assembly!, null, cancellationToken))
+                    .IsEquivalentTo(["limit none", "own a 3", "own b 4", "referenced none", "ping 3"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(
+                         await SendAndPublish(
+                             host,
+                             library.Assembly!,
+                             static services => services.AddSingleton(typeof(int), 9).AddSingleton(typeof(int?), 7).AddSingleton(typeof(long?), 5L),
+                             cancellationToken
+                         )
+                     )
+                    .IsEquivalentTo(["limit 7", "own a 9", "own b 9", "referenced 5", "ping 9"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    /// <summary>
+    ///     Sends <c>Ping</c> and publishes <c>Values.Noted</c> once in a new scope of a provider with <paramref name="configure" />, and returns
+    ///     what the behavior and the handlers logged, then the response.
+    /// </summary>
+    private static async Task<string[]> SendAndPublish(
+        System.Reflection.Assembly host,
+        System.Reflection.Assembly library,
+        Action<IServiceCollection>? configure,
+        CancellationToken cancellationToken
+    )
+    {
+        _ = Seen(host);
+        await using var provider = BuildProvider(host, configure);
+        await using var scope = provider.CreateAsyncScope();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var response = await mediator.Send((IRequest<string>)Create(host, "Sample.Ping"), cancellationToken);
+        await mediator.Publish((INotification)Create(library, "Values.Noted", log), cancellationToken);
+        return [.. Seen(host), .. log, response];
+    }
+
+    /// <summary>A library with the <c>Noted</c> notification and a handler of it that injects an optional <c>long?</c>.</summary>
+    private const string ValuesLibrary = """
+        namespace Values;
+
+        using System.Collections.Concurrent;
+        using System.Globalization;
+        using System.Threading.Tasks;
+        using Keryx;
+
+        public sealed record Noted(ConcurrentQueue<string> Log) : INotification;
+
+        public partial class NotedHandler
+        {
+            private static ValueTask Handle(Noted notification, long? x = null)
+            {
+                notification.Log.Enqueue("referenced " + (x?.ToString(CultureInfo.InvariantCulture) ?? "none"));
+                return default;
+            }
+        }
+        """;
+
+    /// <summary>
+    ///     A host whose <c>Ping</c> has a behavior that injects an optional <c>int?</c> and a handler that injects an <c>int</c> with a
+    ///     default, and two own handlers of <c>Values.Noted</c> that inject an <c>int</c> with different defaults.
+    /// </summary>
+    private const string ValuesHost = """
+        namespace Sample;
+
+        using System.Collections.Concurrent;
+        using System.Globalization;
+
+        public static class Seen
+        {
+            private static readonly ConcurrentQueue<string> Lines = new();
+
+            public static void Write(string line) => Lines.Enqueue(line);
+
+            public static string[] Take()
+            {
+                var lines = Lines.ToArray();
+                Lines.Clear();
+                return lines;
+            }
+        }
+
+        [RequestBehavior]
+        public static class Limit
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, CancellationToken cancellationToken, int? limit = null)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Seen.Write("limit " + (limit?.ToString(CultureInfo.InvariantCulture) ?? "none"));
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        public sealed record Ping : IRequest<string>;
+
+        public partial class PingHandler
+        {
+            [Behavior(typeof(Limit))]
+            private static string Handle(Ping request, int retries = 3) => "ping " + retries.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public partial class OnNotedA
+        {
+            private static ValueTask Handle(Values.Noted notification, int retries = 3)
+            {
+                notification.Log.Enqueue("own a " + retries.ToString(CultureInfo.InvariantCulture));
+                return default;
+            }
+        }
+
+        public partial class OnNotedB
+        {
+            private static ValueTask Handle(Values.Noted notification, int retries = 4)
+            {
+                notification.Log.Enqueue("own b " + retries.ToString(CultureInfo.InvariantCulture));
+                return default;
+            }
+        }
+        """;
 
     /// <summary>
     ///     A request, a stream request and a notification type, each with four behaviors (<c>Order</c> 1 to 4) that all inject <c>IClock</c>,

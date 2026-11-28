@@ -27,5 +27,13 @@ namespace Sample
         [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
         public global::System.Threading.Tasks.ValueTask<string?> InvokeAsync(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken) =>
             new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
+
+        /// <summary>
+        ///     Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their
+        ///     context resolved, so they never construct this class. No behaviors run.
+        /// </summary>
+        [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
+        internal static global::System.Threading.Tasks.ValueTask<string?> __keryx_InvokeAsync(global::Sample.Animal request, global::System.IServiceProvider __keryx_services, global::Keryx.IMediator __keryx_mediator, global::System.Threading.CancellationToken cancellationToken) =>
+            new global::System.Threading.Tasks.ValueTask<string?>(Handle(request, __keryx_services, __keryx_mediator));
     }
 }

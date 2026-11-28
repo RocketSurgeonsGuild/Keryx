@@ -222,6 +222,7 @@ internal static class HostModelFactory
             messageType.IsValueType,
             model.ResponseType,
             model.StaticInvoker,
+            !model.StaticInvoker,
             services.ToImmutable(),
             behaviors,
             usedExclusions,
@@ -237,7 +238,8 @@ internal static class HostModelFactory
     ///     come from <c>[KeryxHandler]</c>, its response type from the request type, its injected parameters from the generated public
     ///     constructor (which copies <c>[FromKeyedServices]</c> and default values). <see langword="null" />, with the reason in
     ///     <paramref name="problem" />, when the entry does not describe a handler the host can compose (a kind that does not fit the target as
-    ///     the host resolves it, or not exactly one public constructor for a handler with injected parameters); the host reports it (KRX034).
+    ///     the host resolves it, a class that implements <c>IDisposable</c> or <c>IAsyncDisposable</c> (KRX025), or not exactly one public
+    ///     constructor for a handler with injected parameters, which the host's pipeline contexts call); the host reports it (KRX034).
     /// </summary>
     public static HostHandlerModel? CreateReferencedHandler(
         INamedTypeSymbol handlerClass,
@@ -261,6 +263,14 @@ internal static class HostModelFactory
         if (!fits)
         {
             problem = $"the manifest describes {KindText(kind)} of '{target.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}', but that type is not {MessageText(kind)} this host can dispatch";
+            return null;
+        }
+
+        // KRX025 in the library keeps a disposable handler out of its manifest; this keeps one from an entry written otherwise out of the
+        // host, whose pipeline contexts would construct it and never dispose it (owner decision 45).
+        if (HandlerAnalysis.DisposableInterface(handlerClass) is { } disposable)
+        {
+            problem = $"the class implements '{disposable.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)}', which a handler class may not (KRX025)";
             return null;
         }
 
@@ -292,6 +302,7 @@ internal static class HostModelFactory
             target.IsValueType,
             responseType is null ? null : CSharpText.Type(responseType),
             staticInvoker,
+            false,
             services.ToImmutable(),
             behaviors,
             usedExclusions,

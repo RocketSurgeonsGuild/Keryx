@@ -288,10 +288,10 @@ public class CodeWriterTests : HostTest
         await Assert.That(mediator).Contains(
             "public global::System.Threading.Tasks.ValueTask Publish<TNotification>(TNotification notification, global::System.Threading.CancellationToken cancellationToken = default)\n            where TNotification : global::Keryx.INotification\n        {\n"
         );
-        await Assert.That(addKeryx).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, typeof(global::System.Collections.Generic.Dictionary<,>))");
-        await Assert.That(addKeryx).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"a \\\"b\\\"\\\\c\\n\")");
-        await Assert.That(addKeryx).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, '\\'')");
-        await Assert.That(addKeryx).Contains("serviceProvider.GetService(typeof(int?)) is int __value3 ? (int?)__value3 : null");
+        await Assert.That(mediator).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, typeof(global::System.Collections.Generic.Dictionary<,>))");
+        await Assert.That(mediator).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, \"a \\\"b\\\"\\\\c\\n\")");
+        await Assert.That(mediator).Contains("GetRequiredKeyedService<global::Sample.IClock>(serviceProvider, '\\'')");
+        await Assert.That(mediator).Contains("serviceProvider.GetService(typeof(int?)) is int __value3 ? (int?)__value3 : null");
         await Assert.That(handler).Contains("[global::Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute(typeof(global::System.Collections.Generic.Dictionary<,>))] global::Sample.IClock unbound,");
         await Assert.That(handler).Contains("            int? @class = null)\n");
         await Assert.That(handler).Contains("            __keryx_class = @class;\n");

@@ -17,6 +17,12 @@ namespace Keryx.Analyzers.Hosts;
 /// <param name="MessageIsValueType">Whether the message type is a struct (unboxed on the generic path, KRX021).</param>
 /// <param name="ResponseType">The request's <c>TResponse</c> or the stream request's <c>TItem</c>; <see langword="null" /> for a notification.</param>
 /// <param name="StaticInvoker">Whether <c>InvokeAsync</c> is static: the handler has no injected parameters and is never constructed.</param>
+/// <param name="StaticEntry">
+///     Whether the handler is the host's own and has injected parameters, so the handler generator gives it the static entry
+///     <c>__keryx_InvokeAsync</c> (owner decision 44): its pipeline context holds the handler's services, resolved once per scope, and
+///     calls that entry, so the handler class is never constructed. A referenced handler with injected parameters has none: its context
+///     constructs it with <c>new</c> (owner decision 42). <see langword="false" /> for a static invoker.
+/// </param>
 /// <param name="Services">The generated constructor's parameters (the handler's injected parameters), in order.</param>
 /// <param name="Behaviors">
 ///     The behaviors that apply to a request or stream handler's pipeline: the union of the three scopes (per target, per assembly, global),
@@ -46,6 +52,7 @@ internal sealed record HostHandlerModel(
     bool MessageIsValueType,
     string? ResponseType,
     bool StaticInvoker,
+    bool StaticEntry,
     EquatableArray<ServiceParameterModel> Services,
     EquatableArray<PipelineBehaviorModel> Behaviors,
     EquatableArray<string> UsedExclusions,
@@ -165,8 +172,8 @@ internal sealed record GlobalBehaviorModel(string Name, BehaviorKind Kind, strin
 internal sealed record ExclusionModel(string Operand, string Display, LocationInfo? Location);
 
 /// <summary>
-///     One injected parameter of a handler's generated constructor or of a behavior method, resolved by a generated factory or a pipeline
-///     context (ADR 0001, Injected parameters).
+///     One injected parameter of a handler's generated constructor or of a behavior method, resolved by a pipeline context (ADR 0001,
+///     Injected parameters).
 /// </summary>
 /// <param name="Type">The parameter type, fully qualified, with nullable annotations.</param>
 /// <param name="ServiceType">

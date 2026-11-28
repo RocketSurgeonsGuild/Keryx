@@ -68,7 +68,7 @@ internal static class HandlerEmitter
             writer.Open();
         }
 
-        WriteMembers(writer, model, memberAccess);
+        WriteMembers(writer, model, memberAccess, isHost);
 
         for (var i = 0; i < model.Types.Count; i++)
         {
@@ -134,8 +134,11 @@ internal static class HandlerEmitter
         writer.Directive("#nullable enable");
     }
 
-    /// <summary>The members of the handler class's generated half: the fields and constructor of an injecting handler, then the invoker.</summary>
-    private static void WriteMembers(CodeWriter writer, HandlerModel model, string memberAccess)
+    /// <summary>
+    ///     The members of the handler class's generated half: the fields and constructor of an injecting handler, then the invoker, and in a
+    ///     host, for an injecting handler, the static entry its pipelines call (owner decision 44).
+    /// </summary>
+    private static void WriteMembers(CodeWriter writer, HandlerModel model, string memberAccess, bool isHost)
     {
         var className = model.Types[^1].Name;
         var injected = model.Parameters.Where(static p => p.Role == ParameterRole.Injected).ToArray();
@@ -162,6 +165,8 @@ internal static class HandlerEmitter
             writer.Close();
         }
 
+        // The handler method's arguments: the invoker passes the fields; the static entry takes parameters with the fields' names, so the
+        // call reads the same in both.
         var messageName = model.Kind == HandlerKind.Notification ? "notification" : "request";
         var call = new StringBuilder(64).Append(model.MethodName).Append('(');
         for (var i = 0; i < model.Parameters.Count; i++)
@@ -180,13 +185,53 @@ internal static class HandlerEmitter
         }
 
         var invocation = call.Append(')').ToString();
-        var result = model.NullabilityDiffers ? invocation + "!" : invocation;
 
         writer.Member();
         writer.Documentation("<summary>Runs the handler only. No behaviors run.</summary>");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
-        var declaration =
-            $"{memberAccess}{( model.StaticInvoker ? " static" : "" )} {InvokerReturnType(model)} {HandlerAnalysis.InvokerName}({model.MessageType} {messageName}, {CancellationToken} cancellationToken)";
+        WriteInvoker(
+            writer,
+            model,
+            $"{memberAccess}{( model.StaticInvoker ? " static" : "" )} {InvokerReturnType(model)} {HandlerAnalysis.InvokerName}({model.MessageType} {messageName}, {CancellationToken} cancellationToken)",
+            invocation
+        );
+
+        if (!isHost || injected.Length == 0)
+        {
+            return;
+        }
+
+        // A host's pipelines hold the services and call this, so they never construct the handler class (owner decision 44). It is internal:
+        // only the host's own generated code calls it, and referenced handlers keep their public constructor and InvokeAsync.
+        var parameters = new StringBuilder(64 * injected.Length);
+        foreach (var parameter in injected)
+        {
+            parameters.Append(", ").Append(parameter.Type).Append(' ').Append(FieldName(parameter));
+        }
+
+        writer.Member();
+        writer.Documentation(
+            "<summary>",
+            "    Runs the handler only, with the services its handler method injects. The host's pipelines call it with the services their",
+            "    context resolved, so they never construct this class. No behaviors run.",
+            "</summary>"
+        );
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        WriteInvoker(
+            writer,
+            model,
+            $"internal static {InvokerReturnType(model)} {HandlerAnalysis.StaticEntryName}({model.MessageType} {messageName}{parameters}, {CancellationToken} cancellationToken)",
+            invocation
+        );
+    }
+
+    /// <summary>
+    ///     An invoker (<c>InvokeAsync</c> or the static entry): the call of the handler method with the return adaptation of its shape (ADR
+    ///     0001, Handlers, return adaptation).
+    /// </summary>
+    private static void WriteInvoker(CodeWriter writer, HandlerModel model, string declaration, string invocation)
+    {
+        var result = model.NullabilityDiffers ? invocation + "!" : invocation;
         switch (model.ReturnShape)
         {
             case ReturnShape.Void:

@@ -59,17 +59,16 @@ public class HostConcurrencyTests : HostTest
     public async Task Concurrent_First_Use_In_One_Scope_Shares_One_Pipeline_Context(CancellationToken cancellationToken)
     {
         var host = await CompileHostAsync(HostRuntimeTests.Source, cancellationToken);
-        var handlerType = host.GetType("Sample.WhoAmIHandler", throwOnError: true)!;
 
-        // A transient handler (AddKeryx keeps an existing registration) makes every context construction observable: each context built
-        // gets a new handler with a new Identity, so only a race that keeps a single context gives every caller the same identity.
-        await using var provider = BuildProvider(host, services => HostRuntimeTests.RegistrationsWithTransientIdentityHandlers(host)(services));
+        // A transient Identity makes every context construction observable: each context built resolves a new one for its handler (the
+        // host's own, called through its static entry with the context's HandlerService0), so only a race that keeps a single context gives
+        // every caller the same identity.
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
         var state = new ScopeState(host);
         var whoAmIType = host.GetType("Sample.WhoAmI", throwOnError: true)!;
         var identityType = host.GetType("Sample.Identity", throwOnError: true)!;
         var created = identityType.GetField("Created", BindingFlags.Public | BindingFlags.Static)!;
         var identityId = identityType.GetProperty("Id")!;
-        var handlerIdentity = handlerType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance).Single(f => f.FieldType == identityType);
         var typedSend = state.MediatorType.GetMethod("Send", [whoAmIType, typeof(CancellationToken)])!;
 
         for (var scopeIndex = 0; scopeIndex < Scopes; scopeIndex++)
@@ -103,15 +102,15 @@ public class HostConcurrencyTests : HostTest
 
             var identities = await Task.WhenAll(callers);
 
-            // Every caller used the context the state kept: one identity, the one held by that context's handler. Losers may have built a
-            // context each (at most one per caller), but none of them was used.
+            // Every caller used the context the state kept: one identity, the one that context holds for its handler. Losers may have built
+            // a context each (at most one per caller), but none of them was used.
             await Assert.That(identities.Distinct()).HasSingleItem();
             var context = await Assert.That(state.Contexts(scope.ServiceProvider)).HasSingleItem();
-            var storedIdentity = handlerIdentity.GetValue(context!.GetType().GetField("Handler")!.GetValue(context));
+            var storedIdentity = context!.GetType().GetField("HandlerService0")!.GetValue(context);
             await Assert.That((int)identityId.GetValue(storedIdentity)!).IsEqualTo(identities[0]);
             await Assert.That((int)created.GetValue(null)! - createdBefore).IsBetween(1, Callers);
 
-            // Later calls, through those mediators or a new one, reuse that context: no new handler, the same identity.
+            // Later calls, through those mediators or a new one, reuse that context: no new Identity, the same one.
             foreach (var mediator in mediators.Append(scope.ServiceProvider.GetRequiredService<ISender>()))
             {
                 await Assert.That(await ( (ISender)mediator ).Send(whoAmI, cancellationToken)).IsEqualTo(identities[0]);
@@ -126,20 +125,8 @@ public class HostConcurrencyTests : HostTest
     {
         var host = await CompileHostAsync(ManyPipelines(), cancellationToken);
 
-        // Transient handlers, so every context construction gets a new Identity (see above).
-        await using var provider = BuildProvider(
-            host,
-            services =>
-            {
-                var identityType = host.GetType("Sample.Identity", throwOnError: true)!;
-                services.AddTransient(identityType);
-                for (var i = 0; i < Pipelines; i++)
-                {
-                    var handlerType = host.GetType($"Sample.Who{i}Handler", throwOnError: true)!;
-                    services.AddTransient(handlerType, sp => Activator.CreateInstance(handlerType, sp.GetRequiredService(identityType))!);
-                }
-            }
-        );
+        // A transient Identity, so every context construction gets a new one (see above).
+        await using var provider = BuildProvider(host, services => services.AddTransient(host.GetType("Sample.Identity", throwOnError: true)!));
         var state = new ScopeState(host);
         await Assert.That(state.Fields).IsEqualTo(Pipelines);
         var requests = Enumerable.Range(0, Pipelines).Select(i => (IRequest<int>)Create(host, $"Sample.Who{i}")).ToArray();
@@ -198,7 +185,7 @@ public class HostConcurrencyTests : HostTest
     }
 
     /// <summary>
-    ///     Every kind of pipeline with a context, two of each, all of whose handlers answer the <c>Identity</c> they were constructed with:
+    ///     Every kind of pipeline with a context, two of each, all of whose handlers answer the <c>Identity</c> their context resolved for them:
     ///     requests <c>Ask0</c> and <c>Ask2</c> (with <c>Ask1</c>, a static handler without a context, between them), streams <c>Flow0</c> and
     ///     <c>Flow1</c>, and notifications <c>Told0</c> and <c>Told1</c> (whose handlers record it in the notification).
     /// </summary>
@@ -262,24 +249,12 @@ public class HostConcurrencyTests : HostTest
         // requests, streams and publishes, each first used at once through several mediators, raced for the one state.
         var host = await CompileHostAsync(MixedPipelines, cancellationToken);
         string[] handlers = ["Ask0", "Ask2", "Flow0", "Flow1", "Told0", "Told1"];
-        await using var provider = BuildProvider(
-            host,
-            services =>
-            {
-                var identityType = host.GetType("Sample.Identity", throwOnError: true)!;
-                services.AddTransient(identityType);
-                foreach (var name in handlers)
-                {
-                    var handlerType = host.GetType($"Sample.{name}Handler", throwOnError: true)!;
-                    services.AddTransient(handlerType, sp => Activator.CreateInstance(handlerType, sp.GetRequiredService(identityType))!);
-                }
-            }
-        );
+        await using var provider = BuildProvider(host, services => services.AddTransient(host.GetType("Sample.Identity", throwOnError: true)!));
         var state = new ScopeState(host);
         string[] expectedFields = ["__pipeline0", "__pipeline2", "__streamPipeline0", "__streamPipeline1", "__notification0", "__notification1"];
         await Assert.That(state.FieldNames).IsEquivalentTo(expectedFields, TUnit.Assertions.Enums.CollectionOrdering.Matching);
 
-        // Each operation answers the identity its pipeline's handler holds.
+        // Each operation answers the identity its pipeline's context holds for its handler.
         Func<object, Task<int>>[] operations =
         [
             mediator => ( (ISender)mediator ).Send((IRequest<int>)Create(host, "Sample.Ask0"), cancellationToken).AsTask(),

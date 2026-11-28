@@ -598,16 +598,15 @@ public class NotificationRuntimeTests : HostTest
                     .IsEquivalentTo(["threw synchronously", "threw synchronously", "threw synchronously", "completed"], CollectionOrdering.Matching);
 
     [Test]
-    public async Task Notification_Handlers_Are_Registered_And_Resolved_Once_Per_Scope(CancellationToken cancellationToken)
+    public async Task Notification_Handlers_Are_Not_Registered(CancellationToken cancellationToken)
     {
+        // Owner decisions 42 and 44: a publish pipeline context resolves the services its handlers inject and calls their static entries, so
+        // AddKeryx() registers no handler class.
         var host = await CompileHostAsync(Source, cancellationToken);
         await using var provider = BuildProvider(host, Registrations(host));
-        var handlerType = host.GetType("Sample.AuditDomainEvents", throwOnError: true)!;
+        await using var scope = provider.CreateAsyncScope();
 
-        await using var first = provider.CreateAsyncScope();
-        await using var second = provider.CreateAsyncScope();
-        await Assert.That(first.ServiceProvider.GetRequiredService(handlerType)).IsSameReferenceAs(first.ServiceProvider.GetRequiredService(handlerType));
-        await Assert.That(first.ServiceProvider.GetRequiredService(handlerType)).IsNotSameReferenceAs(second.ServiceProvider.GetRequiredService(handlerType));
+        await Assert.That(scope.ServiceProvider.GetService(host.GetType("Sample.AuditDomainEvents", throwOnError: true)!)).IsNull();
     }
 
     [Test]

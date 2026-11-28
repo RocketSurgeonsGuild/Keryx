@@ -29,7 +29,7 @@
     Severity: Error,
     WarningLevel: 0,
     Location: Input0.cs: (18,15)-(18,22),
-    Description: Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one). With injected parameters a host constructs the class, so it is not abstract, it and its base types declare no required members, and its base type has an accessible parameterless constructor.,
+    Description: Keryx generates the constructor of a handler class from the handler's injected parameters. The class declares no instance constructor (a record primary constructor counts as one). With injected parameters the class is constructed (by a host that references it, and by unit tests), so it is not abstract, it and its base types declare no required members, and its base type has an accessible parameterless constructor.,
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx007,
     MessageFormat: '{0}' {1},
     Message: 'NotPartial.Handler' declares an instance constructor; Keryx generates the constructor of a handler class from the handler's injected parameters,
@@ -77,7 +77,7 @@
     Severity: Error,
     WarningLevel: 0,
     Location: Input0.cs: (20,66)-(20,72),
-    Description: Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator and AddKeryx() use them from outside their containing types.,
+    Description: Outside a host, every request, response, notification, behavior class and behavior method that a host's pipeline uses, and every type a handler class's public constructor and invoker mention, must be public, as must the types containing them. In a host, every type a handler's signature mentions, and every behavior class and method its pipelines use, must be at least internal and not file-local, because the generated mediator uses them from outside their containing types.,
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx016,
     MessageFormat: '{0}' must be {1}, because {2},
     Message: 'IHidden' must be public, because the handler injects it through parameter 'hidden', the generated public constructor takes it, and this assembly is not a host,
@@ -177,6 +177,18 @@
     HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx013,
     MessageFormat: Handler parameter '{0}' {1},
     Message: Handler parameter 'b' is a second CancellationToken; a handler takes at most one,
+    Category: Keryx
+  },
+  {
+    Id: KRX025,
+    Title: Handler class is disposable,
+    Severity: Error,
+    WarningLevel: 0,
+    Location: Input0.cs: (31,21)-(31,31),
+    Description: Keryx never disposes a handler object: a host calls its own handlers through a static entry without constructing them, and constructs a referenced handler with new in a pipeline context that nothing disposes. A handler class that implements IDisposable or IAsyncDisposable, directly or through a base type or interface, would leak what it holds. Inject the disposable service into the handler method instead; the container that created it disposes it.,
+    HelpLink: https://github.com/RocketSurgeonsGuild/Keryx/blob/main/Readme.md#krx025,
+    MessageFormat: Handler class '{0}' implements '{1}'; a handler class is stateless and is never disposed, so inject the disposable service instead,
+    Message: Handler class 'Disposable' implements 'System.IDisposable'; a handler class is stateless and is never disposed, so inject the disposable service instead,
     Category: Keryx
   }
 ]

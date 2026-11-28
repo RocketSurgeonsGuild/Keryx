@@ -63,6 +63,20 @@ with many pipelines (decision 41's 25, 50 and 100 notification handlers in the b
   chunked pages of 16 fields allocated on first use. Alternative: accept the per-field layout for every size and document the 8 B per
   pipeline. Needs a decision.
 
+### OQ-79: An injected parameter named `InvokeAsync` in a host's own handler (2026-11-28)
+
+Owner decision 44 gives a host's own handler with injected parameters a static entry named `__keryx_InvokeAsync` (the `__keryx_` prefix
+KRX015 reserves). The handler generator also names each injected parameter's field `__keryx_<parameterName>`, so a handler method with
+an injected parameter named `InvokeAsync` (`Handle(Ping request, IClock InvokeAsync)`) gets a field and a method with the same name in a
+host, and the generated partial does not compile (CS0102). Outside a host there is no static entry, so the library compiles. Any
+`__keryx_` name would collide with some parameter name, so the static entry's name cannot avoid it alone.
+
+- **Interim:** nothing reports it; such a handler fails to compile in a host only, with CS0102 in generated code. No test covers it.
+- **Proposal:** KRX015 also reports an injected handler parameter named `InvokeAsync` ("parameter 'InvokeAsync' would take the name of
+  the generated static entry; rename it"), in libraries and hosts alike so a library cannot ship a handler a host cannot compile, and the
+  handler generator skips such a handler like any handler error. Alternative: name the fields differently from the static entry (for
+  example `__keryx_p_<parameterName>`), which changes every handler partial. Needs a decision.
+
 ## Decided
 
 ### OQ-1: Cancellation during a publish (2026-11-26)
@@ -687,6 +701,10 @@ an empty segment (`My..App`). It also does not say whether `RootNamespace` itsel
 - **Decision:** Accepted as proposed. Folded into the ADR (Opting in).
 
 ### OQ-34: Handler classes a host cannot construct with `new` (2026-11-26)
+
+**Superseded in part** (2026-11-28) by owner decisions 42 and 44 ("Handlers are not registered", at the end): `AddKeryx()` has no handler
+factories. A host constructs a referenced handler with `new` in its pipeline context and never constructs its own (it calls their static
+entry), so the KRX007 rules below now protect referenced construction and unit tests; they stay as decided.
 
 A handler class with injected parameters is constructed by the host's generated factory (`new Handler(...)` in `AddKeryx()`). Two shapes
 pass every rule and still break that factory with a compiler error in generated code: an `abstract` handler class (CS0144) and a handler
@@ -2832,3 +2850,142 @@ Done:
 
 Folded into the ADR (status; Injected parameters; Generated pipeline shape; Mediator; DI registration; Consequences), the brief (the
 host), CONTEXT.md (mediator, pipeline context, scope state), the README (Injected parameters, Hosts, Benchmarks notes) and whats-left.md.
+
+### Handlers are not registered (2026-11-28)
+
+Owner decisions 42, 44 and 45, with 48 (the deep dive into ZeroAlloc.Mediator's lead with a scope per request, its "Rank 1 A" and
+"Rank 4 C"; decision 43, "Rank 2 B", which shares a context's services between its handlers and behaviors, is a later step).
+
+- **Decision 42** (owner): `AddKeryx()` registers no handler class, own or referenced. A pipeline or publish context that needs a
+  handler object constructs it, `new H(<resolved constructor arguments>)`, with the creation expression and resolution rules the
+  `AddKeryx()` factory used. Accepted: the mediator's handler is not a DI instance; a polymorphic notification handler gets one instance
+  per context; a user registration of a handler class no longer affects the mediator (swap services, not handler classes).
+- **Decision 44** (owner, own handlers only): for handlers the host compiles itself, the handler generator emits a static entry
+  (`__keryx_`-prefixed, reserved by KRX015) that takes the injected services as parameters and forwards to the private `Handle` with
+  `InvokeAsync`'s return adaptation; the context holds the services and calls it, so no handler object is created. Referenced handlers
+  stay on decision 42's construction (no new public surface, no manifest or `FormatVersion` change). The class, its constructor and
+  `InvokeAsync` stay. Accepted: the mediator never runs an own handler class's constructor.
+- **Decision 45** (owner): a handler class that implements `IDisposable` or `IAsyncDisposable`, directly or through a base type or
+  interface, is an error (the next free per-assembly ID, KRX025); the generators skip it like any handler error. Nothing in Keryx
+  disposes handler objects.
+- **Decision 48**: verify the bytes exactly and measure the targeted rows on a quiet machine against decision 37's run.
+
+Done:
+
+- **Handler partials** (`HandlerEmitter`). In a host, a handler with injected parameters also gets
+  `internal static <invoker return type> __keryx_InvokeAsync(<message> request, <type> __keryx_<name>, ..., CancellationToken cancellationToken)`
+  (`HandlerAnalysis.StaticEntryName`): its parameters carry the names of the generated fields, so its body is the invoker's call of
+  `Handle`, with the same return adaptation (one `WriteInvoker` writes both). It is `internal` whatever the class's accessibility, and only
+  a host emits it, so libraries' partials and manifests are unchanged; the generated constructor and the public (or internal)
+  `InvokeAsync` stay for unit tests and for referenced use. A static invoker (no injected parameters) gets nothing new.
+- **Host model** (`HostHandlerModel.StaticEntry`): true for the host's own handler with injected parameters (`HostModelFactory.CreateHandler`),
+  false for a referenced one (`CreateReferencedHandler`) and for a static invoker. `HostComposition.ConstructedHandlers` is gone.
+- **Pipeline contexts** (`HostEmitter.WriteHandlerFields`, `HandlerInvocation`). For an own handler the context has one field per
+  injected service, `HandlerService{j}` in a request or stream context and `Handler{i}Service{j}` in a publish context (the parameter's
+  type), assigned with the resolution `AddKeryx()`'s factory used (`Resolve`: required, optional with the default, keyed, value types by
+  type pattern, the unkeyed `IServiceProvider` as the provider itself), and the pipeline calls
+  `H.__keryx_InvokeAsync(request, pipeline.HandlerService0, ..., cancellationToken)` (in a publish context, the fields directly). A
+  pipeline method without behaviors whose handler takes more than one service reads the context into a local once. For a referenced
+  handler the context keeps its `Handler` (`Handler{i}`) field, now `new H(<resolutions>)`, and calls its `InvokeAsync`. Pattern variables
+  (`__valueN`) continue after the shared services' numbers and across a publish context's handlers, so a constructor never declares one
+  twice (`SharedServiceTests.Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable`). The handler's services are not
+  merged with the behaviors' `ServiceN` fields (that is decision 43): a pipeline whose handler and behaviors inject the same service has
+  both fields for now.
+- **Registrations.** `AddKeryx()` registers the four mediator service types and the scope state only; its summary says that handlers
+  and behaviors are not registered.
+- **KRX025** (`Descriptors.DisposableHandlerClass`, `HandlerAnalysis.DisposableInterface`, reported by `HandlerAnalyzer` among the
+  class rules; release tracking, help link `#krx025`): "Handler class '{0}' implements '{1}'; a handler class is stateless and is never
+  disposed, so inject the disposable service instead", on the class, in libraries and hosts. The issue is an error, so the handler
+  generator skips the handler and the host composes nothing for it. As a safety net for a manifest entry whose class became disposable
+  (a base class from a contracts assembly built differently from the one the host references), `CreateReferencedHandler` reports the
+  host's KRX034 "does not fit" form ("the class implements 'System.IDisposable', which a handler class may not (KRX025)") and leaves the
+  handler out.
+- **Bytes, exact** (a `GC.GetAllocatedBytesForCurrentThread` probe over 10,000 calls after 200,000 warm-up calls, the smallest of ten
+  repeats, built from a clean `git archive` of c759c9c and from the working tree, `rework-scope/handlers/bytes-{before,after}.txt`;
+  BenchmarkDotNet's allocation column agrees). Per scope, typed and `IMediator` alike, before then after:
+  `RealWorldBehaviorsScopePerRequest` 1,432 then 1,048 B (the report's target, exactly: the handler's scope entry goes, so the scope's
+  resolved services stay within their first arrays, 360 B, and the 24 B handler object goes; the 40 B context holds the repository where
+  it held the handler); `RealWorldPublish5ScopePerRequest` 1,360 then 880 B (the five handler entries' growth, 360 B, and five 32 B
+  handlers go; the context grows from 56 to 96 B, ten service fields where it had five handler fields; with decision 43's sharing two
+  fields would remain, 816 B); `RealWorldPublish1ScopePerRequest` 584 then 560 B (the 32 B handler goes, the context grows by 8 B);
+  `RealWorldPublishBehavior1ScopePerRequest` 736 then 712 B; `RealWorldPublishBehavior5ScopePerRequest` 1,512 then 1,032 B. Unchanged:
+  `RealWorldPingScopePerRequest` 192 B (a static handler), the long-lived rows (`RealWorldPing` 32 B, `RealWorldBehaviors` 520 B,
+  `PublishTo1`/`5` 0 B) and every other subject. With 1,000 warm-up calls the probe once measured 120 B more for the `IMediator` row of
+  `RealWorldPublishBehavior5ScopePerRequest`, which a longer warm-up removed (a tiering effect of the probe, not of the code). The
+  direct call's `RealWorldPublish1ScopePerRequest` row reads 466 to 469 B in the probe and 456 B in BenchmarkDotNet, in both trees.
+  `HostAllocationTests.An_Own_Handler_With_Services_Costs_A_Scope_What_A_Behavior_With_Them_Costs` pins the shape: over 1,000 scopes, a
+  send whose own handler injects a scoped `Clock` allocates exactly what a send whose behavior injects it allocates.
+- **Time** (JIT, BenchmarkDotNet 0.15.8, Apple M4 Max, .NET 10.0.15, the README's job: IterationCount=15, IterationTime=200ms,
+  LaunchCount=1, WarmupCount=5; `before` from a clean `git archive` of c759c9c, `after` from a copy of the working tree, which was not
+  committed). Typed, then `IMediator`, before then after: `RealWorldBehaviorsScopePerRequest` 336.7 and 339.7 ns, then 266.1 and
+  269.9 ns (the direct call 211.8 and 212.1 ns, ZeroAlloc.Mediator 249.3 and 247.4 ns; the re-run, below); `RealWorldPublish1ScopePerRequest`
+  174.1 and 178.1 ns, then 142.6 and 146.5 ns (the direct call 122.5 ns, ZeroAlloc.Mediator 128.2 ns); `RealWorldPublish5ScopePerRequest`
+  562.6 and 572.7 ns, then 405.4 and 402.2 ns (the direct call 446.0 ns, ZeroAlloc.Mediator 366.1 ns); `RealWorldPublishBehavior1ScopePerRequest`
+  257.6 and 260.4 ns, then 226.4 and 231.9 ns (the direct call 200.2 ns); `RealWorldPublishBehavior5ScopePerRequest` 636.1 and 653.5 ns,
+  then 480.5 and 486.3 ns (the direct call 517.8 ns); `RealWorldPingScopePerRequest` (no context) 29.4 and 33.4 ns, then 30.2 and
+  33.9 ns. The deep dive predicted about 45 to 58 ns for the behaviors and 130 to 150 ns for the publish to 5 handlers from decision 42
+  alone; the measured savings are 71 and 157 ns with decision 44 too. Long-lived, before then after: `RealWorldPing` 2.23 and 5.77 ns,
+  then 2.22 and 5.77 ns; `PublishTo1` 0.38 and 3.30 ns, then 0.38 and 3.29 ns (the re-run); `PublishTo5` 0.47 and 3.98 ns, then 0.44 and
+  3.23 ns; `SendSyncDepth0` 0.00 and 2.44 ns both; and in three interleaved rounds each (before, after, before, ...):
+  `RealWorldBehaviors` typed 120.8, 121.9, 120.2 ns, then 124.0, 122.6, 120.9 ns (errors 0.6 to 1.0 ns; means 121.0 and 122.5 ns;
+  the direct call 115.7 and 113.9 ns), `IMediator` 124.8, 127.7, 126.1 ns, then 125.5, 127.5, 126.6 ns; `SendSyncDepth8` typed 0.55,
+  0.57, 0.56 ns, then 0.52, 0.78, 0.79 ns, `IMediator` 2.73, 2.74, 2.74 ns, then 2.72, 2.75, 2.75 ns. Of these only `RealWorldBehaviors`
+  runs code this change touched (its handler injects the repository: the link now calls the static entry with the context's field
+  instead of the handler's `InvokeAsync`); its typed row is 1.5 ns slower on average, beyond the error in the first round only, and its
+  `IMediator` row did not move. `SendSyncDepth8`'s pipeline (a static handler) is generated identically before and after, so its
+  sub-nanosecond typed difference is layout, not code. Against decision 37's run (`bench-final-2/jit`) the before rows are within
+  noise or a few nanoseconds faster (for example `RealWorldPublish5ScopePerRequest` 570.2 and 579.8 ns there).
+- **How it was measured** (decision 48's rule). The script of the previous step: it sampled `ps` every 5 s and started a run only after
+  35 s with no busy dotnet-related process outside its own process tree (MSBuild, the compiler server, test hosts, benchmark processes,
+  language servers), sampled every 3 s during the run and logged any busy one with the benchmark it overlapped; MSBuild node reuse and
+  the MSBuild and compiler servers were off for the benchmark builds; no file in the repository was edited during a run (an edit wakes
+  this machine's language server). A first before run was stopped when the language server woke on this step's edits. In the full runs
+  a compiler-server burst overlapped the before run's `RealWorldBehaviorsScopePerRequest` `IMediator` row and the language server's
+  burst after BenchmarkDotNet's build overlapped the after run's three `PublishTo1` rows; both classes were run again in both trees
+  (`rerun-before`, `rerun-after`) after a scratch-only benchmark with a 45 s `[GlobalSetup]` that absorbed the burst (no busy sample
+  outside it), and so were the six interleaved rounds (`rounds-{before,after}-{1,2,3}`, no busy sample outside the settle benchmark).
+  Every number above is from a run with no overlap. `--verify` passed (238 under the JIT) on the working tree under net10.0 and net11.0
+  and in both benchmark builds.
+- **Tests** (1,606, both target frameworks). `HostRuntimeTests.Contexts_Call_Own_Handlers_Without_Constructing_Them_And_Construct_Referenced_Handlers`:
+  a host's own request and notification handlers and a library's, each with a field initializer that counts constructions and
+  registrations of all six classes that throw: over two scopes, sending and publishing twice each constructs the own handlers 0 times
+  and each referenced one once per scope, the transient service each injects is one per scope and pipeline, and an own handler's public
+  constructor and `InvokeAsync` still work. The library's `Fetched` also has an own handler in the host (`OnFetched`, static entry) and
+  the library's polymorphic `AnyEventHandler` (on `IEvent`, which `Fetched` and `Refetched` implement), so one publish context holds an
+  own handler's services next to two constructed referenced handlers: both logging handlers run in every publish, `OnFetched` is
+  constructed 0 times, and `AnyEventHandler` once per publish context per scope (two per scope, four in all), the semantics decision 42
+  accepted in place of the one instance per scope that `NotificationRuntimeTests.Notification_Handlers_Are_Registered_And_Resolved_Once_Per_Scope`
+  pinned. `SharedServiceTests.Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable` (snapshot): a request
+  whose behavior injects `int? limit = null` and whose own handler injects `int retries = 3`, and a library notification with two own
+  handlers (`int retries = 3` and `= 4`) and a referenced one (`long? x = null`): the context constructors declare `__value0`, `__value1`
+  (and `__value2`) once each, the generated code compiles, and one send and one publish apply each default, or the registered value. `AddKeryx_Registers_Transient_Mediators_Over_One_Scope_State` checks that `AddKeryx()` adds
+  exactly the four mediator service types and the state; `PipelineRuntimeTests.AddKeryx_Registers_No_Behaviors` lists no handler;
+  `NotificationRuntimeTests.Notification_Handlers_Are_Not_Registered` replaces `..._Are_Registered_And_Resolved_Once_Per_Scope`. The
+  context-identity tests (`HostRuntimeTests`, `HostConcurrencyTests`) used transient handler registrations to see each context
+  construction; the contexts now resolve the transient `Identity` themselves, so they use the plain registrations, and the concurrency
+  test reads the identity from the context's `HandlerService0`. `HostAllocationTests.An_Own_Handler_With_Services_Costs_A_Scope_What_A_Behavior_With_Them_Costs`
+  (above). `HandlerAnalyzerTests.KRX025_Disposable_Handler_Class` (direct, through a base class, through an interface, with and without
+  injected parameters, a notification handler, in a library and a host: one KRX025 on the class, the message, the help link, no partial;
+  in the host, with the host generator running, KRX025 is the only error of the final compilation and the mediator names neither the
+  handler nor its request)
+  and `KRX025_Disposable_Services_Are_Fine` (injected disposable services, a disposable type beside a static handler);
+  `Reports_Every_Rule_With_Its_Message` gains a disposable handler class. `CrossAssemblyTests.KRX034_For_A_Referenced_Handler_Whose_Base_Class_Became_Disposable`.
+  `SharedServiceTests.Should_Pass_The_Scope_Provider_To_A_Handler_That_Injects_It`, `CrossAssemblyTests.A_Host_Composes_The_Handlers_Of_Its_Project_References`
+  and `CodeWriterTests.Writes_Type_Names_Identifiers_And_Literals_As_The_Models_Hold_Them` assert the resolutions in the mediator instead of
+  `AddKeryx()`. `IMediator`'s remarks said the generated implementation is scoped; they now say transient (decision 46's change, missed
+  then).
+- **Snapshots** (43 changed and one new, the mixed publish context above, the same on both target frameworks, each diff read; `rework-scope/handlers/snapdiff2.txt` and `snapdiff4.txt`).
+  Every host snapshot changes `AddKeryx()`'s summary and loses its handler registrations; the contexts of pipelines with an injecting own
+  handler hold `HandlerServiceN` (`Handler{i}ServiceN`) fields resolved as the registrations did, and their entries and last links call
+  `__keryx_InvokeAsync` (a pipeline method without behaviors whose handler takes two or more services reads the context into a local);
+  the context summaries say what they hold ("the services its handler injects"; a publish context whose handlers are all static now
+  names only its behaviors' services); the six handler partials of a host gain the static entry (library partials do not change); the
+  two `Reports_Every_Rule_With_Its_Message` snapshots change the KRX007 and KRX016 descriptions (no more "a host constructs the class"
+  and "AddKeryx() use them"), and the handler one gains KRX025.
+- The reports, scripts and logs are in the session scratchpad, `rework-scope/handlers/` (`before`, `after`, `rerun-*`, `rounds-*`,
+  `bytes-{before,after}.txt` and the `probe-*` projects, `verify/verify-net{10,11}.0.log`, `test5.log`).
+
+Folded into the ADR (status; Handler classes; Example; Injected parameters; Diagnostics, KRX015 and KRX025 rows; Generated pipeline
+shape; Mediator; DI registration; Hosts; Performance contract; Consequences), the brief (handlers, the host, Phase 3 and Phase 4),
+CONTEXT.md (invoker and static entry, pipeline context), the README (quick start, handler classes, testing, Hosts, diagnostics,
+Benchmarks notes) and whats-left.md. OQ-34 carries a superseded note. A parameter named `InvokeAsync` is OQ-79 (open).

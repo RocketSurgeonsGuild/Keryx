@@ -291,15 +291,15 @@ namespace Sample
             public object? __notification3;
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Broadcast</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Broadcast</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.SecondListener Handler1;
+            public readonly global::Sample.IJournal Handler1Service0;
             public readonly global::Sample.IJournal Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.SecondListener>(serviceProvider);
+                Handler1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
                 Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
@@ -319,7 +319,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task1;
                 try
                 {
-                    task1 = Handler1.InvokeAsync(notification, cancellationToken);
+                    task1 = global::Sample.SecondListener.__keryx_InvokeAsync(notification, Handler1Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -367,14 +367,14 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.OrderPlaced</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.OrderPlaced</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification1
         {
-            public readonly global::Sample.AuditDomainEvents Handler0;
+            public readonly global::Sample.IJournal Handler0Service0;
 
             public __Notification1(global::System.IServiceProvider serviceProvider)
             {
-                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
+                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -384,7 +384,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = Handler0.InvokeAsync(notification, cancellationToken);
+                    task = global::Sample.AuditDomainEvents.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -463,14 +463,14 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Shipped</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Shipped</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification2
         {
-            public readonly global::Sample.AuditDomainEvents Handler0;
+            public readonly global::Sample.IJournal Handler0Service0;
 
             public __Notification2(global::System.IServiceProvider serviceProvider)
             {
-                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
+                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -480,7 +480,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = Handler0.InvokeAsync(notification, cancellationToken);
+                    task = global::Sample.AuditDomainEvents.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -524,14 +524,14 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Tick</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Tick</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification3
         {
-            public readonly global::Sample.AuditDomainEvents Handler0;
+            public readonly global::Sample.IJournal Handler0Service0;
 
             public __Notification3(global::System.IServiceProvider serviceProvider)
             {
-                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AuditDomainEvents>(serviceProvider);
+                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -542,7 +542,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = Handler0.InvokeAsync(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.IDomainEvent>(boxed), cancellationToken);
+                    task = global::Sample.AuditDomainEvents.__keryx_InvokeAsync(global::System.Runtime.CompilerServices.Unsafe.As<global::Sample.IDomainEvent>(boxed), Handler0Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -634,16 +634,16 @@ namespace Sample
 
 namespace Sample
 {
-    /// <summary>Registers this host's Keryx mediator and handlers.</summary>
+    /// <summary>Registers this host's Keryx mediator.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
         ///     Registers <see cref="KeryxMediator" />, <see cref="global::Keryx.IMediator" />, <see cref="global::Keryx.ISender" /> and
         ///     <see cref="global::Keryx.IPublisher" /> as transient factories that each create a mediator over the provider that resolves
-        ///     it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a
-        ///     pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are
-        ///     static and are not registered.
+        ///     it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every
+        ///     mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the
+        ///     services they inject, call this host's own handlers through their static entries and construct referenced handlers.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -656,8 +656,6 @@ namespace Sample
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator.__KeryxScopeState());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.AuditDomainEvents(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.SecondListener(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IJournal>(serviceProvider)));
             return services;
         }
     }

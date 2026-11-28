@@ -314,7 +314,7 @@ public class HostRuntimeTests : HostTest
     {
         var host = await CompileHostAsync(Source, cancellationToken);
         var services = new ServiceCollection();
-        RegistrationsWithTransientIdentityHandlers(host)(services);
+        Registrations(host)(services);
         var registered = services.Count;
         AddKeryx(host, services);
         var count = services.Count;
@@ -326,10 +326,11 @@ public class HostRuntimeTests : HostTest
         await Assert.That(keryx.All(static d => d.ImplementationFactory is not null)).IsTrue();
 
         // KeryxMediator, IMediator, ISender and IPublisher are transient factories that each create a mediator (owner decision 46); the
-        // scope state that holds the pipeline contexts, and the handlers, are scoped.
+        // scope state that holds the pipeline contexts is scoped. Nothing else is registered: no handler class (owner decision 42).
         var mediatorType = host.GetType("Sample.KeryxMediator", throwOnError: true)!;
         var stateType = mediatorType.GetNestedType("__KeryxScopeState", BindingFlags.NonPublic)!;
         Type[] mediators = [mediatorType, typeof(IMediator), typeof(ISender), typeof(IPublisher)];
+        await Assert.That(keryx.Select(static d => d.ServiceType)).IsEquivalentTo([.. mediators, stateType]);
         await Assert.That(keryx.Where(d => mediators.Contains(d.ServiceType)).Select(static d => d.Lifetime).ToArray())
                     .IsEquivalentTo([ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient, ServiceLifetime.Transient]);
         await Assert.That(keryx.Single(d => d.ServiceType == stateType).Lifetime).IsEqualTo(ServiceLifetime.Scoped);
@@ -340,7 +341,7 @@ public class HostRuntimeTests : HostTest
         var state = mediatorType.GetField("__state", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         // Every resolve is a new mediator of the same class; the mediators of one scope share the scope's state and so its pipeline contexts
-        // (the transient handler registered above makes each context construction a new identity), whichever mediator first uses a context.
+        // (each context construction resolves a new transient Identity for its handler), whichever mediator first uses a context.
         int first, firstStream, firstPublish;
         object firstState;
         await using (var scope = provider.CreateAsyncScope())
@@ -410,10 +411,6 @@ public class HostRuntimeTests : HostTest
             await Assert.That(publishException.Message).Contains("__KeryxScopeState").Because(serviceType.Name);
             await Assert.That(state.GetValue(root)).IsNull().Because(serviceType.Name);
         }
-
-        // Handlers without injected parameters are never registered; the others are, with factories.
-        await Assert.That(services.Any(d => d.ServiceType == host.GetType("Sample.PingHandler"))).IsFalse();
-        await Assert.That(services.Single(d => d.ServiceType == host.GetType("Sample.GreetHandler")).ImplementationFactory).IsNotNull();
     }
 
     [Test]
@@ -496,9 +493,9 @@ public class HostRuntimeTests : HostTest
     {
         var host = await CompileHostAsync(Source, cancellationToken);
 
-        // With a transient handler every context construction (and every per-call resolution) gets a new Identity, so equal identities in
-        // one scope prove that the scope built its context once and reused it.
-        await using var provider = BuildProvider(host, RegistrationsWithTransientIdentityHandlers(host));
+        // Identity is transient, so every context construction (and every per-call resolution) gets a new one: equal identities in one
+        // scope prove that the scope built its context once and reused it.
+        await using var provider = BuildProvider(host, Registrations(host));
         var whoAmI = (IRequest<int>)Create(host, "Sample.WhoAmI");
 
         int first, again, other;
@@ -516,6 +513,196 @@ public class HostRuntimeTests : HostTest
 
         await Assert.That(again).IsEqualTo(first);
         await Assert.That(other).IsNotEqualTo(first);
+    }
+
+    /// <summary>
+    ///     A library whose handlers inject a transient service and count their constructions, for the context construction tests:
+    ///     <c>FetchHandler</c> and <c>FetchedHandler</c> handle one type each, <c>AnyEventHandler</c> handles both notifications of
+    ///     <c>IEvent</c> (a polymorphic notification handler).
+    /// </summary>
+    private const string ConstructionLibrary = """
+        namespace Lib;
+
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Keryx;
+
+        /// <summary>A transient service: each resolution is a new identity.</summary>
+        public sealed class Stamp
+        {
+            public static int Created;
+            public int Id { get; } = Interlocked.Increment(ref Created);
+        }
+
+        public sealed record Fetch : IRequest<int>;
+        public partial class FetchHandler
+        {
+            public static int Constructed;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static int Handle(Fetch request, Stamp stamp) => stamp.Id;
+        }
+
+        public interface IEvent : INotification
+        {
+            System.Collections.Concurrent.ConcurrentQueue<int> Ids { get; }
+        }
+
+        public sealed record Fetched(System.Collections.Concurrent.ConcurrentQueue<int> Ids) : IEvent;
+        public sealed record Refetched(System.Collections.Concurrent.ConcurrentQueue<int> Ids) : IEvent;
+
+        public partial class FetchedHandler
+        {
+            public static int Constructed;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static ValueTask Handle(Fetched notification, Stamp stamp)
+            {
+                notification.Ids.Enqueue(stamp.Id);
+                return default;
+            }
+        }
+
+        public partial class AnyEventHandler
+        {
+            public static int Constructed;
+            public static int Handled;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static ValueTask Handle(IEvent notification, Stamp stamp)
+            {
+                Interlocked.Increment(ref Handled);
+                return default;
+            }
+        }
+        """;
+
+    /// <summary>
+    ///     A host with the same shapes as <see cref="ConstructionLibrary" />, whose handlers are its own, and an own handler of the library's
+    ///     <c>Fetched</c>, whose publish context then holds an own handler's services next to two constructed referenced handlers.
+    /// </summary>
+    private const string ConstructionHost = """
+        namespace Sample;
+
+        public sealed record Own : IRequest<int>;
+        public partial class OwnHandler
+        {
+            public static int Constructed;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static int Handle(Own request, Lib.Stamp stamp) => stamp.Id;
+        }
+
+        public sealed record Seen(System.Collections.Concurrent.ConcurrentQueue<int> Ids) : INotification;
+        public partial class SeenHandler
+        {
+            public static int Constructed;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static ValueTask Handle(Seen notification, Lib.Stamp stamp)
+            {
+                notification.Ids.Enqueue(stamp.Id);
+                return default;
+            }
+        }
+
+        public partial class OnFetched
+        {
+            public static int Constructed;
+            public readonly int Instance = Interlocked.Increment(ref Constructed);
+
+            private static ValueTask Handle(Lib.Fetched notification, Lib.Stamp stamp)
+            {
+                notification.Ids.Enqueue(stamp.Id);
+                return default;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task Contexts_Call_Own_Handlers_Without_Constructing_Them_And_Construct_Referenced_Handlers(CancellationToken cancellationToken)
+    {
+        // Owner decisions 42 and 44: AddKeryx() registers no handler class. A pipeline context resolves the services the host's own handler
+        // injects and calls its static entry, so the class is never constructed; it constructs a referenced handler with new, once per scope.
+        // Registrations of the handler classes that throw prove the mediator never resolves them. Fetched's context mixes both: the own
+        // OnFetched's services next to the constructed FetchedHandler and AnyEventHandler. AnyEventHandler handles every IEvent, so it is
+        // constructed once per publish context that holds it, Fetched's and Refetched's, in each scope (owner decision 42).
+        var library = await CompileLibraryAsync("Lib", ConstructionLibrary, cancellationToken);
+        var host = await CompileHostAsync(ConstructionHost, cancellationToken, library);
+        var lib = library.Assembly!;
+        Type[] handlerTypes =
+        [
+            host.GetType("Sample.OwnHandler", throwOnError: true)!,
+            host.GetType("Sample.SeenHandler", throwOnError: true)!,
+            lib.GetType("Lib.FetchHandler", throwOnError: true)!,
+            lib.GetType("Lib.FetchedHandler", throwOnError: true)!,
+            host.GetType("Sample.OnFetched", throwOnError: true)!,
+            lib.GetType("Lib.AnyEventHandler", throwOnError: true)!,
+        ];
+        var stampType = lib.GetType("Lib.Stamp", throwOnError: true)!;
+        await using var provider = BuildProvider(
+            host,
+            services =>
+            {
+                services.AddTransient(stampType, _ => Activator.CreateInstance(stampType)!);
+                foreach (var handlerType in handlerTypes)
+                {
+                    services.AddScoped(handlerType, _ => throw new InvalidOperationException("The mediator resolved " + handlerType.Name));
+                }
+            }
+        );
+
+        var own = (IRequest<int>)Create(host, "Sample.Own");
+        var fetch = (IRequest<int>)Create(lib, "Lib.Fetch");
+        var scopes = new List<int[]>();
+        for (var i = 0; i < 2; i++)
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            var seen = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            var fetched = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            var refetched = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            int[] ids =
+            [
+                await mediator.Send(own, cancellationToken),
+                await mediator.Send(own, cancellationToken),
+                await mediator.Send(fetch, cancellationToken),
+                await mediator.Send(fetch, cancellationToken),
+            ];
+            await mediator.Publish((INotification)Create(host, "Sample.Seen", seen), cancellationToken);
+            await mediator.Publish((INotification)Create(host, "Sample.Seen", seen), cancellationToken);
+            await mediator.Publish((INotification)Create(lib, "Lib.Fetched", fetched), cancellationToken);
+            await mediator.Publish((INotification)Create(lib, "Lib.Fetched", fetched), cancellationToken);
+            await mediator.Publish((INotification)Create(lib, "Lib.Refetched", refetched), cancellationToken);
+            await mediator.Publish((INotification)Create(lib, "Lib.Refetched", refetched), cancellationToken);
+
+            // Each pipeline's context resolves its handlers' Stamps once per scope: the same in both calls, its own per pipeline. Both of
+            // Fetched's handlers that log ran in each publish, the second publish exactly as the first.
+            await Assert.That(ids[1]).IsEqualTo(ids[0]);
+            await Assert.That(ids[3]).IsEqualTo(ids[2]);
+            await Assert.That(seen.Distinct()).HasSingleItem();
+            await Assert.That(fetched.Count).IsEqualTo(4);
+            await Assert.That(fetched.Skip(2)).IsEquivalentTo(fetched.Take(2), TUnit.Assertions.Enums.CollectionOrdering.Matching);
+            await Assert.That(refetched).IsEmpty();
+            scopes.Add([ids[0], ids[2], seen.First(), fetched.First()]);
+        }
+
+        await Assert.That(scopes.SelectMany(static ids => ids).Distinct().Count()).IsEqualTo(8);
+        // AnyEventHandler ran in every publish of Fetched and Refetched: four per scope.
+        await Assert.That((int)handlerTypes[5].GetField("Handled")!.GetValue(null)!).IsEqualTo(8);
+        var constructed = handlerTypes.ToDictionary(static t => t.Name, static t => (int)t.GetField("Constructed")!.GetValue(null)!);
+        await Assert.That(constructed["OwnHandler"]).IsEqualTo(0);
+        await Assert.That(constructed["SeenHandler"]).IsEqualTo(0);
+        await Assert.That(constructed["FetchHandler"]).IsEqualTo(2);
+        await Assert.That(constructed["FetchedHandler"]).IsEqualTo(2);
+        await Assert.That(constructed["OnFetched"]).IsEqualTo(0);
+        await Assert.That(constructed["AnyEventHandler"]).IsEqualTo(4);
+
+        // The host's own handlers keep their public constructor and InvokeAsync, for unit tests.
+        var handler = Activator.CreateInstance(handlerTypes[0], Activator.CreateInstance(stampType))!;
+        var invoked = await (ValueTask<int>)handlerTypes[0].GetMethod("InvokeAsync")!.Invoke(handler, [own, cancellationToken])!;
+        await Assert.That(invoked).IsGreaterThan(0);
+        await Assert.That((int)handlerTypes[0].GetField("Constructed")!.GetValue(null)!).IsEqualTo(1);
     }
 
     [Test]
@@ -546,25 +733,12 @@ public class HostRuntimeTests : HostTest
         await Assert.That(foreign.RequestType).IsEqualTo(typeof(ForeignRequest));
     }
 
-    /// <summary>The host's own registrations of the services its handlers need (<c>Sample.Registrations.Required</c>).</summary>
-    internal static Action<IServiceCollection> Registrations(Assembly host) => services => Call<object?>(host, "Sample.Registrations", "Required", services);
-
     /// <summary>
-    ///     <see cref="Registrations" />, plus <c>WhoAmIHandler</c>, <c>CountMeHandler</c> and <c>SeenByHandler</c> registered as transient
-    ///     before <c>AddKeryx()</c> (which keeps them): each resolution then constructs a new handler with a new <c>Identity</c>, so tests can
-    ///     count pipeline context constructions (requests, streams and publishes).
+    ///     The host's own registrations of the services its handlers need (<c>Sample.Registrations.Required</c>). <c>Identity</c> is transient,
+    ///     so each pipeline context of <c>WhoAmIHandler</c>, <c>CountMeHandler</c> and <c>SeenByHandler</c> gets a new one when it is built: tests
+    ///     count pipeline context constructions (requests, streams and publishes) with it.
     /// </summary>
-    internal static Action<IServiceCollection> RegistrationsWithTransientIdentityHandlers(Assembly host) =>
-        services =>
-        {
-            Registrations(host)(services);
-            var identityType = host.GetType("Sample.Identity", throwOnError: true)!;
-            foreach (var name in (string[])["Sample.WhoAmIHandler", "Sample.CountMeHandler", "Sample.SeenByHandler"])
-            {
-                var handlerType = host.GetType(name, throwOnError: true)!;
-                services.AddTransient(handlerType, provider => Activator.CreateInstance(handlerType, provider.GetRequiredService(identityType))!);
-            }
-        };
+    internal static Action<IServiceCollection> Registrations(Assembly host) => services => Call<object?>(host, "Sample.Registrations", "Required", services);
 
     /// <summary>Streams <c>Sample.CountMe</c> once through <paramref name="sender" /> and answers the one identity it yields.</summary>
     internal static async Task<int> StreamIdentityAsync(Assembly host, ISender sender, CancellationToken cancellationToken)

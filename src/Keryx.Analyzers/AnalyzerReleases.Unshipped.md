@@ -27,6 +27,7 @@ KRX021  | Keryx    | Info     | StructRequestAnalyzer, struct request boxed thro
 KRX022  | Keryx    | Error    | LanguageVersionAnalyzer, C# language version below 14
 KRX023  | Keryx    | Error    | HandlerAnalyzer, handler of a request or stream request declared in another assembly
 KRX024  | Keryx    | Error    | MessageTypeAnalyzer, request or stream request type that is neither sealed nor abstract (or closed)
+KRX025  | Keryx    | Error    | HandlerAnalyzer, handler class implements IDisposable or IAsyncDisposable
 KRX030  | Keryx    | Error    | HostGenerator, referenced request without a handler in the host
 KRX031  | Keryx    | Error    | HostGenerator, host targets a framework older than net10.0
 KRX032  | Keryx    | Error    | HostGenerator, referenced assembly has a newer manifest format version

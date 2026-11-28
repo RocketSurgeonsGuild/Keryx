@@ -272,7 +272,7 @@ namespace Sample
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
             public readonly global::Sample.IClock Service0;
@@ -363,16 +363,16 @@ namespace Sample
 
 namespace Sample
 {
-    /// <summary>Registers this host's Keryx mediator and handlers.</summary>
+    /// <summary>Registers this host's Keryx mediator.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
         ///     Registers <see cref="KeryxMediator" />, <see cref="global::Keryx.IMediator" />, <see cref="global::Keryx.ISender" /> and
         ///     <see cref="global::Keryx.IPublisher" /> as transient factories that each create a mediator over the provider that resolves
-        ///     it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a
-        ///     pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are
-        ///     static and are not registered.
+        ///     it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every
+        ///     mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the
+        ///     services they inject, call this host's own handlers through their static entries and construct referenced handlers.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>

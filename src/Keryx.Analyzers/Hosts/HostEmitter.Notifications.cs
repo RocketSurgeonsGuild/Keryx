@@ -6,8 +6,8 @@ namespace Keryx.Analyzers.Hosts;
 
 /// <summary>
 ///     Notification dispatch and publish pipelines (ADR 0001, Notifications): typed <c>Publish</c> overloads, generic
-///     <c>Publish&lt;TNotification&gt;</c> that never boxes a struct notification, and per notification type a pipeline context holding its
-///     handlers and the injected services of its notification behaviors, one flat <c>INext</c> link struct per notification behavior, and the
+///     <c>Publish&lt;TNotification&gt;</c> that never boxes a struct notification, and per notification type a pipeline context holding what
+///     its handlers need (the services of the host's own handlers, referenced handlers) and the injected services of its notification behaviors, one flat <c>INext</c> link struct per notification behavior, and the
 ///     publish strategy (sequential or parallel, run all, then one <c>AggregateException</c>), which calls the handlers directly. A type that
 ///     resolves nothing (every handler's invoker is static, or it has no handlers, and its behaviors inject nothing) has no context: its
 ///     strategy and links are static members of a static class (OQ-70).
@@ -209,8 +209,8 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     Whether a publish pipeline has a context (created once per scope): only when it resolves something, a handler whose invoker is not
-    ///     static (the context holds it) or a service its behaviors inject, the unkeyed <c>IServiceProvider</c> included (ADR 0001, Generated
+    ///     Whether a publish pipeline has a context (created once per scope): only when it resolves something, for a handler whose invoker is
+    ///     not static (the context holds its services or the handler) or a service its behaviors inject, the unkeyed <c>IServiceProvider</c> included (ADR 0001, Generated
     ///     pipeline shape; OQ-70, OQ-63). Otherwise its publish strategy and its links are static members of a static class, and the mediator
     ///     has no field for it.
     /// </summary>
@@ -292,8 +292,9 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The pipeline context of one notification type: its handlers that have injected parameters and the injected services of its
-    ///     notification behaviors, resolved once per scope; the publish strategy, which calls the handlers directly; and one flat link struct
+    ///     The pipeline context of one notification type: for its handlers that have injected parameters, the services each of the host's own
+    ///     handlers injects (called through its static entry) and each referenced handler, constructed with <c>new</c> (owner decisions 42 and
+    ///     44), and the injected services of its notification behaviors, resolved once per scope; the publish strategy, which calls the handlers directly; and one flat link struct
     ///     per notification behavior (<c>Link{k}</c>, whose last one runs the strategy). A type that resolves nothing has no context: its
     ///     publish strategy (static) and its links are nested in a static class of the same name; its last link takes the notification, or
     ///     nothing when there are no handlers.
@@ -309,20 +310,15 @@ internal static partial class HostEmitter
             writer.Documentation(
                 pipeline.Handlers.IsEmpty
                     ? $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: the injected services of its behaviors, resolved once per scope (it has no handlers).</summary>"
-                    : $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>"
+                    : $"<summary>The publish pipeline context of <c>{Display(notification.Type)}</c>: {HandlersHeld(pipeline)}the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>"
             );
             writer.Line($"private sealed class {context}");
             writer.Open();
             var resolution = new List<string>(pipeline.Handlers.Length + notification.ContextServices.Count + 1);
+            var variable = notification.ContextServices.Count;
             for (var i = 0; i < pipeline.Handlers.Length; i++)
             {
-                var handler = pipeline.Handlers[i].Handler;
-                if (!handler.StaticInvoker)
-                {
-                    writer.Member(plainField: true);
-                    writer.Line($"public readonly {handler.HandlerClass} {HandlerField(i)};");
-                    resolution.Add($"{HandlerField(i)} = {ServiceProviderExtensions}.GetRequiredService<{handler.HandlerClass}>({ServiceProviderName});");
-                }
+                WriteHandlerFields(writer, pipeline.Handlers[i].Handler, HandlerField(i), resolution, ref variable);
             }
 
             WriteServiceFields(writer, notification.ContextServices, notification.ContextServiceProvider, resolution);
@@ -506,17 +502,31 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The direct call of one handler's invoker, from inside the context: handlers have no behaviors of their own (ADR 0001,
-    ///     Notifications). It is called on the class for a static invoker, else on the handler instance the context holds; it receives the
-    ///     notification itself (a class converts to the handler's base type or interface implicitly), or, for a struct notification and an
-    ///     interface-typed handler, the publish's one box.
+    ///     The direct call of one handler, from inside the context: handlers have no behaviors of their own (ADR 0001, Notifications). A static
+    ///     invoker and the host's own handler's static entry (with the services the context holds for it) are called on the class, a
+    ///     referenced handler on the instance the context holds (<see cref="HandlerInvocation" />); it receives the notification itself (a
+    ///     class converts to the handler's base type or interface implicitly), or, for a struct notification and an interface-typed handler,
+    ///     the publish's one box.
     /// </summary>
     private static string HandlerCall(NotificationPipeline pipeline, int handler)
     {
         var entry = pipeline.Handlers[handler];
-        var target = entry.Handler.StaticInvoker ? entry.Handler.HandlerClass : HandlerField(handler);
         var argument = entry.Boxed ? $"{Unsafe}.As<{entry.Handler.MessageType}>(boxed)" : "notification";
-        return $"{target}.{HandlerAnalysis.InvokerName}({argument}, cancellationToken)";
+        return HandlerInvocation(entry.Handler, "", HandlerField(handler), argument);
+    }
+
+    /// <summary>
+    ///     What a publish pipeline context holds for its handlers, for its documentation, followed by <c>and </c>; empty when every handler's
+    ///     invoker is static.
+    /// </summary>
+    private static string HandlersHeld(NotificationPipeline pipeline)
+    {
+        var own = pipeline.Handlers.Any(static h => h.Handler.StaticEntry);
+        var referenced = pipeline.Handlers.Any(static h => h.Handler is { StaticInvoker: false, StaticEntry: false });
+        return own && referenced ? "the services its handlers inject, its referenced handlers and "
+            : referenced ? "its handlers and "
+            : own ? "the services its handlers inject and "
+            : "";
     }
 
     private static string HandlerField(int handler) => "Handler" + Digits(handler);

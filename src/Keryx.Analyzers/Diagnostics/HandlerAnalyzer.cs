@@ -28,6 +28,7 @@ public sealed class HandlerAnalyzer : DiagnosticAnalyzer
         Descriptors.ResponseNullabilityMismatch,
         Descriptors.InvalidServiceKey,
         Descriptors.ForeignRequestHandler,
+        Descriptors.DisposableHandlerClass,
         Descriptors.MisplacedHandlerOrder,
     ];
 

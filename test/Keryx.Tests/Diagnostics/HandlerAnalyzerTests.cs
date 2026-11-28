@@ -1,12 +1,13 @@
 using Keryx.Analyzers;
 using Keryx.Analyzers.Diagnostics;
+using Keryx.Analyzers.Hosts;
 using Microsoft.CodeAnalysis;
 
 namespace Keryx.Tests.Diagnostics;
 
 /// <summary>
-///     KRX002-KRX007 (KRX003 for request bases, abstract and closed), KRX012 (handler classes), KRX013-KRX018, KRX023 and KRX040, each with a
-///     positive and a negative case.
+///     KRX002-KRX007 (KRX003 for request bases, abstract and closed), KRX012 (handler classes), KRX013-KRX018, KRX023, KRX025 and KRX040, each
+///     with a positive and a negative case.
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public class HandlerAnalyzerTests : AnalyzerTest
@@ -689,6 +690,61 @@ public class HandlerAnalyzerTests : AnalyzerTest
     }
 
     [Test]
+    [Arguments(false, "public partial class H : IDisposable { public void Dispose() { } private static string Handle(Ping request) => \"\"; }", "System.IDisposable")]
+    [Arguments(false, "public partial class H : IAsyncDisposable { public ValueTask DisposeAsync() => default; private static string Handle(Ping request, IServiceProvider services) => \"\"; }", "System.IAsyncDisposable")]
+    [Arguments(false, "public abstract class Owner : IDisposable { public void Dispose() { } } public partial class H : Owner { private static string Handle(Ping request) => \"\"; }", "System.IDisposable")]
+    [Arguments(false, "public interface IResource : IAsyncDisposable { } public partial class H : IResource { public ValueTask DisposeAsync() => default; private static ValueTask Handle(Rang notification) => default; }", "System.IAsyncDisposable")]
+    [Arguments(true, "public partial class H : IDisposable { public void Dispose() { } private static string Handle(Ping request, IServiceProvider services) => \"\"; }", "System.IDisposable")]
+    public async Task KRX025_Disposable_Handler_Class(bool host, string source, string disposable, CancellationToken cancellationToken)
+    {
+        // Directly, through a base class or through another interface, with and without injected parameters, in a library and in a host:
+        // Keryx never disposes a handler object (owner decision 45).
+        var result = await ( host ? Builder.WithGenerator<HostGenerator>().WithKeryxHost() : Builder )
+                          .WithAnalyzer<HandlerAnalyzer>()
+                          .AddSources(Usings + Ping + "public sealed record Rang : INotification;\n" + source)
+                          .Build()
+                          .GenerateAsync(cancellationToken);
+        var diagnostics = result.AnalyzerResults[typeof(HandlerAnalyzer)].Diagnostics;
+
+        await Assert.That(Ids(diagnostics)).IsEquivalentTo(["KRX025"]);
+        await Assert.That(Messages(diagnostics, "KRX025"))
+                    .IsEquivalentTo(
+                         [$"Handler class 'H' implements '{disposable}'; a handler class is stateless and is never disposed, so inject the disposable service instead"]
+                     );
+        var diagnostic = diagnostics.Single();
+        await Assert.That(diagnostic.Severity).IsEqualTo(DiagnosticSeverity.Error);
+        await Assert.That(diagnostic.Location.SourceTree!.GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan)).IsEqualTo("H");
+        await Assert.That(diagnostic.Descriptor.HelpLinkUri).IsEqualTo(Descriptors.HelpLinkBase + "krx025");
+        // The handler generator skips the handler, as it does for every handler error: no partial, so no manifest entry either.
+        await Assert.That(result.Results.Values.SelectMany(static r => r.SyntaxTrees).Where(static t => t.ToString().Contains("partial class H", StringComparison.Ordinal))).IsEmpty();
+        if (!host)
+        {
+            return;
+        }
+
+        // In a host the composer leaves the skipped handler out as well: KRX025 is the only error, so the generated code compiles (a
+        // mediator that still called H's static entry, which was not generated, would fail with CS0117), and nothing dispatches Ping or
+        // reaches H.
+        await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity == DiagnosticSeverity.Error).Select(static d => d.Id)).IsEquivalentTo(["KRX025"]);
+        await Assert.That(result.Results[typeof(HostGenerator)].Diagnostics).IsEmpty();
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(mediator).DoesNotContain("global::H");
+        await Assert.That(mediator).DoesNotContain("global::Ping");
+    }
+
+    [Test]
+    [Arguments("public partial class H { private static string Handle(Ping request, IDisposable resource, IAsyncDisposable other) => \"\"; }")]
+    [Arguments("public sealed class Resource : IDisposable { public void Dispose() { } } public partial class H { private static string Handle(Ping request, Resource resource) => \"\"; }")]
+    [Arguments("public static partial class H { private static string Handle(Ping request) => \"\"; } public sealed class Helper : IDisposable { public void Dispose() { } }")]
+    public async Task KRX025_Disposable_Services_Are_Fine(string source, CancellationToken cancellationToken)
+    {
+        // Injecting a disposable service is what KRX025 asks for: the container that created it disposes it.
+        var diagnostics = await AnalyzeAsync<HandlerAnalyzer>(Ping + source, cancellationToken);
+
+        await Assert.That(Ids(diagnostics)).IsEmpty();
+    }
+
+    [Test]
     [Arguments("public static partial class H { [HandlerOrder(1)] private static string Handle(Ping request) => \"\"; }")]
     [Arguments("public static class Helpers { [HandlerOrder(1)] public static void Run() { } }")]
     public async Task KRX040_HandlerOrder_Not_On_A_Notification_Handler(string source, CancellationToken cancellationToken)
@@ -750,6 +806,12 @@ public class HandlerAnalyzerTests : AnalyzerTest
                                    [HandlerOrder(1)]
                                    private static ValueTask<string?> Handle(Pong request, IService service) => default;
                                    private static int HandleAsync(Pong request, CancellationToken a, CancellationToken b) => 1;
+                               }
+
+                               public partial class Disposable : IDisposable
+                               {
+                                   public void Dispose() { }
+                                   private static string Handle(Ping request) => "";
                                }
                                """
                            )

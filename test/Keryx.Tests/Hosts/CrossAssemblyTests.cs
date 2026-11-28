@@ -189,8 +189,10 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).Contains("global::Orders.Journaled.Handle<global::Orders.CreateOrder, int, ");
         await Assert.That(mediator).Contains("global::Orders.IJournal Service0;");
         await Assert.That(mediator).Contains("global::Orders.Doubling.Handle<Link2>(");
-        await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName))
-                    .Contains("new global::Orders.CreateOrderHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Orders.IJournal>(serviceProvider))");
+        // A referenced handler with injected parameters is constructed by its pipeline context, never registered (owner decision 42).
+        await Assert.That(mediator)
+                    .Contains("Handler = new global::Orders.CreateOrderHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Orders.IJournal>(serviceProvider));");
+        await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("CreateOrderHandler");
     }
 
     [Test]
@@ -1056,6 +1058,43 @@ public class CrossAssemblyTests : HostTest
                      );
         await AssertWithoutLocationAsync(HostDiagnostics(result));
         await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("CountedHandler");
+    }
+
+    [Test]
+    public async Task KRX034_For_A_Referenced_Handler_Whose_Base_Class_Became_Disposable(CancellationToken cancellationToken)
+    {
+        // The library was built against a contracts assembly whose base class was not disposable (no KRX025); in the one the host resolves
+        // it is. The host's pipeline context would construct the handler and never dispose it (owner decision 45), so it is left out.
+        var contractsV1 = await CompileLibraryAsync("Contracts", "namespace Contracts; public abstract class Base { }", cancellationToken);
+        var contractsV2 = await CompileLibraryAsync(
+            "Contracts",
+            "namespace Contracts; public abstract class Base : System.IDisposable { public void Dispose() { } }",
+            cancellationToken,
+            ownLoadContext: true
+        );
+        var library = await CompileLibraryAsync(
+            "Lib",
+            """
+            namespace Lib;
+            public sealed record Pinged : Keryx.INotification;
+            public interface IClock { }
+            public partial class PingedHandler : Contracts.Base { private static System.Threading.Tasks.ValueTask Handle(Pinged notification, IClock clock) => default; }
+            """,
+            cancellationToken,
+            references: [contractsV1]
+        );
+
+        var result = await HostBuilder.AddCompilationReferences(contractsV2, library).AddSources(Usings + "namespace Sample;").Build().GenerateAsync(cancellationToken);
+
+        await Assert.That(ErrorIds(result)).IsEquivalentTo(["KRX034"]);
+        await Assert.That(Diagnostics(result))
+                    .IsEquivalentTo(
+                         [
+                             "KRX034: Handler 'PingedHandler' in the Keryx manifest of 'Lib' does not fit the types this host resolves: the class implements 'System.IDisposable', which a handler class may not (KRX025); build 'Lib' against the assemblies this host references",
+                         ]
+                     );
+        await AssertWithoutLocationAsync(HostDiagnostics(result));
+        await Assert.That(Source(result, HostEmitter.MediatorHintName)).DoesNotContain("PingedHandler");
     }
 
     [Test]

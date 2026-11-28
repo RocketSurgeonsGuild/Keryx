@@ -206,8 +206,11 @@ namespace Sample
             }
         }
 
-        private global::System.Threading.Tasks.ValueTask<string?> __Send0(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetPipeline0().Handler.InvokeAsync(request, cancellationToken);
+        private global::System.Threading.Tasks.ValueTask<string?> __Send0(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken)
+        {
+            var pipeline = __GetPipeline0();
+            return global::Sample.AnimalHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, cancellationToken);
+        }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline0 __GetPipeline0()
@@ -221,7 +224,7 @@ namespace Sample
             global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline0>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline0, new __Pipeline0(__serviceProvider), null) ?? state.__pipeline0);
 
         private global::System.Threading.Tasks.ValueTask<global::System.Guid> __Send1(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetPipeline1().Handler.InvokeAsync(request, cancellationToken);
+            global::Sample.CreateOrder.__keryx_InvokeAsync(request, __GetPipeline1().HandlerService0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline1 __GetPipeline1()
@@ -234,8 +237,11 @@ namespace Sample
         private __Pipeline1 __CreatePipeline1(__KeryxScopeState state) =>
             global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline1>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline1, new __Pipeline1(__serviceProvider), null) ?? state.__pipeline1);
 
-        private global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __Send2(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken) =>
-            __GetPipeline2().Handler.InvokeAsync(request, cancellationToken);
+        private global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __Send2(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken)
+        {
+            var pipeline = __GetPipeline2();
+            return global::Sample.LookupHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, pipeline.HandlerService2, pipeline.HandlerService3, pipeline.HandlerService4, pipeline.HandlerService5, pipeline.HandlerService6, pipeline.HandlerService7, cancellationToken);
+        }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline2 __GetPipeline2()
@@ -298,47 +304,63 @@ namespace Sample
             public object? __notification0;
         }
 
-        /// <summary>The pipeline context of <c>Sample.Animal</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Animal</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.AnimalHandler Handler;
+            public readonly global::System.IServiceProvider HandlerService0;
+            public readonly global::Keryx.IMediator HandlerService1;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.AnimalHandler>(serviceProvider);
+                HandlerService0 = serviceProvider;
+                HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Keryx.IMediator>(serviceProvider);
             }
         }
 
-        /// <summary>The pipeline context of <c>Sample.CreateOrder.Command</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.CreateOrder.Command</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline1
         {
-            public readonly global::Sample.CreateOrder Handler;
+            public readonly global::Sample.IClock HandlerService0;
 
             public __Pipeline1(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.CreateOrder>(serviceProvider);
+                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
         }
 
-        /// <summary>The pipeline context of <c>Sample.Lookup</c>: its handler, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Lookup</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline2
         {
-            public readonly global::Sample.LookupHandler Handler;
+            public readonly global::Sample.IGreeter HandlerService0;
+            public readonly global::Sample.IGreeter? HandlerService1;
+            public readonly global::Sample.IClock? HandlerService2;
+            public readonly int HandlerService3;
+            public readonly int? HandlerService4;
+            public readonly global::Sample.Mode HandlerService5;
+            public readonly int HandlerService6;
+            public readonly long? HandlerService7;
 
             public __Pipeline2(global::System.IServiceProvider serviceProvider)
             {
-                Handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.LookupHandler>(serviceProvider);
+                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IGreeter>(serviceProvider, "primary");
+                HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<global::Sample.IGreeter>(serviceProvider, "backup");
+                HandlerService2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);
+                HandlerService3 = serviceProvider.GetService(typeof(int)) is int __value3 ? __value3 : 3;
+                HandlerService4 = serviceProvider.GetService(typeof(int?)) is int __value4 ? (int?)__value4 : null;
+                HandlerService5 = serviceProvider.GetService(typeof(global::Sample.Mode)) is global::Sample.Mode __value5 ? __value5 : (global::Sample.Mode)(2);
+                HandlerService6 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), 1) is int __value6 ? __value6 : 2;
+                HandlerService7 = serviceProvider.GetService(typeof(long?)) is long __value7 ? (long?)__value7 : null;
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: its handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.OnPlaced Handler0;
+            public readonly global::Sample.IClock Handler0Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.OnPlaced>(serviceProvider);
+                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -348,7 +370,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = Handler0.InvokeAsync(notification, cancellationToken);
+                    task = global::Sample.OnPlaced.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -394,16 +416,16 @@ namespace Sample
 
 namespace Sample
 {
-    /// <summary>Registers this host's Keryx mediator and handlers.</summary>
+    /// <summary>Registers this host's Keryx mediator.</summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Keryx", "{KeryxVersion}")]
     internal static class KeryxServiceCollectionExtensions
     {
         /// <summary>
         ///     Registers <see cref="KeryxMediator" />, <see cref="global::Keryx.IMediator" />, <see cref="global::Keryx.ISender" /> and
         ///     <see cref="global::Keryx.IPublisher" /> as transient factories that each create a mediator over the provider that resolves
-        ///     it, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every mediator of the scope) when a
-        ///     pipeline has a context, and every handler class that has injected parameters, scoped, all with generated factories. Behaviors are
-        ///     static and are not registered.
+        ///     it, and, when a pipeline has a context, the scope state that holds the pipeline contexts (scoped: one per scope, shared by every
+        ///     mediator of the scope), with generated factories. Handlers and behaviors are not registered: the pipeline contexts resolve the
+        ///     services they inject, call this host's own handlers through their static entries and construct referenced handlers.
         ///     Registrations that already exist are kept, so a second call does nothing.
         /// </summary>
         /// <param name="services">The service collection.</param>
@@ -416,10 +438,6 @@ namespace Sample
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.ISender>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddTransient<global::Keryx.IPublisher>(services, static serviceProvider => new KeryxMediator(serviceProvider));
             global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new KeryxMediator.__KeryxScopeState());
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.AnimalHandler(serviceProvider, global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Keryx.IMediator>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.CreateOrder(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider)));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.LookupHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IGreeter>(serviceProvider, "primary"), global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<global::Sample.IGreeter>(serviceProvider, "backup"), global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider), serviceProvider.GetService(typeof(int)) is int __value3 ? __value3 : 3, serviceProvider.GetService(typeof(int?)) is int __value4 ? (int?)__value4 : null, serviceProvider.GetService(typeof(global::Sample.Mode)) is global::Sample.Mode __value5 ? __value5 : (global::Sample.Mode)(2), (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), 1) is int __value6 ? __value6 : 2, serviceProvider.GetService(typeof(long?)) is long __value7 ? (long?)__value7 : null));
-            global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped(services, static serviceProvider => new global::Sample.OnPlaced(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider)));
             return services;
         }
     }

@@ -9,7 +9,9 @@ and `IPublisher` forwarders, OQ-74); updated for decisions 33, 34 and 36 (the re
 compiled out of the benchmark builds, `MessageName<T>`; OQ-72, OQ-73 and OQ-75); updated for decision 37 (the second full benchmark
 run, at 3575a50; OQ-77); updated for decisions 38 and 39 (OQ-76 and OQ-77 decided: the `ValidateOnBuild` trade-off accepted and
 documented, a fixed invocation count for the direct call's NativeAOT `Publish` to one handler); updated for owner decisions 46 and 47,
-with 48 (2026-11-28: a transient mediator over a scoped state, one field per pipeline context; the size-bounded layout is OQ-78).
+with 48 (2026-11-28: a transient mediator over a scoped state, one field per pipeline context; the size-bounded layout is OQ-78);
+updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler registrations, a static entry for the host's own handlers,
+KRX025 for a disposable handler class; OQ-79).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -302,7 +304,28 @@ requests, streams and publishes, each state field holding its own pipeline's con
 the final tree) pass. Details, numbers and how the runs were kept quiet: open-questions, "The mediator is transient over a scoped state"; the reports are
 in the session scratchpad (`rework-scope/state/`).
 
+## Done: no handler registrations, static entries, KRX025 (owner decisions 42, 44 and 45, with 48, 2026-11-28)
+
+`AddKeryx()` registers the mediator service types and the scope state only. In a host, the handler generator gives each own handler
+with injected parameters an `internal static __keryx_InvokeAsync` that takes the services as parameters; its pipeline context holds
+those services (`HandlerServiceN`, `Handler{i}ServiceN`) and calls it, so the mediator never constructs the host's handler classes. A
+referenced handler is constructed by its context with `new` over the same resolutions. A handler class that implements `IDisposable`
+or `IAsyncDisposable` is KRX025 (and a referenced one that became disposable through a base class is left out with KRX034). Decision
+43 (sharing the handler's services with the behaviors' `ServiceN` fields) is the next step; until then a service both inject is resolved
+twice per context. Bytes per scope, exact (probe and BenchmarkDotNet agree), before then after: `RealWorldBehaviorsScopePerRequest`
+1,432 to 1,048 B, `RealWorldPublish5ScopePerRequest` 1,360 to 880 B, `RealWorldPublish1ScopePerRequest` 584 to 560 B, the publish
+behavior pair 736 to 712 B and 1,512 to 1,032 B; everything else unchanged. Time (JIT, the README's job, typed then `IMediator`):
+behaviors per scope 337 and 340 ns to 266 and 270 ns (ZeroAlloc.Mediator 247 ns), the publish to 5 handlers 563 and 573 ns to 405 and
+402 ns (the direct call 446 ns, ZeroAlloc.Mediator 366 ns); the long-lived rows within noise, `RealWorldBehaviors` typed 121.0 to
+122.5 ns over three interleaved rounds (one round beyond the error). 43 snapshots change (handler partials in a host gain the static
+entry; contexts hold services instead of handlers; `AddKeryx()` loses the handler registrations and its summary changes; two diagnostic
+descriptions and the KRX025 entry). Build, 1,606 tests and `--verify` (238, net10.0 and net11.0) pass. Details: open-questions,
+"Handlers are not registered"; the reports are in the session scratchpad (`rework-scope/handlers/`).
+
 ## Decisions for the owner
+
+**OQ-79** is open ([open-questions.md](adr/open-questions.md)): in a host, a handler whose injected parameter is named `InvokeAsync`
+gets a field `__keryx_InvokeAsync` next to the static entry of that name, and does not compile (CS0102); the proposal extends KRX015.
 
 **OQ-78** is open ([open-questions.md](adr/open-questions.md)): the scope state has one field per pipeline with a context (8 B each, in
 every scope that uses a context) because decision 47's slot cache measured slower on the long-lived path; the proposal keeps the fields
@@ -378,7 +401,9 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   direct call's 368 B (ZeroAlloc.Mediator 208 B), because a scope that uses no pipeline context resolves no scope state; scopes that use
   a context allocate 24 B more than in decision 37's run (1,432 B for the behaviors, 584 B and 1,360 B for the publishes to 1 and 5
   handlers: the 96 B state replaces the 104 B scoped mediator, plus the 32 B transient mediator). Open-questions, "The mediator is
-  transient over a scoped state".
+  transient over a scoped state". Since owner decisions 42 and 44 (no handler registrations, static entries) those scopes allocate
+  1,048 B, 560 B and 880 B (1,032 B for the publish to 5 handlers with the notification behavior); open-questions, "Handlers are not
+  registered".
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.01 ns (inlined) and 0.53 ns for 1 and 5 handlers, against Keryx typed at 0.44 ns and 0.48 ns; under
   NativeAOT 0.04 ns (a fixed invocation count, decision 39, OQ-77; from the run that proved it, 0.06 ns in decision 37's run) and 0.67
