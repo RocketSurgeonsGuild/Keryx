@@ -308,9 +308,10 @@ public class HostAllocationTests : HostTest
     }
 
     /// <summary>
-    ///     Two requests whose contexts each hold one scoped <c>Clock</c>: <c>Handled</c>'s for its handler (the host's own, called through
-    ///     its static entry), <c>Behaved</c>'s for its behavior. A ping without a context is the baseline of a scope that resolves the
-    ///     mediator and sends.
+    ///     Requests whose contexts each hold one scoped <c>Clock</c>: <c>Handled</c>'s for its handler (the host's own, called through its
+    ///     static entry), <c>Behaved</c>'s for its behavior, <c>Both</c>'s for its handler and its behavior, which share it (owner decision
+    ///     43); and notifications whose contexts hold one: <c>Rung</c>'s for its one handler, <c>Rang</c>'s for its two handlers, which
+    ///     share it. A ping without a context is the baseline of a scope that resolves the mediator and sends.
     /// </summary>
     private const string HandlerServices = """
         namespace Sample;
@@ -334,6 +335,24 @@ public class HostAllocationTests : HostTest
                 next.InvokeAsync(cancellationToken);
         }
 
+        public sealed record Both : IRequest<int>;
+        public partial class BothHandler { [Behavior(typeof(BothClocked))] private static int Handle(Both request, Clock clock) => 1; }
+
+        [RequestBehavior]
+        public static class BothClocked
+        {
+            public static ValueTask<int> Handle<TNext>(Both request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TNext : struct, INext<int> =>
+                next.InvokeAsync(cancellationToken);
+        }
+
+        public sealed record Rung : INotification;
+        public partial class OnRung { private static ValueTask Handle(Rung notification, Clock clock) => default; }
+
+        public sealed record Rang : INotification;
+        public partial class OnRangA { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+        public partial class OnRangB { private static ValueTask Handle(Rang notification, Clock clock) => default; }
+
         public static class Registrations
         {
             public static void Required(IServiceCollection services) => services.AddScoped(static _ => new Clock());
@@ -349,8 +368,14 @@ public class HostAllocationTests : HostTest
                     ["ping"] = Region(scopes, static mediator => mediator.Send(new Ping())),
                     ["handler service"] = Region(scopes, static mediator => mediator.Send(new Handled())),
                     ["behavior service"] = Region(scopes, static mediator => mediator.Send(new Behaved())),
+                    ["shared by handler and behavior"] = Region(scopes, static mediator => mediator.Send(new Both())),
+                    ["one handler"] = Region(scopes, static mediator => Completed(mediator.Publish(new Rung()))),
+                    ["shared by two handlers"] = Region(scopes, static mediator => Completed(mediator.Publish(new Rang()))),
                 };
             }
+
+            private static ValueTask<int> Completed(ValueTask published) =>
+                published.IsCompletedSuccessfully ? new(0) : throw new InvalidOperationException("The publish did not complete synchronously.");
 
             /// <summary>The bytes of 1,000 scopes that each send once, the smallest of five repeats after a warm-up.</summary>
             private static long Region(IServiceScopeFactory scopes, Func<KeryxMediator, ValueTask<int>> send)
@@ -393,6 +418,22 @@ public class HostAllocationTests : HostTest
 
         await Assert.That(allocated["handler service"]).IsEqualTo(allocated["behavior service"]);
         await Assert.That(allocated["handler service"]).IsGreaterThan(allocated["ping"]);
+    }
+
+    [Test]
+    public async Task A_Service_Shared_In_A_Context_Costs_A_Scope_What_One_Consumer_Costs(CancellationToken cancellationToken)
+    {
+        // Owner decision 43: a context resolves each service once for its behaviors and its handlers and holds it in one field. A request
+        // whose handler and behavior inject the Clock costs a scope exactly what one whose handler alone injects it costs, and a publish to
+        // two handlers that inject it exactly what a publish to one handler costs (the same context size, one Clock, one scope entry).
+        var host = await CompileHostAsync(HandlerServices, cancellationToken);
+        await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
+
+        var allocated = Call<Dictionary<string, long>>(host, "Sample.HandlerProbe", "Measure", provider);
+
+        await Assert.That(allocated["shared by handler and behavior"]).IsEqualTo(allocated["handler service"]);
+        await Assert.That(allocated["shared by two handlers"]).IsEqualTo(allocated["one handler"]);
+        await Assert.That(allocated["one handler"]).IsGreaterThan(allocated["ping"]);
     }
 
     [Test]

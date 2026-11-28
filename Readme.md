@@ -232,11 +232,14 @@ not at all (short-circuit). A request with no response is `IRequest<Unit>`, so a
 **Behavior methods.** The message, `next` and an optional `CancellationToken` are found by type, in any order; every other parameter is
 **injected** like a handler's (keyed and default-valued forms included). The host resolves those services once per scope into the
 pipeline context, so no behavior instance is ever created (a `[StreamBehavior]` method's own iterator is still allocated per `Stream`
-call; see [Streaming](#streaming)). The context holds each service once, however many behavior methods of the pipeline inject it (same
-type and same key; a keyed and an unkeyed `IClock` are two services): it is resolved as required when any of them requires it, and
-otherwise once as optional, with each method's own default applied when it is missing. So **a transient service that several behaviors
-of one pipeline inject is one instance per scope and pipeline**, shared by those behaviors, not one per behavior. An unkeyed
-`IServiceProvider` is the scope's provider itself, which the context holds in its own field only when a behavior method injects it. The
+call; see [Streaming](#streaming)). The context holds each service once, however many behavior methods and handlers of the pipeline
+inject it (same type and same key; a keyed and an unkeyed `IClock` are two services): it is resolved as required when any of them
+requires it, and otherwise once as optional, with each consumer's own default applied when it is missing. So **a transient service that
+several behaviors or handlers of one pipeline inject is one instance per scope and pipeline**, shared by them, not one per behavior or
+handler: a request's handler and its behaviors get the same instance, and so do all the handlers of a notification (owner decision 43). An unkeyed
+`IServiceProvider` is the scope's provider itself: the context holds it in its own `ServiceProvider` field when a behavior method or one
+of the host's own handlers (through its static entry) injects it, a referenced handler's constructor receives the context's constructor
+provider directly, and otherwise the context has no such field. The
 context's fields are named by service type and key, not by where they are first used, so reordering behaviors or their parameters
 does not rename them. A method is either:
 
@@ -413,8 +416,9 @@ namespace:
   holds the scope's pipeline contexts, with generated factories and `TryAdd`. It registers no handler class (owner decision 42) and no
   behavior: a pipeline context resolves the services the host's own handler injects and calls the handler's generated
   `internal static __keryx_InvokeAsync` (owner decision 44), so the mediator never constructs the host's handler classes; it constructs
-  a referenced (library) handler with `new`, once per scope and pipeline. A polymorphic notification handler gets one instance (or one
-  set of services) per publish pipeline.
+  a referenced (library) handler with `new`, once per scope and pipeline. Each pipeline context resolves a service once for all its
+  behaviors and handlers (owner decision 43). A polymorphic notification handler gets one instance (or one set of services) per publish
+  pipeline.
 
 The mediator is **transient and small** (owner decision 46): it holds the scope's provider and, from its first call that needs a
 pipeline context, the **scope state**, which every mediator resolved in the scope shares. So each resolve is a new mediator, but the
@@ -425,7 +429,7 @@ handlers are all static (or that has none) and whose behaviors inject nothing, h
 such a pipeline's entry calls the outermost behavior method, or the handler, or for a notification its static publish strategy, directly,
 and each `next` link holds only the request or notification. A scope that uses no context resolves no state and allocates only the 32 B
 mediator for Keryx. From then on a `Send` allocates nothing. A handler's or behavior method's transient dependencies live as long as the
-scope, and the behaviors of one pipeline that inject the same transient share one instance.
+scope, and the behaviors and handlers of one pipeline that inject the same transient share one instance.
 
 Singletons and hosted services that need the mediator create a scope with `IServiceScopeFactory`. A singleton that injects
 `KeryxMediator`, `IMediator`, `ISender` or `IPublisher` passes `ValidateOnBuild` and is resolved (the mediator is transient), and gets a
@@ -539,11 +543,12 @@ the machine: another session there started some during the JIT run, so the five 
 nothing else was busy and run again when something started while it ran. "Decision 32's run" in the notes is the previous full run,
 earlier the same day at `1652e50` on the same machine, before decisions 34 to 36.
 
-The tables predate owner decision 46 (2026-11-28: a transient mediator over a scoped state) and owner decisions 42 and 44 (2026-11-28:
-no handler registrations; the host's own handlers called through a static entry), which change Keryx's scope-per-request rows; the
-notes below give those rows as measured after each, on the same machine and settings (a run of the affected classes only, compared with
-a run of the code before it; open-questions, "The mediator is transient over a scoped state" and "Handlers are not registered"). The next
-full run refreshes the tables.
+The tables predate owner decision 46 (2026-11-28: a transient mediator over a scoped state), owner decisions 42 and 44 (2026-11-28:
+no handler registrations; the host's own handlers called through a static entry) and owner decision 43 (2026-11-28: a context's
+handlers and behaviors share its services), which change Keryx's scope-per-request rows; the notes below give those rows as measured
+after each, on the same machine and settings (a run of the affected classes only, compared with a run of the code before it;
+open-questions, "The mediator is transient over a scoped state", "Handlers are not registered" and "Handlers and behaviors share a
+context's services"). The next full run refreshes the tables.
 
 ```
 BenchmarkDotNet v0.15.8, macOS 27.2.1 (26B131) [Darwin 27.2.0]
@@ -741,7 +746,13 @@ Handlers that await the SQLite query, from the long-lived scope:
   `IMediator`, 143 and 147 ns with 560 B (1 handler), 405 and 402 ns with 880 B (5 handlers), 226 and 232 ns with 712 B and 481 and
   486 ns with 1,032 B with the notification behavior (174 and 178 ns, 563 and 573 ns, 258 and 260 ns, 636 and 654 ns, and 584, 1,360,
   736 and 1,512 B, before it, in the same session; the direct call 123, 446, 200 and 518 ns; ZeroAlloc.Mediator 128 ns and 456 B, 366 ns
-  and 840 B). With 5 handlers Keryx is now below the direct call (whose handlers are registered scoped).
+  and 840 B). With 5 handlers Keryx is now below the direct call (whose handlers are registered scoped). Since owner decision 43 a
+  publish context resolves the repository and the logger once for all its handlers (and the behavior's logger with them), so the five
+  handlers' ten fields become two: typed, then `IMediator`, 311 and 314 ns with 816 B (5 handlers), 219 and 226 ns with 704 B and 381
+  and 390 ns with 960 B with the notification behavior; 1 handler unchanged at 143 and 146 ns with 560 B (397 and 398 ns, 880 B; 226
+  and 234 ns, 712 B; 478 and 481 ns, 1,032 B; 145 and 144 ns, before it, in the same session; the direct call 444, 202, 510 and 122 ns;
+  ZeroAlloc.Mediator 364 ns and 840 B with 5 handlers). Over three interleaved rounds the publish to 5 handlers measured 398 ns before
+  and 305 ns after (typed), ZeroAlloc.Mediator 366 ns.
 - SQLite's async methods complete synchronously, so no row waits on I/O: the async and parallel rows measure each library's path for
   handlers that return completed tasks, not overlapping work, and each library's parallel strategy measures within 3% of its sequential
   publish. Keryx allocates what the direct call allocates in all four columns.

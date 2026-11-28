@@ -36,14 +36,23 @@ namespace Keryx.Analyzers.Hosts;
 ///     Polymorphic handlers), in no particular order (ordinal by type). Empty for request and stream request handlers.
 /// </param>
 /// <param name="ContextServices">
-///     The distinct services the behavior methods of a request or stream handler's pipeline inject, which its pipeline context resolves once
-///     each (<see cref="ContextServiceModel" />), in the stable order of <see cref="PipelineBehaviors.CompareServices" />; the behaviors'
-///     <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. The unkeyed <c>IServiceProvider</c> is not among them
-///     (<paramref name="ContextServiceProvider" />). Empty for a notification handler.
+///     The distinct services a request or stream handler's pipeline context resolves once each and shares (<see cref="ContextServiceModel" />,
+///     owner decisions 9 and 43): those its behavior methods inject and those the handler injects, in the stable order of
+///     <see cref="PipelineBehaviors.CompareServices" />; the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> and the handler's
+///     <paramref name="ServiceSlots" /> index into it. The unkeyed <c>IServiceProvider</c> is not among them
+///     (<paramref name="ContextServiceProvider" />). Empty for a notification handler: a publish context shares the services of all its
+///     handlers and behaviors (<see cref="NotificationPipeline.Services" />).
 /// </param>
 /// <param name="ContextServiceProvider">
-///     Whether a behavior method of the pipeline injects the unkeyed <c>IServiceProvider</c>, so its pipeline context holds the provider it
-///     is built with in a <c>ServiceProvider</c> field (OQ-63). <see langword="false" /> for a notification handler.
+///     Whether a behavior method of the pipeline, or the handler through its static entry, injects the unkeyed <c>IServiceProvider</c>, so
+///     its pipeline context holds the provider it is built with in a <c>ServiceProvider</c> field (OQ-63); a referenced handler's
+///     constructor receives the provider the context is built with directly. <see langword="false" /> for a notification handler.
+/// </param>
+/// <param name="ServiceSlots">
+///     For each of <paramref name="Services" /> of a request or stream handler, the index of the context service it receives
+///     (<paramref name="ContextServices" />), or <see cref="PipelineBehaviors.ServiceProviderSlot" /> for the unkeyed
+///     <c>IServiceProvider</c>. Empty for a notification handler (its slots are its publish context's,
+///     <see cref="NotificationHandlerPipeline.ServiceSlots" />) and for a static invoker.
 /// </param>
 internal sealed record HostHandlerModel(
     string HandlerClass,
@@ -59,7 +68,8 @@ internal sealed record HostHandlerModel(
     int Order,
     EquatableArray<HostNotificationModel> Deliveries = default,
     EquatableArray<ContextServiceModel> ContextServices = default,
-    bool ContextServiceProvider = false
+    bool ContextServiceProvider = false,
+    EquatableArray<int> ServiceSlots = default
 );
 
 /// <summary>
@@ -78,10 +88,10 @@ internal sealed record HostHandlerModel(
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior from the publish pipeline (for KRX036).</param>
 /// <param name="Location">Its first declaration when it is in source, for KRX037.</param>
 /// <param name="ContextServices">
-///     The distinct services its notification behaviors inject, which its publish pipeline context resolves once each
-///     (<see cref="ContextServiceModel" />), in the stable order of <see cref="PipelineBehaviors.CompareServices" />; the behaviors'
-///     <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. The unkeyed <c>IServiceProvider</c> is not among them
-///     (<paramref name="ContextServiceProvider" />).
+///     The distinct services its notification behaviors inject (<see cref="ContextServiceModel" />), in the stable order of
+///     <see cref="PipelineBehaviors.CompareServices" />; the behaviors' <see cref="PipelineBehaviorModel.ServiceSlots" /> index into it. The
+///     unkeyed <c>IServiceProvider</c> is not among them (<paramref name="ContextServiceProvider" />). Its publish pipeline context also shares
+///     them with the services its handlers inject, which only the composition knows (<see cref="NotificationPipeline.Services" />).
 /// </param>
 /// <param name="ContextServiceProvider">
 ///     Whether a notification behavior injects the unkeyed <c>IServiceProvider</c>, so its publish pipeline context holds the provider it is
@@ -207,26 +217,34 @@ internal sealed record ServiceParameterModel(
 ///     as required (<c>GetRequiredService</c>/<c>GetRequiredKeyedService</c>) and every consumer receives that instance; when all of them
 ///     are optional it is resolved once with <c>GetService</c>/<c>GetKeyedService</c> into a nullable field, and each call site applies its
 ///     own parameter's default. The unkeyed <c>IServiceProvider</c> is not one of them: the context holds the provider it is built with in
-///     its own <c>ServiceProvider</c> field (OQ-63). A keyed <c>IServiceProvider</c> is an ordinary keyed service.
+///     its own <c>ServiceProvider</c> field (OQ-63). A keyed <c>IServiceProvider</c> is an ordinary keyed service. Its consumers are the
+///     context's behavior methods and its handlers (owner decision 43): the host's own handlers receive it through their static entries,
+///     referenced handlers through the constructor the context calls.
 /// </summary>
 /// <param name="ServiceType">The service type, fully qualified, without a top-level nullable reference annotation.</param>
 /// <param name="ServiceKey">The <c>[FromKeyedServices]</c> key as a C# expression, or <see langword="null" />.</param>
 /// <param name="IsValueType">Whether the service type is a value type, including <c>Nullable&lt;T&gt;</c>.</param>
 /// <param name="NullableUnderlyingType">For a <c>Nullable&lt;T&gt;</c> service type, <c>T</c>.</param>
 /// <param name="Required">Whether at least one consumer is required (has no default value), so the service is resolved as required.</param>
+/// <param name="Held">
+///     Whether the context holds it in a field: a behavior method or an own handler's static entry reads it on every call. When only the
+///     constructors of referenced handlers take it, the context's constructor resolves it into a local and passes it to them.
+/// </param>
 internal sealed record ContextServiceModel(
     string ServiceType,
     string? ServiceKey,
     bool IsValueType,
     string? NullableUnderlyingType,
-    bool Required
+    bool Required,
+    bool Held
 )
 {
     /// <summary>
-    ///     The service a parameter injects, as a pipeline context shares it: required unless the parameter has a default value.
+    ///     The service a parameter injects, as a pipeline context shares it: required unless the parameter has a default value; held in a
+    ///     field when <paramref name="held" /> (the consumer reads it on every call, not only in a constructor).
     /// </summary>
-    public static ContextServiceModel For(ServiceParameterModel parameter) =>
-        new(parameter.ServiceType, parameter.ServiceKey, parameter.IsValueType, parameter.NullableUnderlyingType, parameter.DefaultValue is null);
+    public static ContextServiceModel For(ServiceParameterModel parameter, bool held) =>
+        new(parameter.ServiceType, parameter.ServiceKey, parameter.IsValueType, parameter.NullableUnderlyingType, parameter.DefaultValue is null, held);
 
     /// <summary>Whether a parameter injects this service: the same service type and key.</summary>
     public bool Matches(ServiceParameterModel parameter) =>

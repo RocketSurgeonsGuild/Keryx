@@ -11,7 +11,8 @@ run, at 3575a50; OQ-77); updated for decisions 38 and 39 (OQ-76 and OQ-77 decide
 documented, a fixed invocation count for the direct call's NativeAOT `Publish` to one handler); updated for owner decisions 46 and 47,
 with 48 (2026-11-28: a transient mediator over a scoped state, one field per pipeline context; the size-bounded layout is OQ-78);
 updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler registrations, a static entry for the host's own handlers,
-KRX025 for a disposable handler class; OQ-79).
+KRX025 for a disposable handler class; OQ-79); updated for owner decision 43, with 48 (2026-11-28: a context's handlers and behaviors
+share its services).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -322,6 +323,23 @@ entry; contexts hold services instead of handlers; `AddKeryx()` loses the handle
 descriptions and the KRX025 entry). Build, 1,606 tests and `--verify` (238, net10.0 and net11.0) pass. Details: open-questions,
 "Handlers are not registered"; the reports are in the session scratchpad (`rework-scope/handlers/`).
 
+## Done: handlers and behaviors share a context's services (owner decision 43, with 48, 2026-11-28)
+
+Each pipeline context resolves a (service type, key) once for its behaviors and its handlers together, by decision 9's rules and
+decision 28's numbering (`PipelineBehaviors.ShareServices` with the handlers as consumers: in the handler model for a request or stream
+pipeline, in the composition for a publish pipeline). The host's own handlers' static entries receive the `ServiceN` fields, a
+referenced handler is constructed over them (a service only its constructor takes is a constructor local), and the `HandlerServiceN`
+and `Handler{i}ServiceN` fields are gone. A transient dependency is one instance per context, shared by a notification's handlers or
+a request's handler and its behaviors (accepted). Bytes per scope, exact (probe and BenchmarkDotNet agree), before then after:
+`RealWorldPublish5ScopePerRequest` 880 to 816 B, the publish behavior pair 712 to 704 B and 1,032 to 960 B; everything else unchanged.
+Time (JIT, the README's job, typed then `IMediator`): the publish to 5 handlers 397 and 398 ns to 311 and 314 ns (305 ns typed over
+three interleaved rounds; the direct call 444 ns, ZeroAlloc.Mediator 364 ns; the deep dive projected 355 to 375 ns), with the
+notification behavior 478 and 481 ns to 381 and 390 ns; the long-lived rows within noise (`RealWorldBehaviors` typed 121.5 to 122.2 ns
+over three rounds; `SendSyncDepth0`/`8` and `PublishTo1` move between two levels in both trees). 18 snapshots change (field names and
+counts, the static entries' arguments, context summaries) and one is new. Build, 1,612 tests and `--verify` (238, net10.0 and net11.0)
+pass. Details: open-questions, "Handlers and behaviors share a context's services"; the reports are in the session scratchpad
+(`rework-scope/shared/`).
+
 ## Decisions for the owner
 
 **OQ-79** is open ([open-questions.md](adr/open-questions.md)): in a host, a handler whose injected parameter is named `InvokeAsync`
@@ -403,7 +421,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
   handlers: the 96 B state replaces the 104 B scoped mediator, plus the 32 B transient mediator). Open-questions, "The mediator is
   transient over a scoped state". Since owner decisions 42 and 44 (no handler registrations, static entries) those scopes allocate
   1,048 B, 560 B and 880 B (1,032 B for the publish to 5 handlers with the notification behavior); open-questions, "Handlers are not
-  registered".
+  registered". Since owner decision 43 (shared services) the publish to 5 handlers allocates 816 B (960 B with the notification
+  behavior, 704 B for 1 handler with it); open-questions, "Handlers and behaviors share a context's services".
 - **Publish baseline:** the direct call is non-async with an `async` fallback for handlers that do not complete synchronously; the
   README's Publish table shows 0.01 ns (inlined) and 0.53 ns for 1 and 5 handlers, against Keryx typed at 0.44 ns and 0.48 ns; under
   NativeAOT 0.04 ns (a fixed invocation count, decision 39, OQ-77; from the run that proved it, 0.06 ns in decision 37's run) and 0.67
@@ -418,8 +437,8 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Add `icons/keryx-icon-512.png`; the package picks it up when the file exists.
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
-  decision 37's run at 3575a50; Keryx's scope-per-request cells predate decision 46, whose numbers are in the README's notes; NativeAOT
-  was not measured for decision 46).
+  decision 37's run at 3575a50; Keryx's scope-per-request cells predate decisions 46, 42, 44 and 43, whose numbers are in the README's
+  notes; NativeAOT was not measured for them).
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
   `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
   generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified

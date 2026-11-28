@@ -79,7 +79,7 @@ namespace Sample
         }
 
         private global::System.Threading.Tasks.ValueTask<string> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken) =>
-            global::Sample.PingHandler.__keryx_InvokeAsync(request, __GetPipeline0().HandlerService0, cancellationToken);
+            global::Sample.PingHandler.__keryx_InvokeAsync(request, __GetPipeline0().Service0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline0 __GetPipeline0()
@@ -116,11 +116,11 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Ping</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.IClock HandlerService0;
+            public readonly global::Sample.IClock Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
         }
     }

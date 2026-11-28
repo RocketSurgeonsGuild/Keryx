@@ -33,8 +33,9 @@ question, the interim behavior you are using and a proposal, continue with the s
 - A host (net10.0+; the `KeryxHost` MSBuild property, `true` by default for executables, test projects and Android apps that target
   net10.0 or later, OQ-61 and OQ-62) gets an internal transient `KeryxMediator : IMediator` (`ISender` + `IPublisher`) with typed overloads,
   exact-type dispatch (type patterns on the sealed request types, KRX024) with `Unsafe.As`, and an internal `AddKeryx()` that registers the mediator with generated factory
-  lambdas (nothing for handlers or behaviors: a pipeline context resolves the services the host's own handler injects and calls its
-  static entry, and constructs a referenced handler with `new`, owner decision 42); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
+  lambdas (nothing for handlers or behaviors: a pipeline context resolves the services its handlers and behaviors inject, each once,
+  shared by all of them, owner decision 43, calls the host's own handler's static entry with them, and constructs a referenced handler
+  with `new` over them, owner decision 42); `KeryxMediator`, `IMediator`, `ISender` and `IPublisher` are transient factories that each create a
   mediator over the scope (`sp => new KeryxMediator(sp)`), and the pipeline contexts live in a scoped `KeryxMediator.__KeryxScopeState`
   that every mediator of the scope shares, resolved by the first call that needs a context, one `object?` field per pipeline with a
   context (owner decisions 46 and 47, superseding decision 35's one mediator per scope; the size-bounded layout decision 47 asked for
@@ -327,17 +328,20 @@ Then request behaviors, as the ADR's Behaviors, Ordering and Performance contrac
   raises CS9113 and the mediator's header suppresses nothing but the obsolete-type warnings. The publish strategy of a publish pipeline
   without a context is static, in that class (Phase 6). The gate prototype is written the same way and `--prototype-disasm` must still show
   0 B and every link inlined.
-- **Shared services** (owner decision 9 of the second rework; ADR, Injected parameters). Every pipeline context (request, stream, publish)
-  resolves each distinct service (type and key) once, into one field, whatever the number of behavior parameters that inject it. The
+- **Shared services** (owner decisions 9 and 43; ADR, Injected parameters). Every pipeline context (request, stream, publish)
+  resolves each distinct service (type and key) once, into one field, whatever the number of behavior and handler parameters that inject
+  it: its behavior methods, the host's own handlers (through their static entries) and the referenced handlers it constructs share it. The
   fields are `Service0`, `Service1`, ... numbered by a stable ordinal sort of (service type, then key: none first, then the key's literal
   text), so any edit that keeps the set of services keeps every name (owner decision 28, OQ-64). The model computes this
-  (`PipelineBehaviors.ShareServices`: the pipeline model's `ContextServices`, and each behavior's `ServiceSlots` indexing into it); the
-  emitter only writes it. A required consumer makes the service required for all; when every consumer is optional it is resolved once
-  into a nullable field and each call site applies its own default. A transient shared by several behavior methods is one instance per
-  scope and pipeline. The unkeyed `IServiceProvider` is not a numbered service (owner decision 27, OQ-63): a context whose behaviors
-  inject it holds the provider it is built with in a `ServiceProvider` field (never resolved; the model's `ContextServiceProvider`, slot
-  `PipelineBehaviors.ServiceProviderSlot`), and has no such field otherwise; a handler's injected `IServiceProvider` is the provider
-  directly too. A keyed `IServiceProvider` is an ordinary keyed service; `IServiceScope` has no special case.
+  (`PipelineBehaviors.ShareServices`: the request or stream handler model's `ContextServices` and the publish composition's
+  `NotificationPipeline.Services`, with each behavior's and handler's `ServiceSlots` indexing into them); the emitter only writes it. A
+  required consumer makes the service required for all; when every consumer is optional it is resolved once into a nullable field and
+  each call site applies its own default. A service only referenced handlers' constructors take is a constructor local, not a field
+  (`ContextServiceModel.Held`). A transient shared by several behavior methods or handlers is one instance per scope and pipeline, a
+  notification's handlers included. The unkeyed `IServiceProvider` is not a numbered service (owner decision 27, OQ-63): the context holds
+  the provider it is built with in its own `ServiceProvider` field (never resolved; the model's `ContextServiceProvider`, slot
+  `PipelineBehaviors.ServiceProviderSlot`) when a behavior method or one of the host's own handlers (through its static entry) injects it;
+  a referenced handler's constructor receives the context's constructor provider directly; otherwise there is no such field. A keyed `IServiceProvider` is an ordinary keyed service; `IServiceScope` has no special case.
 
 **Done when:**
 

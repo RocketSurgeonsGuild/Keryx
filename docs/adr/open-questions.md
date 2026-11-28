@@ -34,7 +34,9 @@ follows; OQ-76 was raised while implementing it. OQ-72, OQ-73 and OQ-75, decided
 and 36), follow. Decision 37's run (the same day) is recorded in "Full benchmark run" and in those entries; OQ-77 was raised while
 doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 39), follow. "The mediator is transient over a scoped
 state" (owner decisions 46 and 47, 2026-11-28; it supersedes decision 35's one-mediator-per-scope guarantee and changes decision 38's
-trade-off) comes last; OQ-78 was raised while implementing decision 47 and is open.
+trade-off) and "Handlers are not registered" (owner decisions 42, 44 and 45, the same day) follow; OQ-78 was raised while implementing
+decision 47 and OQ-79 while implementing decision 44, both open. "Handlers and behaviors share a context's services" (owner decision
+43, the same day) comes last.
 
 ## Open
 
@@ -1482,6 +1484,8 @@ outermost behavior injecting (`IClock`, `IStore`) to a pipeline sharing `IClock`
 optional `retries` default moving to the call site; `CrossAssemblyTests` asserts `Service0`. Folded into the ADR (Injected parameters,
 Behavior methods, Generated pipeline shape, Mediator), the brief (Phases 4, 5 and 6), CONTEXT.md (pipeline context) and the README
 (Behaviors, Hosts).
+**Extended** (2026-11-28) by owner decision 43 ("Handlers and behaviors share a context's services", at the end): the same rules now
+fold the handlers' injected services into the context's shared services.
 
 ### Generated code is built with SyntaxFactory (2026-11-26)
 
@@ -2890,7 +2894,9 @@ Done:
   (`__valueN`) continue after the shared services' numbers and across a publish context's handlers, so a constructor never declares one
   twice (`SharedServiceTests.Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable`). The handler's services are not
   merged with the behaviors' `ServiceN` fields (that is decision 43): a pipeline whose handler and behaviors inject the same service has
-  both fields for now.
+  both fields for now. **Superseded** (2026-11-28) by decision 43 ("Handlers and behaviors share a context's services", below): the
+  `HandlerServiceN` and `Handler{i}ServiceN` fields are gone, the handlers' services are the context's `ServiceN` fields, and pattern
+  variables are numbered by service.
 - **Registrations.** `AddKeryx()` registers the four mediator service types and the scope state only; its summary says that handlers
   and behaviors are not registered.
 - **KRX025** (`Descriptors.DisposableHandlerClass`, `HandlerAnalysis.DisposableInterface`, reported by `HandlerAnalyzer` among the
@@ -2989,3 +2995,118 @@ Folded into the ADR (status; Handler classes; Example; Injected parameters; Diag
 shape; Mediator; DI registration; Hosts; Performance contract; Consequences), the brief (handlers, the host, Phase 3 and Phase 4),
 CONTEXT.md (invoker and static entry, pipeline context), the README (quick start, handler classes, testing, Hosts, diagnostics,
 Benchmarks notes) and whats-left.md. OQ-34 carries a superseded note. A parameter named `InvokeAsync` is OQ-79 (open).
+
+### Handlers and behaviors share a context's services (2026-11-28)
+
+Owner decision 43, with 48 (the deep dive into ZeroAlloc.Mediator's lead with a scope per request, its "Rank 2 B").
+
+- **Decision 43** (owner): each distinct (service type, key) is resolved once per pipeline context and shared by the context's
+  handlers and behaviors: the handlers' constructor (injected) services are folded into the context's `ContextServices` with decision
+  9's rules (a required consumer makes it required for all; when all are optional it is resolved once into a nullable field and each
+  call site applies its own default) and decision 28's stable numbering. Accepted: a transient dependency is one instance per context,
+  shared across a notification's handlers or a request's handler and its behaviors. The ADR is amended (Injected parameters, the
+  consequence paragraph), and a test pins a shared transient between a handler and a behavior and between two notification handlers.
+- **Decision 48**: verify the bytes exactly and measure the targeted rows on a quiet machine (the publish to 5 handlers per scope was
+  projected at about 355 to 375 ns); the long-lived rows must not regress beyond noise.
+
+Done:
+
+- **Model** (`PipelineBehaviors.ShareServices`). It takes the pipeline's behaviors and its handlers as `HandlerConsumer`s (the
+  handler's injected parameters, and whether the context reads them on every call: an own handler's static entry) and returns the
+  behaviors with their slots, the distinct services, the `ServiceProvider` flag and each handler's slots. A request or stream pipeline
+  shares in its handler model (`HostModelFactory.CreateHandler` and `CreateReferencedHandler` pass the handler to
+  `PipelineBehaviors.For`), so `HostHandlerModel.ContextServices` now holds the handler's services too and the new
+  `HostHandlerModel.ServiceSlots` indexes into it. A publish pipeline shares in the composition, the only place that knows which
+  handlers a notification type runs (`HostComposition.NotificationPipelines`): `NotificationPipeline.Services` and `ServiceProvider`
+  hold the notification behaviors' and every handler's services, the behaviors' slots are renumbered over that set, and
+  `NotificationHandlerPipeline.ServiceSlots` holds each handler's; `HostNotificationModel.ContextServices` stays the notification
+  behaviors' own set. `ContextServiceModel.Held` says whether a behavior or a static entry reads the service on every call; a service
+  only referenced handlers' constructors take is not held (below). The unkeyed `IServiceProvider` sets the `ServiceProvider` flag only
+  for held consumers.
+- **Emitter.** The `HandlerServiceN` and `Handler{i}ServiceN` fields are gone: an own handler's static entry receives the context's
+  `ServiceN` fields (and `ServiceProvider` for the unkeyed `IServiceProvider`), with each call site's default applied as behaviors'
+  are (`pipeline.Service0 ?? 3`); a referenced handler is constructed after the services, `Handler = new H(Service0)`, and a service
+  only its constructor takes is a constructor local, `var __service1 = ...;` then `new H(__service1)`, so a referenced handler's context
+  is no larger than before (the handler holds the reference); its unkeyed `IServiceProvider` is the constructor's provider. Pattern
+  variables are numbered by service (`__valueN` for service N), so a constructor never declares one twice. Fields are declared
+  `ServiceProvider`, `ServiceN`, then the referenced handlers'. The context summaries name what they hold ("the services its handler and
+  its behaviors inject"; a publish context's summary no longer names behaviors it does not have).
+- **Bytes, exact** (the `GC.GetAllocatedBytesForCurrentThread` probe of the previous step: 10,000 calls after 200,000 warm-up calls,
+  the smallest of ten repeats; built from a clean `git archive` of c457b32 and from a copy of the working tree with this step's code,
+  which was not committed; `rework-scope/shared/bytes-{before,after}.txt`; BenchmarkDotNet's allocation column agrees). Per scope, typed
+  and `IMediator` alike, before then after: `RealWorldPublish5ScopePerRequest` 880 then 816 B (the five handlers' ten fields, a 96 B
+  context, become two, 32 B: exactly the 816 B "Handlers are not registered" projected); `RealWorldPublishBehavior5ScopePerRequest`
+  1,032 then 960 B (eleven fields, the behavior's logger among them, become two); `RealWorldPublishBehavior1ScopePerRequest` 712 then
+  704 B (three fields become two: the handler's logger is the behavior's). Unchanged: `RealWorldPublish1ScopePerRequest` 560 B,
+  `RealWorldBehaviorsScopePerRequest` 1,048 B (the handler and the behaviors share no service there: the context holds the repository,
+  the validator and the logger either way, now as `Service0` to `Service2`), `RealWorldPingScopePerRequest` 192 B, the long-lived rows
+  and every other subject. `HostAllocationTests.A_Service_Shared_In_A_Context_Costs_A_Scope_What_One_Consumer_Costs` pins it over 1,000
+  scopes: a send whose handler and behavior inject a scoped `Clock` allocates exactly what one whose handler alone injects it allocates,
+  and a publish to two handlers that inject it exactly what a publish to one handler allocates (both failed before: 8 B per scope).
+- **Time** (JIT, BenchmarkDotNet 0.15.8, Apple M4 Max, .NET 10.0.15, the README's job: IterationCount=15, IterationTime=200ms,
+  LaunchCount=1, WarmupCount=5; `before` from the clean `git archive` of c457b32, `after` from the copy of the working tree). Typed,
+  then `IMediator`, before then after: `RealWorldPublish5ScopePerRequest` 397.3 and 398.1 ns, then 310.5 and 314.3 ns (errors 1 to 2
+  ns; the direct call 451.5 and 444.1 ns, ZeroAlloc.Mediator 369.9 and 363.7 ns), and in three interleaved rounds (before, after, ...)
+  typed 400.6, 392.8, 400.5 ns, then 306.7, 303.6, 305.5 ns (means 398.0 and 305.3 ns), `IMediator` 396.7, 395.9, 405.9 ns, then
+  306.3, 306.1, 313.2 ns, ZeroAlloc.Mediator 364.9 to 368.5 ns in every round: about 93 ns faster, below the deep dive's projection
+  of 355 to 375 ns and about 60 ns below ZeroAlloc.Mediator; `RealWorldPublishBehavior5ScopePerRequest` 478.0 and 480.5 ns, then
+  380.6 and 389.7 ns (the direct call 514.0 and 510.3 ns); `RealWorldPublishBehavior1ScopePerRequest` 226.4 and 233.5 ns, then 218.9
+  and 225.7 ns (the direct call 200.3 and 201.7 ns). Unchanged within noise, as their bytes are: `RealWorldPublish1ScopePerRequest`
+  144.5 and 144.4 ns, then 143.3 and 146.2 ns; `RealWorldBehaviorsScopePerRequest` 262.0 and 269.6 ns, then 260.5 and 270.8 ns
+  (ZeroAlloc.Mediator 246.4 and 246.9 ns); `RealWorldPingScopePerRequest` 30.1 and 33.2 ns, then 29.3 and 33.5 ns; the async SQLite
+  publishes, whose contexts also shrank (`RealWorldPublishAsync1`/`5`, `RealWorldPublishParallel1`/`5`: 1.33 to 1.40 µs and 6.68 to 6.78
+  µs both before and after, errors 0.03 to 0.10 µs) and `RealWorldSqlite` (1.27 to 1.28 µs both). Long-lived, before then after:
+  `RealWorldPing` 2.22 and 5.78 ns, then 2.23 and 5.75 ns; `PublishTo5` 0.55 and 3.28 ns, then 0.50 and 3.25 ns; `RealWorldBehaviors`
+  (its context's fields are renumbered: the repository is `Service0` now) in three interleaved rounds typed 120.2, 122.7, 121.5 ns,
+  then 121.3, 121.2, 124.1 ns (means 121.5 and 122.2 ns, errors 0.4 to 1.0 ns; only the third round differs beyond its error),
+  `IMediator` 127.2, 128.2, 125.6 ns, then 127.6, 127.4, 125.0 ns. In the full runs `SendSyncDepth0` and `SendSyncDepth8` through
+  `IMediator` read 2.52 and 2.72 ns before, 2.99 and 2.88 ns after, and `PublishTo1` typed 0.46 then 0.41 ns, so those three classes ran
+  three more interleaved rounds: `SendSyncDepth0` `IMediator` 2.50, 2.51, 3.08 ns before and 3.00, 2.53, 2.49 ns after,
+  `SendSyncDepth8` `IMediator` 2.77, 2.76, 2.76 ns and 3.26, 2.72, 2.76 ns, `PublishTo1` typed 0.47, 0.40, 0.48 ns and 0.40, 0.47,
+  0.41 ns: each moves between two levels about 0.5 ns apart (0.07 ns for `PublishTo1`) in both trees, from run to run, and their
+  pipelines (static handlers) are generated identically before and after, so the differences are layout, not this change. No long-lived
+  row regressed beyond noise. Against decision 37's run (`bench-final-2/jit`) the publish to 5 handlers was 570.2 and 579.8 ns and
+  1,336 B.
+- **How it was measured** (decision 48's rule). The script of the previous steps: it sampled `ps` every 5 s and started a run only
+  after 35 s with no busy dotnet-related process outside its own process tree (MSBuild, the compiler server, test hosts, benchmark
+  processes, language servers), sampled every 3 s during the run and logged any busy one with the benchmark it overlapped; MSBuild node
+  reuse and the MSBuild and compiler servers were off for the benchmark builds; no file in the repository was edited during a run (the
+  docs were drafted in the scratchpad and copied in afterwards). Each run started with a scratch-only benchmark with a 45 s
+  `[GlobalSetup]` (`AaaSettle`, in the measured copies only) that absorbed the language server's burst after BenchmarkDotNet's build:
+  every busy sample of every run fell inside it, so no measured benchmark overlapped anything, and nothing had to be run again for an
+  overlap. `--verify` passed (238 under the JIT) in both measured trees and on the final working tree under net10.0 and net11.0.
+- **Tests** (1,612, both target frameworks). `SharedServiceTests.Handlers_And_Behaviors_Of_One_Context_Receive_The_Same_Instance_Of_A_Transient`:
+  a library's transient `Clock` that numbers its instances, injected by global request, stream and notification behaviors of a host,
+  an own request handler, a library request handler (constructed by its context), an own stream handler, two own notification handlers
+  and a library one of a library notification: over two scopes, sending, streaming and publishing twice each, every behavior and
+  handler of one context receives the same instance on every call in the scope, each context its own, and a new scope new ones.
+  `SharedServiceTests.Should_Give_A_Service_A_Handler_And_Its_Behaviors_Share_One_Field` (snapshot): a request whose handler requires
+  `IClock` where its behavior takes it optionally and whose behavior requires `IStore` where the handler takes it optionally, with an
+  `ILog?` only the handler injects (a held nullable field), a stream and a notification whose handlers (one optional) share `IClock`
+  with their behaviors: one field per service, resolved as required where any consumer requires it, no `HandlerService` field.
+  `HostAllocationTests.A_Service_Shared_In_A_Context_Costs_A_Scope_What_One_Consumer_Costs` (above). Changed:
+  `Should_Pass_The_Scope_Provider_To_A_Handler_That_Injects_It` (the handler's unkeyed provider is the `ServiceProvider` field, its keyed
+  one `Service0`), `Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable` (the own handlers' `int` with defaults
+  3 and 4 is one optional `Service0` with `?? 3` and `?? 4` at the calls, and the referenced `NotedHandler`'s `int retries = 5` shares it
+  as `Service0 ?? 5`; the referenced handlers' `long?` is one constructor local, passed bare to `NotedHandler` (default `null`) and as
+  `__service1 ?? 6` to `NotedLimitHandler`; with nothing registered each consumer gets its own default, with services registered every
+  one gets the registered value),
+  `CrossAssemblyTests.A_Host_Composes_The_Handlers_Of_Its_Project_References` (`Handler = new global::Orders.CreateOrderHandler(Service0);`,
+  the `IJournal` it shares with the `Journaled` behavior) and `HostConcurrencyTests` (reads the identity from `Service0`).
+- **Snapshots** (18 changed and one new, the same on both target frameworks, each diff read; `rework-scope/shared/snapdiff1.txt` and
+  `snapdiff2.txt`). The request, stream and publish depth snapshots, `Should_Generate_The_Mediator_And_AddKeryx`,
+  `Should_Give_The_Scope_State_One_Field_Per_Pipeline_With_A_Context`, `Should_Generate_Publish_Pipelines` and
+  `Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable`: `HandlerServiceN`/`Handler{i}ServiceN` become
+  `ServiceN` (one field where a handler and a behavior, or two handlers, shared a service), the calls of the static entries pass them
+  (with call-site defaults for all-optional services, as the `Lookup` handler's `int retries = 3` and `Mode` now do), the contexts' summaries
+  change, and the publish summaries without behaviors no longer mention them. Nothing else changes (registrations, handler partials,
+  dispatch).
+- The reports, scripts and logs are in the session scratchpad, `rework-scope/shared/` (`before`, `after`, `rounds-{before,after}-{1,2,3}`,
+  `sync-{before,after}-{1,2,3}`, `compare-full.md`, `bytes-{before,after}.txt` and the `probe-*` projects, `verify-{before,after}`,
+  `benchhost-gen.diff`, the generated benchmark host code before and after, `test5.log` and the final logs).
+
+Folded into the ADR (status; Injected parameters, Shared services and the consequence paragraph; Behavior methods; Generated pipeline
+shape; Mediator; Performance contract; Consequences), the brief (the host summary, Phase 4's shared services), CONTEXT.md (pipeline
+context), the README (Behavior methods, Hosts, the Benchmarks notes) and whats-left.md. Decision 9's entry ("A pipeline context resolves
+each shared service once") carries an extended note and "Handlers are not registered" a superseded note on its fields. No new open
+question.

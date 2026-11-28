@@ -116,15 +116,13 @@ namespace Sample
             public object? __pipeline0;
         }
 
-        /// <summary>The pipeline context of <c>Sample.Ping</c>: the services its handler injects and the injected services of its behaviors, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Ping</c>: the services its handler and its behaviors inject, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.IClock HandlerService0;
             public readonly global::Sample.IClock Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
                 Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
@@ -181,7 +179,7 @@ namespace Sample
             public readonly struct Link8(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<string>
             {
                 public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, cancellationToken);
+                    global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.Service0, cancellationToken);
             }
         }
     }

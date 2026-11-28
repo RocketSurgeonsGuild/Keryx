@@ -115,15 +115,13 @@ namespace Sample
             public object? __notification0;
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the services its handlers and its behaviors inject, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.IClock Handler1Service0;
             public readonly global::Sample.IClock Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler1Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
                 Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
@@ -150,7 +148,7 @@ namespace Sample
                 task.GetAwaiter().GetResult();
                 try
                 {
-                    task = global::Sample.Second.__keryx_InvokeAsync(notification, Handler1Service0, cancellationToken);
+                    task = global::Sample.Second.__keryx_InvokeAsync(notification, Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -184,7 +182,7 @@ namespace Sample
                 {
                     try
                     {
-                        await global::Sample.Second.__keryx_InvokeAsync(notification, Handler1Service0, cancellationToken).ConfigureAwait(false);
+                        await global::Sample.Second.__keryx_InvokeAsync(notification, Service0, cancellationToken).ConfigureAwait(false);
                     }
                     catch (global::System.Exception exception)
                     {

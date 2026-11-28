@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using Specular.Scanning;
 using Keryx.Analyzers.Behaviors;
 using Keryx.Analyzers.Handlers;
 using Microsoft.CodeAnalysis;
@@ -258,7 +259,7 @@ internal sealed class BehaviorCatalog
             }
         }
 
-        var (behaviors, services, usedExclusions, serviceProvider) = PipelineBehaviors.Compose(
+        var (behaviors, services, usedExclusions, serviceProvider, _) = PipelineBehaviors.Compose(
             attached,
             AssemblyBehaviorsOf(type.ContainingAssembly),
             new(BehaviorKind.Notification, type, null),
@@ -356,24 +357,56 @@ internal sealed class BehaviorCatalog
     }
 }
 
-/// <summary>The behaviors of one pipeline, the services its context shares among them, and the exclusions that removed behaviors from it.</summary>
+/// <summary>
+///     The behaviors of one pipeline, the services its context shares among them and its handler, and the exclusions that removed behaviors
+///     from it.
+/// </summary>
 /// <param name="Behaviors">The behaviors, in no particular order (ordinal by class), each with its <see cref="PipelineBehaviorModel.ServiceSlots" />.</param>
 /// <param name="Services">
-///     The distinct services the behaviors inject, without the unkeyed <c>IServiceProvider</c>, in the stable order of
+///     The distinct services the behaviors and the handler inject, without the unkeyed <c>IServiceProvider</c>, in the stable order of
 ///     <see cref="PipelineBehaviors.CompareServices" />.
 /// </param>
 /// <param name="UsedExclusions">The <c>ExcludeBehavior</c> operands that removed a behavior.</param>
-/// <param name="ServiceProvider">Whether a behavior injects the unkeyed <c>IServiceProvider</c>, which the context holds in its own field.</param>
+/// <param name="ServiceProvider">
+///     Whether a behavior, or the handler through its static entry, injects the unkeyed <c>IServiceProvider</c>, which the context holds in
+///     its own field.
+/// </param>
+/// <param name="HandlerSlots">For each of the handler's injected parameters, the index of the service it receives (<see cref="HostHandlerModel.ServiceSlots" />).</param>
 internal sealed record ComposedBehaviors(
     ImmutableArray<PipelineBehaviorModel> Behaviors,
     ImmutableArray<ContextServiceModel> Services,
     ImmutableArray<string> UsedExclusions,
-    bool ServiceProvider
+    bool ServiceProvider,
+    ImmutableArray<int> HandlerSlots
 )
 {
     /// <summary>A pipeline without behaviors.</summary>
-    public static ComposedBehaviors Empty { get; } = new([], [], [], false);
+    public static ComposedBehaviors Empty { get; } = new([], [], [], false, []);
 }
+
+/// <summary>
+///     The services a pipeline context shares (<see cref="PipelineBehaviors.ShareServices" />): the behaviors with their slots, the distinct
+///     services, whether the context holds the scope's provider, and the slots of each handler's injected parameters.
+/// </summary>
+/// <param name="Behaviors">The behaviors, in the order given, each with its <see cref="PipelineBehaviorModel.ServiceSlots" />.</param>
+/// <param name="Services">The distinct services, in the stable order of <see cref="PipelineBehaviors.CompareServices" />.</param>
+/// <param name="ServiceProvider">Whether a behavior or a handler's static entry injects the unkeyed <c>IServiceProvider</c>.</param>
+/// <param name="HandlerSlots">For each handler, in the order given, the slot of each of its injected parameters.</param>
+internal sealed record SharedServices(
+    ImmutableArray<PipelineBehaviorModel> Behaviors,
+    ImmutableArray<ContextServiceModel> Services,
+    bool ServiceProvider,
+    ImmutableArray<ImmutableArray<int>> HandlerSlots
+);
+
+/// <summary>
+///     A handler of a pipeline as a consumer of the services its context shares (owner decision 43): its injected parameters, and whether the
+///     context reads them on every call (the host's own handler, through its static entry) or only passes them to the constructor of the
+///     referenced handler it builds.
+/// </summary>
+/// <param name="Services">The handler's injected parameters, in order; empty for a static invoker.</param>
+/// <param name="Held">Whether the handler has a static entry, so the context holds what it injects in fields.</param>
+internal readonly record struct HandlerConsumer(EquatableArray<ServiceParameterModel> Services, bool Held);
 
 /// <summary>
 ///     Composes the behaviors of one pipeline from the three scopes (ADR 0001, Three ways to attach a behavior) and projects them into
@@ -390,27 +423,34 @@ internal static class PipelineBehaviors
     ///     (narrower than <c>internal</c>, or not accessible from the host) or one whose behavior method of the target's kind injects a type the
     ///     host cannot resolve (KRX034).
     /// </summary>
+    /// <param name="attached">The behavior classes attached to the handler method.</param>
+    /// <param name="handlerAssembly">The handler's assembly, whose <c>[assembly: Behavior]</c>s apply.</param>
+    /// <param name="target">The handler's pipeline target.</param>
+    /// <param name="catalog">The host's behaviors.</param>
+    /// <param name="handler">The handler, whose injected services the context shares with its behaviors' (owner decision 43).</param>
     public static ComposedBehaviors For(
         ImmutableArray<ITypeSymbol> attached,
         IAssemblySymbol? handlerAssembly,
         BehaviorTarget target,
-        BehaviorCatalog catalog
+        BehaviorCatalog catalog,
+        HandlerConsumer handler
     ) =>
-        Compose(attached, catalog.AssemblyBehaviorsOf(handlerAssembly), target, catalog, null);
+        Compose(attached, catalog.AssemblyBehaviorsOf(handlerAssembly), target, catalog, null, handler);
 
     /// <summary>
     ///     The behaviors that apply to one target: <paramref name="attached" /> (per target), then <paramref name="assembly" /> (per
     ///     assembly), then the global ones whose <c>[GlobalBehavior]</c> covers the target's kind, each kept when it fits; de-duplicated by
     ///     behavior class; minus the host's exclusions. <paramref name="unfitAttached" /> receives each attached behavior that does not fit,
-    ///     with the reason (a class the behavior rules reject is its own KRX019 and is not passed). The pipeline's injected services are
-    ///     shared (<see cref="ShareServices" />).
+    ///     with the reason (a class the behavior rules reject is its own KRX019 and is not passed). The pipeline's injected services, its
+    ///     behaviors' and those of <paramref name="handler" /> when given, are shared (<see cref="ShareServices" />).
     /// </summary>
     public static ComposedBehaviors Compose(
         IEnumerable<ITypeSymbol> attached,
         IEnumerable<ITypeSymbol> assembly,
         BehaviorTarget target,
         BehaviorCatalog catalog,
-        Action<ITypeSymbol, string>? unfitAttached
+        Action<ITypeSymbol, string>? unfitAttached,
+        HandlerConsumer? handler = null
     )
     {
         var behaviors = new SortedDictionary<string, PipelineBehaviorModel>(StringComparer.Ordinal);
@@ -434,8 +474,14 @@ internal static class PipelineBehaviors
             }
         }
 
-        var (shared, services, serviceProvider) = ShareServices([.. behaviors.Values]);
-        return new(shared, services, [.. usedExclusions], serviceProvider);
+        var shared = ShareServices([.. behaviors.Values], handler is { } consumer ? [consumer] : []);
+        return new(
+            shared.Behaviors,
+            shared.Services,
+            [.. usedExclusions],
+            shared.ServiceProvider,
+            shared.HandlerSlots.IsEmpty ? [] : shared.HandlerSlots[0]
+        );
 
         void Apply(ITypeSymbol type, Action<ITypeSymbol, string>? unfit)
         {
@@ -487,18 +533,20 @@ internal static class PipelineBehaviors
     public const int ServiceProviderSlot = -1;
 
     /// <summary>
-    ///     Gives a pipeline's injected services one pipeline context field each (ADR 0001, Injected parameters): the distinct
-    ///     (service type, key) pairs the behavior methods inject, numbered by a stable ordinal sort (<see cref="CompareServices" />) so that
-    ///     any edit that keeps the set keeps every number (OQ-64), and for each behavior the index of the service each of its injected
-    ///     parameters receives. A service with at least one required consumer is resolved as required for all of them; one whose consumers
-    ///     are all optional is resolved once as optional, and each call site applies its own default. The unkeyed <c>IServiceProvider</c> is
-    ///     not a numbered service: its parameters get <see cref="ServiceProviderSlot" /> and the context holds the provider it is built with
-    ///     (OQ-63); a keyed <c>IServiceProvider</c> is an ordinary keyed service. The behaviors keep their order.
+    ///     Gives a pipeline's injected services one pipeline context service each (ADR 0001, Injected parameters; owner decisions 9 and 43):
+    ///     the distinct (service type, key) pairs the behavior methods and the handlers inject, numbered by a stable ordinal sort
+    ///     (<see cref="CompareServices" />) so that any edit that keeps the set keeps every number (OQ-64), and for each behavior and each
+    ///     handler the index of the service each of its injected parameters receives. A service with at least one required consumer is
+    ///     resolved as required for all of them; one whose consumers are all optional is resolved once as optional, and each call site applies
+    ///     its own default. A service is held in a field when a behavior or an own handler's static entry takes it (<see cref="ContextServiceModel.Held" />);
+    ///     one only referenced handlers' constructors take is a local of the context's constructor. The unkeyed <c>IServiceProvider</c> is not
+    ///     a numbered service: its parameters get <see cref="ServiceProviderSlot" />, and the context holds the provider it is built with
+    ///     when a behavior or a static entry takes it (OQ-63); a keyed <c>IServiceProvider</c> is an ordinary keyed service. The behaviors and
+    ///     handlers keep their order.
     /// </summary>
     /// <param name="behaviors">The pipeline's behaviors, in any order.</param>
-    public static (ImmutableArray<PipelineBehaviorModel> Behaviors, ImmutableArray<ContextServiceModel> Services, bool ServiceProvider) ShareServices(
-        ImmutableArray<PipelineBehaviorModel> behaviors
-    )
+    /// <param name="handlers">The pipeline's handlers: one for a request or stream pipeline, every handler of a publish pipeline, none for behaviors alone.</param>
+    public static SharedServices ShareServices(ImmutableArray<PipelineBehaviorModel> behaviors, ImmutableArray<HandlerConsumer> handlers)
     {
         var distinct = new List<ContextServiceModel>();
         var serviceProvider = false;
@@ -506,27 +554,45 @@ internal static class PipelineBehaviors
         {
             foreach (var parameter in behavior.Services)
             {
-                if (IsScopeProvider(parameter))
-                {
-                    serviceProvider = true;
-                    continue;
-                }
+                Add(parameter, held: true);
+            }
+        }
 
-                var service = ContextServiceModel.For(parameter);
-                var index = distinct.FindIndex(s => s.Matches(parameter));
-                if (index < 0)
-                {
-                    distinct.Add(service);
-                }
-                else if (service.Required && !distinct[index].Required)
-                {
-                    distinct[index] = distinct[index] with { Required = true };
-                }
+        foreach (var handler in handlers)
+        {
+            foreach (var parameter in handler.Services)
+            {
+                Add(parameter, handler.Held);
             }
         }
 
         distinct.Sort(CompareServices);
-        return ([.. behaviors.Select(b => b with { ServiceSlots = b.Services.Select(Slot).ToImmutableArray() })], [.. distinct], serviceProvider);
+        return new(
+            [.. behaviors.Select(b => b with { ServiceSlots = b.Services.Select(Slot).ToImmutableArray() })],
+            [.. distinct],
+            serviceProvider,
+            [.. handlers.Select(h => h.Services.Select(Slot).ToImmutableArray())]
+        );
+
+        void Add(ServiceParameterModel parameter, bool held)
+        {
+            if (IsScopeProvider(parameter))
+            {
+                serviceProvider |= held;
+                return;
+            }
+
+            var service = ContextServiceModel.For(parameter, held);
+            var index = distinct.FindIndex(s => s.Matches(parameter));
+            if (index < 0)
+            {
+                distinct.Add(service);
+            }
+            else if (( service.Required && !distinct[index].Required ) || ( held && !distinct[index].Held ))
+            {
+                distinct[index] = distinct[index] with { Required = distinct[index].Required || service.Required, Held = distinct[index].Held || held };
+            }
+        }
 
         int Slot(ServiceParameterModel parameter) =>
             IsScopeProvider(parameter) ? ServiceProviderSlot : distinct.FindIndex(s => s.Matches(parameter));

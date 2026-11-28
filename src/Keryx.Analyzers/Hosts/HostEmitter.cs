@@ -500,12 +500,12 @@ internal static partial class HostEmitter
             writer.Line(declaration);
             writer.Open();
             writer.Line($"var {PipelineName} = {context};");
-            writer.Line($"return {HandlerInvocation(request, PipelineName + ".", HandlerFieldName, "request")};");
+            writer.Line($"return {HandlerInvocation(request, request.ServiceSlots, request.ContextServices, PipelineName + ".", HandlerFieldName, "request")};");
             writer.Close();
         }
         else if (pipeline.Behaviors.IsEmpty)
         {
-            writer.Arrow(declaration, HandlerInvocation(request, context + ".", HandlerFieldName, "request"));
+            writer.Arrow(declaration, HandlerInvocation(request, request.ServiceSlots, request.ContextServices, context + ".", HandlerFieldName, "request"));
         }
         else
         {
@@ -687,9 +687,9 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     The pipeline context of one request: the services its handler injects (the host's own handler, called through its static entry) or
-    ///     the referenced handler it constructs, unless the invoker is static, and the injected services of its behavior methods, resolved
-    ///     once per scope, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
+    ///     The pipeline context of one request: the services its behavior methods and its handler inject, resolved once per scope and shared
+    ///     (owner decision 43; the host's own handler receives them through its static entry), and the referenced handler it constructs with
+    ///     them, and one flat link struct per behavior (ADR 0001, Generated pipeline shape). <c>Link{k}</c> is the
     ///     <c>next</c> of behavior <c>k</c>: it calls behavior <c>k + 1</c>'s method with <c>Link{k + 1}</c>, and the last link calls the
     ///     handler's invoker. A pipeline with nothing to resolve (a static invoker and no injected services) has no context: its links are
     ///     nested in a static class of the same name and take only the request.
@@ -723,13 +723,12 @@ internal static partial class HostEmitter
         writer.Member();
         if (HasContext(pipeline))
         {
-            writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(request)}, resolved once per scope.</summary>");
+            writer.Documentation($"<summary>The {description} context of <c>{Display(request.MessageType)}</c>: {Holds(pipeline)}, resolved once per scope.</summary>");
             writer.Line($"private sealed class {contextName}");
             writer.Open();
-            var resolution = new List<string>(request.ContextServices.Count + request.Services.Count + 1);
-            var variable = request.ContextServices.Count;
-            WriteHandlerFields(writer, request, HandlerFieldName, resolution, ref variable);
+            var resolution = new List<string>(request.ContextServices.Count + 2);
             WriteServiceFields(writer, request.ContextServices, request.ContextServiceProvider, resolution);
+            WriteHandlerField(writer, request, request.ServiceSlots, request.ContextServices, HandlerFieldName, resolution);
             WriteContextConstructor(writer, contextName, resolution);
         }
         else
@@ -747,7 +746,7 @@ internal static partial class HostEmitter
             var isLast = k == pipeline.Behaviors.Length - 1;
             var body = !isLast
                 ? BehaviorCall(pipeline.Behaviors[k + 1], request.ContextServices, linkName(k + 1), links[k + 1], "request")
-                : HandlerInvocation(request, PipelineName + ".", HandlerFieldName, "request");
+                : HandlerInvocation(request, request.ServiceSlots, request.ContextServices, PipelineName + ".", HandlerFieldName, "request");
             WriteLink(
                 writer,
                 linkName(k),
@@ -767,42 +766,34 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     What a pipeline context holds for a handler whose invoker is not static, with the statements that resolve it to
-    ///     <paramref name="resolution" />: for the host's own handler (<see cref="HostHandlerModel.StaticEntry" />), one field per service the
-    ///     handler injects (<c>{field}Service{j}</c>, the parameter's type), resolved by the rules of the generated constructor's parameters
-    ///     (<see cref="Resolve" />), which its static entry receives; for a referenced handler, the handler itself (<c>{field}</c>),
-    ///     constructed with <c>new</c> over the same resolutions (owner decision 42). Nothing for a static invoker.
+    ///     The field of a referenced handler, which the pipeline context constructs with <c>new</c> (owner decision 42) over the context's
+    ///     shared services (owner decision 43), with the statement that constructs it to <paramref name="resolution" />, after the services'.
+    ///     Nothing for a static invoker or the host's own handler, which the context calls through its static entry with its service fields.
     /// </summary>
     /// <param name="writer">The writer, in the context's body.</param>
     /// <param name="handler">The handler.</param>
-    /// <param name="field">The handler's field, or the prefix of its services' fields.</param>
+    /// <param name="slots">The context service each of its injected parameters receives.</param>
+    /// <param name="services">The context's shared services.</param>
+    /// <param name="field">The handler's field.</param>
     /// <param name="resolution">The context constructor's statements.</param>
-    /// <param name="variable">
-    ///     The next free index of a pattern variable (<c>__value{n}</c>) in the constructor: the shared services take the first ones.
-    /// </param>
-    private static void WriteHandlerFields(CodeWriter writer, HostHandlerModel handler, string field, List<string> resolution, ref int variable)
+    private static void WriteHandlerField(
+        CodeWriter writer,
+        HostHandlerModel handler,
+        EquatableArray<int> slots,
+        EquatableArray<ContextServiceModel> services,
+        string field,
+        List<string> resolution
+    )
     {
-        if (handler.StaticInvoker)
+        if (handler.StaticInvoker || handler.StaticEntry)
         {
-            return;
-        }
-
-        if (handler.StaticEntry)
-        {
-            for (var j = 0; j < handler.Services.Count; j++)
-            {
-                writer.Member(plainField: true);
-                writer.Line($"public readonly {handler.Services[j].Type} {HandlerServiceField(field, j)};");
-                resolution.Add($"{HandlerServiceField(field, j)} = {Resolve(handler.Services[j], variable++)};");
-            }
-
             return;
         }
 
         var creation = new StringBuilder(256).Append("new ").Append(handler.HandlerClass).Append('(');
         for (var j = 0; j < handler.Services.Count; j++)
         {
-            creation.Append(j == 0 ? "" : ", ").Append(Resolve(handler.Services[j], variable++));
+            creation.Append(j == 0 ? "" : ", ").Append(ConstructorArgument(services, slots[j], handler.Services[j]));
         }
 
         writer.Member(plainField: true);
@@ -812,14 +803,23 @@ internal static partial class HostEmitter
 
     /// <summary>
     ///     The call of a handler from a pipeline: a static invoker on the class; the host's own handler's static entry
-    ///     (<c>__keryx_InvokeAsync</c>) on the class, with the services the context holds for it; a referenced handler's <c>InvokeAsync</c> on
-    ///     the instance the context holds.
+    ///     (<c>__keryx_InvokeAsync</c>) on the class, with the context's shared services it injects (owner decisions 43 and 44); a referenced
+    ///     handler's <c>InvokeAsync</c> on the instance the context holds.
     /// </summary>
     /// <param name="handler">The handler.</param>
+    /// <param name="slots">The context service each of its injected parameters receives.</param>
+    /// <param name="services">The context's shared services.</param>
     /// <param name="context">How the context is reached, with the member access dot (<c>pipeline.</c>), or empty inside the context.</param>
-    /// <param name="field">The handler's field, or the prefix of its services' fields (<see cref="WriteHandlerFields" />).</param>
+    /// <param name="field">The field of a referenced handler (<see cref="WriteHandlerField" />).</param>
     /// <param name="message">The message argument.</param>
-    private static string HandlerInvocation(HostHandlerModel handler, string context, string field, string message)
+    private static string HandlerInvocation(
+        HostHandlerModel handler,
+        EquatableArray<int> slots,
+        EquatableArray<ContextServiceModel> services,
+        string context,
+        string field,
+        string message
+    )
     {
         if (handler.StaticInvoker)
         {
@@ -834,17 +834,14 @@ internal static partial class HostEmitter
         var call = new StringBuilder(128).Append(handler.HandlerClass).Append('.').Append(HandlerAnalysis.StaticEntryName).Append('(').Append(message);
         for (var j = 0; j < handler.Services.Count; j++)
         {
-            call.Append(", ").Append(context).Append(HandlerServiceField(field, j));
+            call.Append(", ").Append(SlotArgument(services, slots[j], handler.Services[j], context));
         }
 
         return call.Append(", cancellationToken)").ToString();
     }
 
-    /// <summary>The context field of a request or stream request pipeline's handler, or the prefix of its services' fields.</summary>
+    /// <summary>The context field of a request or stream request pipeline's referenced handler.</summary>
     private const string HandlerFieldName = "Handler";
-
-    /// <summary>The context field of service <paramref name="index" /> of a handler with a static entry.</summary>
-    private static string HandlerServiceField(string field, int index) => field + "Service" + Digits(index);
 
     /// <summary>The constructor of a pipeline context, which resolves what it holds from the scope.</summary>
     private static void WriteContextConstructor(CodeWriter writer, string contextName, List<string> resolution)
@@ -951,12 +948,7 @@ internal static partial class HostEmitter
             switch (behavior.Parameters[i])
             {
                 case BehaviorParameterRole.Service:
-                    var slot = behavior.ServiceSlots[service];
-                    call.Append(
-                        slot == PipelineBehaviors.ServiceProviderSlot
-                            ? PipelineName + "." + ServiceProviderField
-                            : ServiceArgument(services[slot], slot, behavior.Services[service])
-                    );
+                    call.Append(SlotArgument(services, behavior.ServiceSlots[service], behavior.Services[service], PipelineName + "."));
                     service++;
                     break;
                 case BehaviorParameterRole.Message:
@@ -986,42 +978,61 @@ internal static partial class HostEmitter
     }
 
     /// <summary>
-    ///     What one injected parameter of a behavior method receives: the context's field for its service. A service resolved as required
-    ///     is passed as is to every consumer; a service whose consumers are all optional is held in a nullable field (<see langword="null" />
+    ///     What one injected parameter of a behavior method or of an own handler's static entry receives, read through
+    ///     <paramref name="context" /> (<c>pipeline.</c>, or empty inside the context): the context's <c>ServiceProvider</c> field for the
+    ///     unkeyed <c>IServiceProvider</c> (<see cref="PipelineBehaviors.ServiceProviderSlot" />), else its field for the parameter's service
+    ///     (<see cref="WithDefault" />).
+    /// </summary>
+    private static string SlotArgument(EquatableArray<ContextServiceModel> services, int slot, ServiceParameterModel parameter, string context) =>
+        slot == PipelineBehaviors.ServiceProviderSlot
+            ? context + ServiceProviderField
+            : WithDefault(services[slot], parameter, context + ServiceField(slot));
+
+    /// <summary>
+    ///     What one injected parameter of a referenced handler's constructor receives in the context's constructor: the provider the context
+    ///     is built with for the unkeyed <c>IServiceProvider</c>, else the field for its service, or the constructor's local when only
+    ///     constructors take it (<see cref="ContextServiceModel.Held" />), with <see cref="WithDefault" />.
+    /// </summary>
+    private static string ConstructorArgument(EquatableArray<ContextServiceModel> services, int slot, ServiceParameterModel parameter) =>
+        slot == PipelineBehaviors.ServiceProviderSlot
+            ? ServiceProviderName
+            : WithDefault(services[slot], parameter, services[slot].Held ? ServiceField(slot) : ServiceLocal(slot));
+
+    /// <summary>
+    ///     What one consumer of a shared service receives from where the service is stored (<paramref name="stored" />). A service resolved as
+    ///     required is passed as is to every consumer; a service whose consumers are all optional is stored nullable (<see langword="null" />
     ///     when missing), and each call site applies its own parameter's default with <c>??</c> (<c>GetValueOrDefault()</c> for a
     ///     <c>default</c> value type).
     /// </summary>
     /// <param name="service">The parameter's service.</param>
-    /// <param name="slot">Its index in the context.</param>
     /// <param name="parameter">The parameter.</param>
-    private static string ServiceArgument(ContextServiceModel service, int slot, ServiceParameterModel parameter)
-    {
-        var field = PipelineName + "." + ServiceField(slot);
-        return service.Required || parameter.DefaultValue is not { } defaultValue || defaultValue == "null"
-            ? field
+    /// <param name="stored">The field or local that holds the service.</param>
+    private static string WithDefault(ContextServiceModel service, ServiceParameterModel parameter, string stored) =>
+        service.Required || parameter.DefaultValue is not { } defaultValue || defaultValue == "null"
+            ? stored
             : service.IsValueType && defaultValue == "default"
-            ? field + ".GetValueOrDefault()"
-            : $"{field} ?? {defaultValue}";
-    }
+            ? stored + ".GetValueOrDefault()"
+            : $"{stored} ?? {defaultValue}";
 
-    /// <summary>What a pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
-    private static string Holds(HostHandlerModel handler)
+    /// <summary>What a request or stream pipeline context holds, for its documentation (a pipeline that would hold nothing has no context).</summary>
+    private static string Holds(HostPipeline pipeline)
     {
-        var own = handler.StaticInvoker ? null
-            : handler.StaticEntry ? "the services its handler injects"
+        var handler = pipeline.Handler;
+        var behaviors = pipeline.Behaviors.Any(static b => b.Services.Count > 0);
+        return handler.StaticInvoker ? "the injected services of its behaviors"
+            : handler.StaticEntry ? behaviors ? "the services its handler and its behaviors inject" : "the services its handler injects"
+            : behaviors ? "its handler and the services it and its behaviors inject"
             : "its handler";
-        return own is null ? "the injected services of its behaviors"
-            : handler.ContextServices.Count > 0 || handler.ContextServiceProvider ? own + " and the injected services of its behaviors"
-            : own;
     }
 
     /// <summary>
-    ///     The <c>ServiceProvider</c> field when <paramref name="serviceProvider" /> (a behavior method injects the unkeyed
-    ///     <c>IServiceProvider</c>; it is assigned the provider the context is built with, never resolved, OQ-63), then one field per service
-    ///     the pipeline context shares (ADR 0001, Injected parameters), in their stable order (OQ-64): the service type for a service resolved
-    ///     as required, the nullable service type for one whose consumers are all optional (<see langword="null" /> when the service is
-    ///     missing; each call site applies its own default). Adds the statement that assigns or resolves each from the scope, once, to
-    ///     <paramref name="resolution" />.
+    ///     The <c>ServiceProvider</c> field when <paramref name="serviceProvider" /> (a behavior method or an own handler's static entry
+    ///     injects the unkeyed <c>IServiceProvider</c>; it is assigned the provider the context is built with, never resolved, OQ-63), then
+    ///     one field per service the pipeline context shares (ADR 0001, Injected parameters; owner decision 43), in their stable order
+    ///     (OQ-64): the service type for a service resolved as required, the nullable service type for one whose consumers are all optional
+    ///     (<see langword="null" /> when the service is missing; each call site applies its own default). A service only referenced handlers'
+    ///     constructors take is a local of the context's constructor instead (<see cref="ContextServiceModel.Held" />). Adds the statement that
+    ///     assigns or resolves each from the scope, once, to <paramref name="resolution" />.
     /// </summary>
     private static void WriteServiceFields(CodeWriter writer, EquatableArray<ContextServiceModel> services, bool serviceProvider, List<string> resolution)
     {
@@ -1035,6 +1046,12 @@ internal static partial class HostEmitter
         for (var i = 0; i < services.Count; i++)
         {
             var service = services[i];
+            if (!service.Held)
+            {
+                resolution.Add($"var {ServiceLocal(i)} = {ResolveShared(service, i)};");
+                continue;
+            }
+
             writer.Member(plainField: true);
             writer.Line(
                 $"public readonly {( service.Required || service.NullableUnderlyingType is not null ? service.ServiceType : service.ServiceType + "?" )} {ServiceField(i)};"
@@ -1157,6 +1174,9 @@ internal static partial class HostEmitter
     /// <summary>The context field of the shared service at <paramref name="slot" />.</summary>
     private static string ServiceField(int slot) => "Service" + Digits(slot);
 
+    /// <summary>The context constructor's local for the shared service at <paramref name="slot" /> that no call reads (<see cref="ContextServiceModel.Held" />).</summary>
+    private static string ServiceLocal(int slot) => "__service" + Digits(slot);
+
     private static string LinkName(int position) => "Link" + Digits(position + 1);
 
     private static string ContextName(int index) => "__Pipeline" + Digits(index);
@@ -1273,13 +1293,23 @@ internal sealed record HostComposition(
         var pipelines = ImmutableArray.CreateBuilder<NotificationPipeline>(known.Count);
         foreach (var notification in known.Values)
         {
-            pipelines.Add(
-                new(
-                    notification,
-                    Sorted(notification.Behaviors, cycles),
-                    received.TryGetValue(notification.Type, out var list) ? [.. list] : []
-                )
-            );
+            // The publish context shares each service among the notification behaviors and every handler it calls (owner decision 43), so
+            // the behaviors' slots are numbered again over that set.
+            var receivers = received.TryGetValue(notification.Type, out var list) ? list : [];
+            var consumers = ImmutableArray.CreateBuilder<HandlerConsumer>(receivers.Count);
+            foreach (var receiver in receivers)
+            {
+                consumers.Add(new(receiver.Handler.Services, receiver.Handler.StaticEntry));
+            }
+
+            var shared = PipelineBehaviors.ShareServices(Sorted(notification.Behaviors, cycles), consumers.MoveToImmutable());
+            var handlerPipelines = ImmutableArray.CreateBuilder<NotificationHandlerPipeline>(receivers.Count);
+            for (var i = 0; i < receivers.Count; i++)
+            {
+                handlerPipelines.Add(receivers[i] with { ServiceSlots = shared.HandlerSlots[i] });
+            }
+
+            pipelines.Add(new(notification, shared.Behaviors, handlerPipelines.MoveToImmutable(), shared.Services, shared.ServiceProvider));
         }
 
         return pipelines.MoveToImmutable();
@@ -1297,12 +1327,23 @@ internal sealed record HostComposition(
 ///     handlers (ADR 0001, Notifications).
 /// </summary>
 /// <param name="Notification">The concrete notification type.</param>
-/// <param name="Behaviors">The notification behaviors, outermost first.</param>
-/// <param name="Handlers">The handlers, in handler order.</param>
+/// <param name="Behaviors">The notification behaviors, outermost first, with their slots in <paramref name="Services" />.</param>
+/// <param name="Handlers">The handlers, in handler order, with their slots in <paramref name="Services" />.</param>
+/// <param name="Services">
+///     The distinct services its publish pipeline context resolves once and shares among its notification behaviors and its handlers (owner
+///     decisions 9 and 43), in the stable order of <see cref="PipelineBehaviors.CompareServices" />, without the unkeyed
+///     <c>IServiceProvider</c>.
+/// </param>
+/// <param name="ServiceProvider">
+///     Whether a notification behavior or an own handler's static entry injects the unkeyed <c>IServiceProvider</c>, so the context holds the
+///     provider it is built with in its <c>ServiceProvider</c> field (OQ-63).
+/// </param>
 internal sealed record NotificationPipeline(
     HostNotificationModel Notification,
     ImmutableArray<PipelineBehaviorModel> Behaviors,
-    ImmutableArray<NotificationHandlerPipeline> Handlers
+    ImmutableArray<NotificationHandlerPipeline> Handlers,
+    EquatableArray<ContextServiceModel> Services,
+    bool ServiceProvider
 )
 {
     /// <summary>
@@ -1323,4 +1364,9 @@ internal sealed record NotificationPipeline(
 ///     Whether the notification is a struct and the handler's parameter an interface or <c>INotification</c>, so the handler receives the
 ///     publish's one box (OQ-17).
 /// </param>
-internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, bool Boxed);
+/// <param name="ServiceSlots">
+///     For each of the handler's injected parameters, the index of the publish context's service it receives
+///     (<see cref="NotificationPipeline.Services" />), or <see cref="PipelineBehaviors.ServiceProviderSlot" /> for the unkeyed
+///     <c>IServiceProvider</c>; empty for a static invoker.
+/// </param>
+internal sealed record NotificationHandlerPipeline(HostHandlerModel Handler, bool Boxed, EquatableArray<int> ServiceSlots = default);

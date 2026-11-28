@@ -209,7 +209,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<string?> __Send0(global::Sample.Animal request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = __GetPipeline0();
-            return global::Sample.AnimalHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, cancellationToken);
+            return global::Sample.AnimalHandler.__keryx_InvokeAsync(request, pipeline.ServiceProvider, pipeline.Service0, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -224,7 +224,7 @@ namespace Sample
             global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline0>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline0, new __Pipeline0(__serviceProvider), null) ?? state.__pipeline0);
 
         private global::System.Threading.Tasks.ValueTask<global::System.Guid> __Send1(global::Sample.CreateOrder.Command request, global::System.Threading.CancellationToken cancellationToken) =>
-            global::Sample.CreateOrder.__keryx_InvokeAsync(request, __GetPipeline1().HandlerService0, cancellationToken);
+            global::Sample.CreateOrder.__keryx_InvokeAsync(request, __GetPipeline1().Service0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline1 __GetPipeline1()
@@ -240,7 +240,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<global::System.Collections.Generic.List<string>> __Send2(global::Sample.Lookup request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = __GetPipeline2();
-            return global::Sample.LookupHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, pipeline.HandlerService2, pipeline.HandlerService3, pipeline.HandlerService4, pipeline.HandlerService5, pipeline.HandlerService6, pipeline.HandlerService7, cancellationToken);
+            return global::Sample.LookupHandler.__keryx_InvokeAsync(request, pipeline.Service2, pipeline.Service1, pipeline.Service0, pipeline.Service4 ?? 3, pipeline.Service6, pipeline.Service3 ?? (global::Sample.Mode)(2), pipeline.Service5 ?? 2, pipeline.Service7, cancellationToken);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -307,60 +307,60 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Animal</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::System.IServiceProvider HandlerService0;
-            public readonly global::Keryx.IMediator HandlerService1;
+            public readonly global::System.IServiceProvider ServiceProvider;
+            public readonly global::Keryx.IMediator Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = serviceProvider;
-                HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Keryx.IMediator>(serviceProvider);
+                ServiceProvider = serviceProvider;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Keryx.IMediator>(serviceProvider);
             }
         }
 
         /// <summary>The pipeline context of <c>Sample.CreateOrder.Command</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline1
         {
-            public readonly global::Sample.IClock HandlerService0;
+            public readonly global::Sample.IClock Service0;
 
             public __Pipeline1(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
         }
 
         /// <summary>The pipeline context of <c>Sample.Lookup</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline2
         {
-            public readonly global::Sample.IGreeter HandlerService0;
-            public readonly global::Sample.IGreeter? HandlerService1;
-            public readonly global::Sample.IClock? HandlerService2;
-            public readonly int HandlerService3;
-            public readonly int? HandlerService4;
-            public readonly global::Sample.Mode HandlerService5;
-            public readonly int HandlerService6;
-            public readonly long? HandlerService7;
+            public readonly global::Sample.IClock? Service0;
+            public readonly global::Sample.IGreeter? Service1;
+            public readonly global::Sample.IGreeter Service2;
+            public readonly global::Sample.Mode? Service3;
+            public readonly int? Service4;
+            public readonly int? Service5;
+            public readonly int? Service6;
+            public readonly long? Service7;
 
             public __Pipeline2(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IGreeter>(serviceProvider, "primary");
-                HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<global::Sample.IGreeter>(serviceProvider, "backup");
-                HandlerService2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);
-                HandlerService3 = serviceProvider.GetService(typeof(int)) is int __value3 ? __value3 : 3;
-                HandlerService4 = serviceProvider.GetService(typeof(int?)) is int __value4 ? (int?)__value4 : null;
-                HandlerService5 = serviceProvider.GetService(typeof(global::Sample.Mode)) is global::Sample.Mode __value5 ? __value5 : (global::Sample.Mode)(2);
-                HandlerService6 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), 1) is int __value6 ? __value6 : 2;
-                HandlerService7 = serviceProvider.GetService(typeof(long?)) is long __value7 ? (long?)__value7 : null;
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<global::Sample.IClock>(serviceProvider);
+                Service1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetKeyedService<global::Sample.IGreeter>(serviceProvider, "backup");
+                Service2 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::Sample.IGreeter>(serviceProvider, "primary");
+                Service3 = serviceProvider.GetService(typeof(global::Sample.Mode)) is global::Sample.Mode __value3 ? (global::Sample.Mode?)__value3 : null;
+                Service4 = serviceProvider.GetService(typeof(int)) is int __value4 ? (int?)__value4 : null;
+                Service5 = (serviceProvider as global::Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider)?.GetKeyedService(typeof(int), 1) is int __value5 ? (int?)__value5 : null;
+                Service6 = serviceProvider.GetService(typeof(int?)) is int __value6 ? (int?)__value6 : null;
+                Service7 = serviceProvider.GetService(typeof(long?)) is long __value7 ? (long?)__value7 : null;
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Placed</c>: the services its handlers inject, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.IClock Handler0Service0;
+            public readonly global::Sample.IClock Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.IClock>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -370,7 +370,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = global::Sample.OnPlaced.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
+                    task = global::Sample.OnPlaced.__keryx_InvokeAsync(notification, Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {

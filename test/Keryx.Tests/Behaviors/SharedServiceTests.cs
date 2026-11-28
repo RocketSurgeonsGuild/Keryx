@@ -11,12 +11,13 @@ using Rocket.Surgery.Extensions.Testing.SourceGenerators;
 namespace Keryx.Tests.Behaviors;
 
 /// <summary>
-///     A pipeline context resolves each service its behavior methods inject once (ADR 0001, Injected parameters): one field per distinct
-///     (service type, key), named <c>Service0</c>, <c>Service1</c>, ... in a stable ordinal order of (service type, key) (OQ-64), in request,
-///     stream and notification pipeline contexts. A service with a required consumer is resolved as required for every consumer; one whose
-///     consumers are all optional is resolved once as optional, and each call site applies its own default. A transient shared by several
-///     behavior methods is one instance per pipeline context. The unkeyed <c>IServiceProvider</c> is not a numbered service: the context
-///     holds the provider it is built with in its <c>ServiceProvider</c> field, only when a behavior method injects it (OQ-63).
+///     A pipeline context resolves each service its behavior methods and its handlers inject once (ADR 0001, Injected parameters; owner
+///     decisions 9 and 43): one field per distinct (service type, key), named <c>Service0</c>, <c>Service1</c>, ... in a stable ordinal order
+///     of (service type, key) (OQ-64), in request, stream and notification pipeline contexts. A service with a required consumer is resolved
+///     as required for every consumer; one whose consumers are all optional is resolved once as optional, and each call site applies its own
+///     default. A transient shared by several behavior methods or handlers is one instance per pipeline context. The unkeyed
+///     <c>IServiceProvider</c> is not a numbered service: the context holds the provider it is built with in its <c>ServiceProvider</c>
+///     field, only when a behavior method or an own handler injects it (OQ-63).
 /// </summary>
 [Timeout(ModuleInitializer.TestTimeout)]
 public partial class SharedServiceTests : HostTest
@@ -157,6 +158,77 @@ public partial class SharedServiceTests : HostTest
                 "stream.first 3", "stream.second 3 scope",
                 "publish.first 4", "publish.second 4 scope", "publish.handler scope",
             ],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching
+        );
+    }
+
+    [Test]
+    public async Task Should_Give_A_Service_A_Handler_And_Its_Behaviors_Share_One_Field(CancellationToken cancellationToken)
+    {
+        var result = await GenerateAsync(LogAndStore + HandlersAndBehaviors, cancellationToken);
+
+        // Owner decision 43: each context resolves a (service type, key) once for its behaviors and its handlers. Ping's handler requires
+        // IClock where its behavior takes it optionally, so it is resolved as required for both; the behavior requires IStore where the
+        // handler takes it optionally; ILog only the handler injects (optional, a nullable field, held for its static entry). Feed's handler
+        // and behavior share one IClock, and so do Placed's behavior and its two handlers (one of them optional).
+        var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
+        await Assert.That(Fields(mediator)).IsEquivalentTo(
+            [
+                "global::Sample.IClock Service0", "global::Sample.ILog? Service1", "global::Sample.IStore Service2",
+                "global::Sample.IClock Service0",
+                "global::Sample.IClock Service0",
+            ],
+            TUnit.Assertions.Enums.CollectionOrdering.Matching
+        );
+        await Assert.That(Count(mediator, "GetRequiredService<global::Sample\\.IClock>")).IsEqualTo(3);
+        await Assert.That(Count(mediator, "GetRequiredService<global::Sample\\.IStore>")).IsEqualTo(1);
+        await Assert.That(Count(mediator, "GetService<global::Sample\\.ILog>")).IsEqualTo(1);
+        await Assert.That(mediator).DoesNotContain("HandlerService");
+        await Assert.That(mediator).Contains("global::Sample.Maybe.Handle<global::Sample.Ping, int, __Pipeline0.Link1>(request, new(pipeline, request), pipeline.Service2, cancellationToken, pipeline.Service0)");
+        await Assert.That(mediator).Contains("global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.Service0, pipeline.Service2, pipeline.Service1, cancellationToken)");
+        await Assert.That(mediator).Contains("global::Sample.FeedHandler.__keryx_InvokeAsync(request, pipeline.Service0, cancellationToken)");
+        await Assert.That(mediator).Contains("global::Sample.OnPlacedA.__keryx_InvokeAsync(notification, Service0, cancellationToken)");
+        await Assert.That(mediator).Contains("global::Sample.OnPlacedB.__keryx_InvokeAsync(notification, Service0, cancellationToken)");
+        await VerifyHost(result);
+    }
+
+    [Test]
+    public async Task Handlers_And_Behaviors_Of_One_Context_Receive_The_Same_Instance_Of_A_Transient(CancellationToken cancellationToken)
+    {
+        // Owner decision 43: a transient service is resolved once per context and shared by the context's behaviors and handlers: a request's
+        // own handler and its behavior, a referenced request handler (constructed with the shared instance) and its behavior, a stream's
+        // handler and behavior, and a notification's behavior, its two own handlers and a referenced one. Each context is created on first
+        // use in the scope, in the order sent (Ping, Fetch, Feed, Placed), so each resolves the next Clock; a new scope resolves new ones.
+        var library = await CompileLibraryAsync("Shared", SharedLibrary, cancellationToken);
+        var host = await CompileHostAsync(SharedHost, cancellationToken, library);
+        var clock = library.Assembly!.GetType("Shared.Clock", throwOnError: true)!;
+        await using var provider = BuildProvider(host, services => services.AddTransient(clock));
+        _ = Take(library.Assembly!);
+
+        for (var scopeIndex = 0; scopeIndex < 2; scopeIndex++)
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            for (var call = 0; call < 2; call++)
+            {
+                _ = await mediator.Send((IRequest<int>)Create(host, "Sample.Ping"), cancellationToken);
+                _ = await mediator.Send((IRequest<int>)Create(library.Assembly!, "Shared.Fetch"), cancellationToken);
+                await foreach (var _ in mediator.Stream((IStreamRequest<int>)Create(host, "Sample.Feed"), cancellationToken)) { }
+
+                await mediator.Publish((INotification)Create(library.Assembly!, "Shared.Placed"), cancellationToken);
+            }
+        }
+
+        string[] Calls(int ping, int fetch, int feed, int placed) =>
+        [
+            $"request.behavior {ping}", $"ping.handler {ping}",
+            $"request.behavior {fetch}", $"fetch.handler {fetch}",
+            $"stream.behavior {feed}", $"feed.handler {feed}",
+            $"publish.behavior {placed}", $"placed.a {placed}", $"placed.b {placed}", $"placed.referenced {placed}",
+        ];
+
+        await Assert.That(Take(library.Assembly!)).IsEquivalentTo(
+            [.. Calls(1, 2, 3, 4), .. Calls(1, 2, 3, 4), .. Calls(5, 6, 7, 8), .. Calls(5, 6, 7, 8)],
             TUnit.Assertions.Enums.CollectionOrdering.Matching
         );
     }
@@ -487,47 +559,55 @@ public partial class SharedServiceTests : HostTest
             cancellationToken
         );
 
-        // The pipeline context holds the scope's provider itself for the unkeyed parameter and resolves the keyed one, and passes both to the
-        // handler's static entry (owner decision 44). No behavior injects IServiceProvider, so the context has no ServiceProvider field and
-        // no shared services; AddKeryx() registers no handler (owner decision 42).
+        // The handler's services are the context's shared services (owner decision 43): the context holds the scope's provider itself in its
+        // ServiceProvider field for the unkeyed parameter (OQ-63) and resolves the keyed one as shared service 0, and passes both to the
+        // handler's static entry (owner decision 44). AddKeryx() registers no handler (owner decision 42).
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
-        await Assert.That(mediator).Contains("HandlerService0 = serviceProvider;");
+        await Assert.That(mediator).Contains("public readonly global::System.IServiceProvider ServiceProvider;");
+        await Assert.That(mediator).Contains("ServiceProvider = serviceProvider;");
         await Assert.That(mediator).Contains(
-            "HandlerService1 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\");"
+            "Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService<global::System.IServiceProvider>(serviceProvider, \"root\");"
         );
-        await Assert.That(mediator).Contains("global::Sample.ProbeHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, pipeline.HandlerService1, cancellationToken)");
-        await Assert.That(mediator).DoesNotContain("ServiceProvider ServiceProvider;");
-        await Assert.That(Fields(mediator)).IsEmpty();
+        await Assert.That(mediator).Contains("global::Sample.ProbeHandler.__keryx_InvokeAsync(request, pipeline.ServiceProvider, pipeline.Service0, cancellationToken)");
+        await Assert.That(Fields(mediator)).IsEquivalentTo(["global::System.IServiceProvider Service0"]);
         await Assert.That(TestSources.HostSource(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("ProbeHandler");
     }
 
     [Test]
     public async Task Should_Give_Every_Value_Type_Resolution_Of_A_Context_Its_Own_Pattern_Variable(CancellationToken cancellationToken)
     {
-        // A context constructor resolves its behaviors' shared services and each handler's injected parameters in one body, so an optional
-        // value type of a behavior, of the host's own handlers (static entries) and of a referenced handler (constructed with new) each
-        // declares its own __valueN: the shared services take the first numbers, the handlers continue after them in order. A repeated
-        // name would be CS0128 in generated code.
+        // A context constructor resolves every shared service of its behaviors and handlers in one body (owner decision 43), so each
+        // optional value type declares its own __valueN, numbered by its service: a behavior's, an own handler's (static entry) and a
+        // referenced handler's (constructed with new) alike. A repeated name would be CS0128 in generated code. Own handlers that inject
+        // the same optional service with different defaults share it, and each call applies its own default; a service only a referenced
+        // handler's constructor takes is a local of the context's constructor, not a field.
         var library = await CompileLibraryAsync("Values", ValuesLibrary, cancellationToken);
         var result = await HostBuilder.AddCompilationReferences(library).AddSources(Usings + ValuesHost).Build().GenerateAsync(cancellationToken);
         result.AssertCompilationWasSuccessful();
         await Assert.That(result.FinalDiagnostics.Where(static d => d.Severity >= DiagnosticSeverity.Warning).Select(static d => d.ToString())).IsEmpty();
 
         var mediator = TestSources.HostSource(result, HostEmitter.MediatorHintName);
-        // The Ping context: the behavior's int? limit is shared service 0, the own handler's int retries continues at 1.
-        await Assert.That(mediator).Contains("Service0 = serviceProvider.GetService(typeof(int?)) is int __value0 ? (int?)__value0 : null;");
-        await Assert.That(mediator).Contains("HandlerService0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 3;");
-        // The Noted context: two own handlers, then the referenced one, numbered in handler order from 0 (no behaviors).
-        await Assert.That(mediator).Contains("Handler0Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? __value0 : 3;");
-        await Assert.That(mediator).Contains("Handler1Service0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 4;");
-        await Assert.That(mediator).Contains("Handler2 = new global::Values.NotedHandler(serviceProvider.GetService(typeof(long?)) is long __value2 ? (long?)__value2 : null);");
-        await Assert.That(mediator).Contains("the services its handlers inject, its referenced handlers and the injected services of its behaviors");
+        // The Ping context: the own handler's int retries is shared service 0 (int sorts before int?), the behavior's int? limit service 1.
+        await Assert.That(mediator).Contains("Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? (int?)__value0 : null;");
+        await Assert.That(mediator).Contains("Service1 = serviceProvider.GetService(typeof(int?)) is int __value1 ? (int?)__value1 : null;");
+        await Assert.That(mediator).Contains("global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.Service0 ?? 3, cancellationToken)");
+        // The Noted context: the int both own handlers and the first referenced handler inject is held service 0, each call site with its
+        // own default (the referenced constructor's included); the long? only the referenced handlers' constructors take is service 1, one
+        // local both constructors read, bare for the null default and with ?? for the other.
+        await Assert.That(Count(mediator, "Service0 = serviceProvider\\.GetService\\(typeof\\(int\\)\\) is int __value0 \\? \\(int\\?\\)__value0 : null;")).IsEqualTo(2);
+        await Assert.That(mediator).Contains("global::Sample.OnNotedA.__keryx_InvokeAsync(notification, Service0 ?? 3, cancellationToken)");
+        await Assert.That(mediator).Contains("global::Sample.OnNotedB.__keryx_InvokeAsync(notification, Service0 ?? 4, cancellationToken)");
+        await Assert.That(Count(mediator, "var __service1 = serviceProvider\\.GetService\\(typeof\\(long\\?\\)\\) is long __value1 \\? \\(long\\?\\)__value1 : null;")).IsEqualTo(1);
+        await Assert.That(mediator).Contains("= new global::Values.NotedHandler(__service1, Service0 ?? 5);");
+        await Assert.That(mediator).Contains("= new global::Values.NotedLimitHandler(__service1 ?? 6L);");
+        await Assert.That(mediator).DoesNotContain("long? Service1;");
+        await Assert.That(mediator).Contains("its referenced handlers and the services its handlers inject");
         await VerifyHost(result);
 
         // Each call site applies its own default when nothing is registered, and every one receives the registered value otherwise.
         var host = result.Assembly!;
         await Assert.That(await SendAndPublish(host, library.Assembly!, null, cancellationToken))
-                    .IsEquivalentTo(["limit none", "own a 3", "own b 4", "referenced none", "ping 3"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+                    .IsEquivalentTo(["limit none", "own a 3", "own b 4", "referenced none 5", "referenced limit 6", "ping 3"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(
                          await SendAndPublish(
                              host,
@@ -536,7 +616,7 @@ public partial class SharedServiceTests : HostTest
                              cancellationToken
                          )
                      )
-                    .IsEquivalentTo(["limit 7", "own a 9", "own b 9", "referenced 5", "ping 9"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+                    .IsEquivalentTo(["limit 7", "own a 9", "own b 9", "referenced 5 9", "referenced limit 5", "ping 9"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
     }
 
     /// <summary>
@@ -560,7 +640,10 @@ public partial class SharedServiceTests : HostTest
         return [.. Seen(host), .. log, response];
     }
 
-    /// <summary>A library with the <c>Noted</c> notification and a handler of it that injects an optional <c>long?</c>.</summary>
+    /// <summary>
+    ///     A library with the <c>Noted</c> notification and two handlers of it: one injects an optional <c>long?</c> with no default and an
+    ///     <c>int</c> with a default, the other the same <c>long?</c> with a non-null default.
+    /// </summary>
     private const string ValuesLibrary = """
         namespace Values;
 
@@ -573,9 +656,20 @@ public partial class SharedServiceTests : HostTest
 
         public partial class NotedHandler
         {
-            private static ValueTask Handle(Noted notification, long? x = null)
+            private static ValueTask Handle(Noted notification, long? x = null, int retries = 5)
             {
-                notification.Log.Enqueue("referenced " + (x?.ToString(CultureInfo.InvariantCulture) ?? "none"));
+                notification.Log.Enqueue(
+                    "referenced " + (x?.ToString(CultureInfo.InvariantCulture) ?? "none") + " " + retries.ToString(CultureInfo.InvariantCulture)
+                );
+                return default;
+            }
+        }
+
+        public partial class NotedLimitHandler
+        {
+            private static ValueTask Handle(Noted notification, long? limit = 6)
+            {
+                notification.Log.Enqueue("referenced limit " + (limit?.ToString(CultureInfo.InvariantCulture) ?? "none"));
                 return default;
             }
         }
@@ -864,6 +958,202 @@ public partial class SharedServiceTests : HostTest
         """;
 
     /// <summary>
+    ///     A request (<c>Ping</c>), a stream request (<c>Feed</c>) and a notification (<c>Placed</c>) whose handlers inject services their
+    ///     behaviors inject too, required on one side and optional on the other, and a service only the request's handler injects.
+    /// </summary>
+    private const string HandlersAndBehaviors = """
+        [RequestBehavior]
+        public static class Maybe
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, IStore store, CancellationToken cancellationToken, IClock? clock = null)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse> => next.InvokeAsync(cancellationToken);
+        }
+
+        [StreamBehavior]
+        public static class StreamClock
+        {
+            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, IClock clock, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem> => next.InvokeAsync(cancellationToken);
+        }
+
+        [NotificationBehavior]
+        public static class PublishClock
+        {
+            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, IClock clock, CancellationToken cancellationToken)
+                where TNotification : INotification
+                where TNext : struct, INext => next.InvokeAsync(cancellationToken);
+        }
+
+        public sealed record Ping : IRequest<int>;
+
+        public partial class PingHandler
+        {
+            [Behavior(typeof(Maybe))]
+            private static int Handle(Ping request, IClock clock, IStore? store = null, ILog? log = null) => 1;
+        }
+
+        public sealed record Feed : IStreamRequest<int>;
+
+        public partial class FeedHandler
+        {
+            [Behavior(typeof(StreamClock))]
+            private static IAsyncEnumerable<int> Handle(Feed request, IClock clock) => throw new NotSupportedException();
+        }
+
+        [Behavior(typeof(PublishClock))]
+        public sealed record Placed : INotification;
+
+        public partial class OnPlacedA { private static ValueTask Handle(Placed notification, IClock clock) => default; }
+
+        public partial class OnPlacedB { private static ValueTask Handle(Placed notification, IClock? clock = null) => default; }
+
+        """;
+
+    /// <summary>
+    ///     A library with a transient <c>Clock</c> that numbers its instances, the log every consumer writes the instance it received to
+    ///     (<c>Seen</c>), the request <c>Fetch</c> and the notification <c>Placed</c>, each with a handler that injects a <c>Clock</c>.
+    /// </summary>
+    private const string SharedLibrary = """
+        namespace Shared;
+
+        using System.Collections.Generic;
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Keryx;
+
+        public sealed class Clock
+        {
+            private static int _created;
+            public int Id { get; } = Interlocked.Increment(ref _created);
+            public override string ToString() => Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        public static class Seen
+        {
+            private static readonly List<string> Entries = [];
+            public static void Write(string entry) { lock (Entries) { Entries.Add(entry); } }
+            public static string[] Take() { lock (Entries) { var entries = Entries.ToArray(); Entries.Clear(); return entries; } }
+        }
+
+        public sealed record Fetch : IRequest<int>;
+
+        public partial class FetchHandler
+        {
+            private static int Handle(Fetch request, Clock clock)
+            {
+                Seen.Write("fetch.handler " + clock);
+                return 1;
+            }
+        }
+
+        public sealed record Placed : INotification;
+
+        public partial class OnPlacedReferenced
+        {
+            private static ValueTask Handle(Placed notification, Clock clock)
+            {
+                Seen.Write("placed.referenced " + clock);
+                return default;
+            }
+        }
+        """;
+
+    /// <summary>
+    ///     A host over <see cref="SharedLibrary" />: a global request behavior, a global stream behavior and a global notification behavior
+    ///     that inject the library's <c>Clock</c> (so they apply to the library's <c>Fetch</c> and <c>Placed</c> too), the request <c>Ping</c>,
+    ///     the stream request <c>Feed</c> and two own handlers of <c>Placed</c> ordered before the library's, each injecting a <c>Clock</c>.
+    /// </summary>
+    private const string SharedHost = """
+        namespace Sample;
+
+        using Shared;
+
+        [RequestBehavior]
+        [GlobalBehavior]
+        public static class RequestStamp
+        {
+            public static ValueTask<TResponse> Handle<TRequest, TResponse, TNext>(TRequest request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TRequest : IRequest<TResponse>
+                where TNext : struct, INext<TResponse>
+            {
+                Seen.Write("request.behavior " + clock);
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        [StreamBehavior]
+        [GlobalBehavior]
+        public static class StreamStamp
+        {
+            public static IAsyncEnumerable<TItem> Handle<TRequest, TItem, TNext>(TRequest request, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TRequest : IStreamRequest<TItem>
+                where TNext : struct, IStreamNext<TItem>
+            {
+                Seen.Write("stream.behavior " + clock);
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        [NotificationBehavior]
+        [GlobalBehavior]
+        public static class PublishStamp
+        {
+            public static ValueTask Handle<TNotification, TNext>(TNotification notification, TNext next, Clock clock, CancellationToken cancellationToken)
+                where TNotification : INotification
+                where TNext : struct, INext
+            {
+                Seen.Write("publish.behavior " + clock);
+                return next.InvokeAsync(cancellationToken);
+            }
+        }
+
+        public sealed record Ping : IRequest<int>;
+
+        public partial class PingHandler
+        {
+            private static int Handle(Ping request, Clock clock)
+            {
+                Seen.Write("ping.handler " + clock);
+                return 1;
+            }
+        }
+
+        public sealed record Feed : IStreamRequest<int>;
+
+        public partial class FeedHandler
+        {
+            private static async IAsyncEnumerable<int> Handle(Feed request, Clock clock)
+            {
+                Seen.Write("feed.handler " + clock);
+                await Task.Yield();
+                yield return 1;
+            }
+        }
+
+        public partial class OnPlacedA
+        {
+            [HandlerOrder(-2)]
+            private static ValueTask Handle(Placed notification, Clock clock)
+            {
+                Seen.Write("placed.a " + clock);
+                return default;
+            }
+        }
+
+        public partial class OnPlacedB
+        {
+            [HandlerOrder(-1)]
+            private static ValueTask Handle(Placed notification, Clock clock)
+            {
+                Seen.Write("placed.b " + clock);
+                return default;
+            }
+        }
+        """;
+
+    /// <summary>
     ///     A host whose behaviors and handler inject <c>string</c> services under keys of different primitive types with equal values
     ///     (<c>(byte)1</c> and <c>1</c>, <c>(short)-1</c> and <c>-1</c>), and log what they receive (<c>Seen</c>).
     /// </summary>
@@ -1035,6 +1325,8 @@ public partial class SharedServiceTests : HostTest
     }
 
     private static string[] Seen(System.Reflection.Assembly host) => Call<string[]>(host, "Sample.Seen", "Take");
+
+    private static string[] Take(System.Reflection.Assembly library) => Call<string[]>(library, "Shared.Seen", "Take");
 
     [GeneratedRegex(@"public readonly (\S+\??\s+Service\d+);")]
     private static partial Regex ServiceField();

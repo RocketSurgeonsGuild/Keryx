@@ -208,8 +208,9 @@ internal static class HostModelFactory
 
         var classified = MessageType.Classify(messageType, symbols);
         var responseType = model.Kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
-        var (behaviors, contextServices, usedExclusions, contextServiceProvider) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
-            ? PipelineBehaviors.For(AttachedBehaviors(method, symbols), method.ContainingAssembly, target, catalog)
+        var handlerServices = services.ToImmutable();
+        var (behaviors, contextServices, usedExclusions, contextServiceProvider, serviceSlots) = PipelineBehaviors.Target(model.Kind, messageType, responseType) is { } target
+            ? PipelineBehaviors.For(AttachedBehaviors(method, symbols), method.ContainingAssembly, target, catalog, new(handlerServices, Held: true))
             : ComposedBehaviors.Empty;
         var deliveries = model.Kind == HandlerKind.Notification
             ? Deliveries(messageType, catalog)
@@ -223,13 +224,14 @@ internal static class HostModelFactory
             model.ResponseType,
             model.StaticInvoker,
             !model.StaticInvoker,
-            services.ToImmutable(),
+            handlerServices,
             behaviors,
             usedExclusions,
             model.Order,
             deliveries,
             contextServices,
-            contextServiceProvider
+            contextServiceProvider,
+            serviceSlots
         );
     }
 
@@ -287,8 +289,9 @@ internal static class HostModelFactory
         }
 
         var responseType = kind == HandlerKind.Stream ? classified.ItemType : classified.ResponseType;
-        var (behaviors, contextServices, usedExclusions, contextServiceProvider) = PipelineBehaviors.Target(kind, target, responseType) is { } pipelineTarget
-            ? PipelineBehaviors.For(attached, handlerClass.ContainingAssembly, pipelineTarget, catalog)
+        var handlerServices = services.ToImmutable();
+        var (behaviors, contextServices, usedExclusions, contextServiceProvider, serviceSlots) = PipelineBehaviors.Target(kind, target, responseType) is { } pipelineTarget
+            ? PipelineBehaviors.For(attached, handlerClass.ContainingAssembly, pipelineTarget, catalog, new(handlerServices, Held: false))
             : ComposedBehaviors.Empty;
         var deliveries = kind == HandlerKind.Notification
             ? Deliveries(target, catalog)
@@ -303,13 +306,14 @@ internal static class HostModelFactory
             responseType is null ? null : CSharpText.Type(responseType),
             staticInvoker,
             false,
-            services.ToImmutable(),
+            handlerServices,
             behaviors,
             usedExclusions,
             kind == HandlerKind.Notification ? order : 0,
             deliveries,
             contextServices,
-            contextServiceProvider
+            contextServiceProvider,
+            serviceSlots
         );
     }
 

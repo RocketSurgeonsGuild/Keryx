@@ -105,7 +105,7 @@ namespace Sample
         private global::System.Threading.Tasks.ValueTask<string> __Send0(global::Sample.Ping request, global::System.Threading.CancellationToken cancellationToken)
         {
             var pipeline = __GetPipeline0();
-            return global::Sample.Limit.Handle<global::Sample.Ping, string, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service0);
+            return global::Sample.Limit.Handle<global::Sample.Ping, string, __Pipeline0.Link1>(request, new(pipeline, request), cancellationToken, pipeline.Service1);
         }
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -158,38 +158,39 @@ namespace Sample
             public object? __notification0;
         }
 
-        /// <summary>The pipeline context of <c>Sample.Ping</c>: the services its handler injects and the injected services of its behaviors, resolved once per scope.</summary>
+        /// <summary>The pipeline context of <c>Sample.Ping</c>: the services its handler and its behaviors inject, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly int HandlerService0;
             public readonly int? Service0;
+            public readonly int? Service1;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 3;
-                Service0 = serviceProvider.GetService(typeof(int?)) is int __value0 ? (int?)__value0 : null;
+                Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? (int?)__value0 : null;
+                Service1 = serviceProvider.GetService(typeof(int?)) is int __value1 ? (int?)__value1 : null;
             }
 
             /// <summary>The <c>next</c> of <c>Sample.Limit</c>: the handler.</summary>
             public readonly struct Link1(__Pipeline0 pipeline, global::Sample.Ping request) : global::Keryx.INext<string>
             {
                 public global::System.Threading.Tasks.ValueTask<string> InvokeAsync(global::System.Threading.CancellationToken cancellationToken) =>
-                    global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.HandlerService0, cancellationToken);
+                    global::Sample.PingHandler.__keryx_InvokeAsync(request, pipeline.Service0 ?? 3, cancellationToken);
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Values.Noted</c>: the services its handlers inject, its referenced handlers and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Values.Noted</c>: its referenced handlers and the services its handlers inject, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly int Handler0Service0;
-            public readonly int Handler1Service0;
+            public readonly int? Service0;
             public readonly global::Values.NotedHandler Handler2;
+            public readonly global::Values.NotedLimitHandler Handler3;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler0Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? __value0 : 3;
-                Handler1Service0 = serviceProvider.GetService(typeof(int)) is int __value1 ? __value1 : 4;
-                Handler2 = new global::Values.NotedHandler(serviceProvider.GetService(typeof(long?)) is long __value2 ? (long?)__value2 : null);
+                Service0 = serviceProvider.GetService(typeof(int)) is int __value0 ? (int?)__value0 : null;
+                var __service1 = serviceProvider.GetService(typeof(long?)) is long __value1 ? (long?)__value1 : null;
+                Handler2 = new global::Values.NotedHandler(__service1, Service0 ?? 5);
+                Handler3 = new global::Values.NotedLimitHandler(__service1 ?? 6L);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -199,7 +200,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = global::Sample.OnNotedA.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
+                    task = global::Sample.OnNotedA.__keryx_InvokeAsync(notification, Service0 ?? 3, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -215,7 +216,7 @@ namespace Sample
                 task.GetAwaiter().GetResult();
                 try
                 {
-                    task = global::Sample.OnNotedB.__keryx_InvokeAsync(notification, Handler1Service0, cancellationToken);
+                    task = global::Sample.OnNotedB.__keryx_InvokeAsync(notification, Service0 ?? 4, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {
@@ -245,6 +246,22 @@ namespace Sample
                 }
 
                 task.GetAwaiter().GetResult();
+                try
+                {
+                    task = Handler3.InvokeAsync(notification, cancellationToken);
+                }
+                catch (global::System.Exception exception)
+                {
+                    (exceptions ??= new()).Add(exception);
+                    task = default;
+                }
+
+                if (!task.IsCompletedSuccessfully)
+                {
+                    return RunHandlersAsync(notification, task, 3, exceptions, cancellationToken);
+                }
+
+                task.GetAwaiter().GetResult();
                 return exceptions is null ? default : global::System.Threading.Tasks.ValueTask.FromException(new global::System.AggregateException(exceptions));
             }
 
@@ -265,7 +282,7 @@ namespace Sample
                 {
                     try
                     {
-                        await global::Sample.OnNotedB.__keryx_InvokeAsync(notification, Handler1Service0, cancellationToken).ConfigureAwait(false);
+                        await global::Sample.OnNotedB.__keryx_InvokeAsync(notification, Service0 ?? 4, cancellationToken).ConfigureAwait(false);
                     }
                     catch (global::System.Exception exception)
                     {
@@ -278,6 +295,18 @@ namespace Sample
                     try
                     {
                         await Handler2.InvokeAsync(notification, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (global::System.Exception exception)
+                    {
+                        (exceptions ??= new()).Add(exception);
+                    }
+                }
+
+                if (position < 3)
+                {
+                    try
+                    {
+                        await Handler3.InvokeAsync(notification, cancellationToken).ConfigureAwait(false);
                     }
                     catch (global::System.Exception exception)
                     {

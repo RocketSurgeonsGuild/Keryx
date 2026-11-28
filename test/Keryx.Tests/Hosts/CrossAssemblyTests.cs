@@ -189,9 +189,9 @@ public class CrossAssemblyTests : HostTest
         await Assert.That(mediator).Contains("global::Orders.Journaled.Handle<global::Orders.CreateOrder, int, ");
         await Assert.That(mediator).Contains("global::Orders.IJournal Service0;");
         await Assert.That(mediator).Contains("global::Orders.Doubling.Handle<Link2>(");
-        // A referenced handler with injected parameters is constructed by its pipeline context, never registered (owner decision 42).
-        await Assert.That(mediator)
-                    .Contains("Handler = new global::Orders.CreateOrderHandler(global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Orders.IJournal>(serviceProvider));");
+        // A referenced handler with injected parameters is constructed by its pipeline context, never registered (owner decision 42), with
+        // the IJournal the context resolved once and shares with the Journaled behavior (owner decision 43).
+        await Assert.That(mediator).Contains("Handler = new global::Orders.CreateOrderHandler(Service0);");
         await Assert.That(Source(result, HostEmitter.ServiceCollectionExtensionsHintName)).DoesNotContain("CreateOrderHandler");
     }
 

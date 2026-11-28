@@ -163,7 +163,7 @@ namespace Sample
         }
 
         private global::System.Threading.Tasks.ValueTask<int> __Send0(global::Sample.Q0 request, global::System.Threading.CancellationToken cancellationToken) =>
-            global::Sample.Q0Handler.__keryx_InvokeAsync(request, __GetPipeline0().HandlerService0, cancellationToken);
+            global::Sample.Q0Handler.__keryx_InvokeAsync(request, __GetPipeline0().Service0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline0 __GetPipeline0()
@@ -180,7 +180,7 @@ namespace Sample
             global::Sample.Q1Handler.InvokeAsync(request, cancellationToken);
 
         private global::System.Threading.Tasks.ValueTask<int> __Send2(global::Sample.Q2 request, global::System.Threading.CancellationToken cancellationToken) =>
-            global::Sample.Q2Handler.__keryx_InvokeAsync(request, __GetPipeline2().HandlerService0, cancellationToken);
+            global::Sample.Q2Handler.__keryx_InvokeAsync(request, __GetPipeline2().Service0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __Pipeline2 __GetPipeline2()
@@ -194,7 +194,7 @@ namespace Sample
             global::System.Runtime.CompilerServices.Unsafe.As<__Pipeline2>(global::System.Threading.Interlocked.CompareExchange(ref state.__pipeline2, new __Pipeline2(__serviceProvider), null) ?? state.__pipeline2);
 
         private global::System.Collections.Generic.IAsyncEnumerable<int> __Stream0(global::Sample.Items request, global::System.Threading.CancellationToken cancellationToken) =>
-            global::Sample.ItemsHandler.__keryx_InvokeAsync(request, __GetStreamPipeline0().HandlerService0, cancellationToken);
+            global::Sample.ItemsHandler.__keryx_InvokeAsync(request, __GetStreamPipeline0().Service0, cancellationToken);
 
         [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private __StreamPipeline0 __GetStreamPipeline0()
@@ -251,44 +251,44 @@ namespace Sample
         /// <summary>The pipeline context of <c>Sample.Q0</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline0
         {
-            public readonly global::Sample.Clock HandlerService0;
+            public readonly global::Sample.Clock Service0;
 
             public __Pipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
         /// <summary>The pipeline context of <c>Sample.Q2</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __Pipeline2
         {
-            public readonly global::Sample.Clock HandlerService0;
+            public readonly global::Sample.Clock Service0;
 
             public __Pipeline2(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
         /// <summary>The stream pipeline context of <c>Sample.Items</c>: the services its handler injects, resolved once per scope.</summary>
         private sealed class __StreamPipeline0
         {
-            public readonly global::Sample.Clock HandlerService0;
+            public readonly global::Sample.Clock Service0;
 
             public __StreamPipeline0(global::System.IServiceProvider serviceProvider)
             {
-                HandlerService0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
         }
 
-        /// <summary>The publish pipeline context of <c>Sample.Rang</c>: the services its handlers inject and the injected services of its behaviors, resolved once per scope, and its publish strategy.</summary>
+        /// <summary>The publish pipeline context of <c>Sample.Rang</c>: the services its handlers inject, resolved once per scope, and its publish strategy.</summary>
         private sealed class __Notification0
         {
-            public readonly global::Sample.Clock Handler0Service0;
+            public readonly global::Sample.Clock Service0;
 
             public __Notification0(global::System.IServiceProvider serviceProvider)
             {
-                Handler0Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
+                Service0 = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<global::Sample.Clock>(serviceProvider);
             }
 
             /// <summary>Runs every handler in handler order (sequential), then reports every failure in one AggregateException.</summary>
@@ -298,7 +298,7 @@ namespace Sample
                 global::System.Threading.Tasks.ValueTask task;
                 try
                 {
-                    task = global::Sample.RangHandler.__keryx_InvokeAsync(notification, Handler0Service0, cancellationToken);
+                    task = global::Sample.RangHandler.__keryx_InvokeAsync(notification, Service0, cancellationToken);
                 }
                 catch (global::System.Exception exception)
                 {

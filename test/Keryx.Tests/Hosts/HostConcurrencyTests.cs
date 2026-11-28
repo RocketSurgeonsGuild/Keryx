@@ -61,7 +61,7 @@ public class HostConcurrencyTests : HostTest
         var host = await CompileHostAsync(HostRuntimeTests.Source, cancellationToken);
 
         // A transient Identity makes every context construction observable: each context built resolves a new one for its handler (the
-        // host's own, called through its static entry with the context's HandlerService0), so only a race that keeps a single context gives
+        // host's own, called through its static entry with the context's Service0), so only a race that keeps a single context gives
         // every caller the same identity.
         await using var provider = BuildProvider(host, HostRuntimeTests.Registrations(host));
         var state = new ScopeState(host);
@@ -106,7 +106,7 @@ public class HostConcurrencyTests : HostTest
             // a context each (at most one per caller), but none of them was used.
             await Assert.That(identities.Distinct()).HasSingleItem();
             var context = await Assert.That(state.Contexts(scope.ServiceProvider)).HasSingleItem();
-            var storedIdentity = context!.GetType().GetField("HandlerService0")!.GetValue(context);
+            var storedIdentity = context!.GetType().GetField("Service0")!.GetValue(context);
             await Assert.That((int)identityId.GetValue(storedIdentity)!).IsEqualTo(identities[0]);
             await Assert.That((int)created.GetValue(null)! - createdBefore).IsBetween(1, Callers);
 
