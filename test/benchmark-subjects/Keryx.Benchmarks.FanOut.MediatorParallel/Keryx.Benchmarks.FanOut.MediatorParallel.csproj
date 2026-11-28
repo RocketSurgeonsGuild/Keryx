@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' Mediator (martinothamar) 3.0.2 subject with its TaskWhenAllPublisher (owner decision 41), for the parallel
+        publish to 25, 50 and 100 handlers: the notification publisher is a generator option, fixed per assembly, as for
+        Keryx.Benchmarks.MediatorParallel. Singleton lifetime. FanOut.cs is written by ../GenerateFanOut.cs.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Mediator.Abstractions" />
+        <PackageReference Include="Mediator.SourceGenerator" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

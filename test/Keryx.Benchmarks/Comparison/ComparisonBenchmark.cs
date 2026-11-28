@@ -59,7 +59,7 @@ public abstract class ComparisonBenchmark
     /// </summary>
     internal void CreateSubjects()
     {
-        _subjects = new();
+        _subjects = new(FanOut);
         KeryxTyped = _subjects.KeryxTyped;
         KeryxGeneric = _subjects.KeryxGeneric;
         MediatorScopedTyped = _subjects.MediatorScopedTyped;
@@ -77,6 +77,9 @@ public abstract class ComparisonBenchmark
         _subjects?.Dispose();
         _subjects = null;
     }
+
+    /// <summary>Whether this scenario publishes to the fan-out projects (<see cref="FanOutBenchmark" />), whose containers only it builds.</summary>
+    private protected virtual bool FanOut => false;
 
     /// <summary>Resolves what only this scenario needs (Immediate.Handlers' generated handler classes).</summary>
     private protected virtual void Resolve(Subjects subjects) { }

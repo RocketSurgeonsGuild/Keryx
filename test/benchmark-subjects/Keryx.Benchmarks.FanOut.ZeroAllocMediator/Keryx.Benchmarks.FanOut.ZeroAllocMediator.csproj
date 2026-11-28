@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' ZeroAlloc.Mediator 7.0.1 subject (owner decision 41): the notifications with 25, 50 and 100 handlers, in a
+        project of their own like every library's fan-out subject. FanOut.cs is written by ../GenerateFanOut.cs. The generated static Mediator
+        class, IMediator and AddMediator() are internal, so the benchmark runner sees them through InternalsVisibleTo; they have the same names
+        as Keryx.Benchmarks.ZeroAllocMediator's, so the runner references this project under the extern alias ZeroAllocFanOut.
+    -->
+    <PropertyGroup>
+        <!-- The same three as Keryx.Benchmarks.ZeroAllocMediator: its behavior shape (CA1068), class messages (ZAM003), injected handlers (ZAM008). -->
+        <NoWarn>$(NoWarn);CA1068;ZAM003;ZAM008</NoWarn>
+    </PropertyGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="Keryx.Benchmarks" />
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="ZeroAlloc.Mediator" />
+        <PackageReference Include="ZeroAlloc.Mediator.Generator" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    </ItemGroup>
+</Project>

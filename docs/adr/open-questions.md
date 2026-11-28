@@ -36,7 +36,8 @@ doing it. OQ-76 and OQ-77, decided by the owner the same day (decisions 38 and 3
 state" (owner decisions 46 and 47, 2026-11-28; it supersedes decision 35's one-mediator-per-scope guarantee and changes decision 38's
 trade-off) and "Handlers are not registered" (owner decisions 42, 44 and 45, the same day) follow; OQ-78 was raised while implementing
 decision 47 and OQ-79 while implementing decision 44, both open. "Handlers and behaviors share a context's services" (owner decision
-43, the same day) comes last.
+43, the same day) follows, and "Publish to 25, 50 and 100 handlers" (owner decision 41, with decision 48's note, the same day) comes
+last; OQ-80 and OQ-81 were raised while implementing it, both open.
 
 ## Open
 
@@ -58,7 +59,9 @@ with many pipelines (decision 41's 25, 50 and 100 notification handlers in the b
 - **Interim:** one `object?` field per pipeline with a context in `KeryxMediator.__KeryxScopeState`, read with `Volatile.Read` and
   `Unsafe.As`, set once with `Interlocked.CompareExchange` (what this step ships). The 25/50/100-handler benchmarks of decision 41 would
   add 8 B to every Keryx scope-per-request row of the benchmark host per new pipeline with a context; put them in a host of their own (or
-  behind a build property like `KeryxDispatchPadding`) until this is decided.
+  behind a build property like `KeryxDispatchPadding`) until this is decided. They are in a host of their own,
+  `Keryx.Benchmarks.FanOut.KeryxHost` ("Publish to 25, 50 and 100 handlers", at the end), whose twelve pipelines with a context make a
+  112 B state; the benchmark host's state and rows did not change.
 - **Proposal:** keep the per-field layout up to a threshold of pipelines with a context (for example 32, `DispatchThreshold`), and
   above it measure a variant that reads only slot 0 inline and finds the
   others in the non-inlined create method (smaller inlined code; the four-slot chain is the suspect for the generic row, unverified), or
@@ -78,6 +81,43 @@ host, and the generated partial does not compile (CS0102). Outside a host there 
   the generated static entry; rename it"), in libraries and hosts alike so a library cannot ship a handler a host cannot compile, and the
   handler generator skips such a handler like any handler error. Alternative: name the fields differently from the static entry (for
   example `__keryx_p_<parameterName>`), which changes every handler partial. Needs a decision.
+
+### OQ-80: An allocation test failed once under the full test run (2026-11-28)
+
+While implementing decision 41 (benchmark projects only; nothing `Keryx.Tests` compiles or references changed), one full
+`dotnet test --solution Keryx.slnx` run failed
+`HostAllocationTests.A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State` on net10.0: `publish: two mediators` minus
+`publish: KeryxMediator` was 60,008 B over 1,000 scopes where the test expects 32,000 (one 32 B mediator per scope). The same test
+passed in the next full run (1,612 of 1,612; the session scratchpad's `fanout/test2.log`) and in three runs of `HostAllocationTests` on
+their own (12 of 12 each, both target frameworks; `fanout/test-hostalloc-{1,2,3}.log`, re-run after the first three, whose output was not
+kept). The probe's `Region` warms up
+with 100 scopes and keeps the smallest of five 1,000-scope repeats; Microsoft.Extensions.DependencyInjection compiles a call site on
+the thread pool after its second resolution and swaps it in when that finishes, so under a busy machine (the full run uses every core)
+a region can be measured before the compiled call sites are in, and two regions compared with each other can then differ by more than
+the mediator. The cause is inferred, not reproduced; no earlier run in this session's logs failed it.
+
+- **Interim:** nothing changes; the test stays as it is, and a run that fails it is re-run.
+- **Proposal:** make `Region` warm up until two consecutive 1,000-scope windows allocate the same (with a cap, failing with both numbers
+  when the cap is reached), so every region is measured on the container's final call sites; the other allocation probes with the same
+  shape get the same helper. Alternative: keep the interim (re-run on failure). Needs a decision.
+
+### OQ-81: NativeAOT pilot on the fan-out direct-call publish (2026-11-28)
+
+Decision 41's `PublishTo25`, `PublishTo50` and `PublishTo100` ("Publish to 25, 50 and 100 handlers", at the end) have a `Baseline` of
+the same shape as `PublishTo1.Baseline` (OQ-77): `B.Handlers.Publish` calls 25, 50 or 100 static handlers that each call `Probe.Hit()`
+and return `default`, and in the builds BenchmarkDotNet makes `Probe.Hit()` is empty (decision 34), so under NativeAOT the call may fold
+to almost nothing. `FixedInvocationCount.Applies` (`Comparison/FixedInvocationCount.cs`, decision 39) matches `typeof(PublishTo1)` only,
+so these three cases get the pilot. If BenchmarkDotNet 0.15.8's pilot reads their first 16 calls as 0 ns, it throws the
+`OverflowException` OQ-77 describes, the row is NA and a measured `--runtimes nativeaot10.0` run exits 1. No measured NativeAOT run has
+included them, and nothing tests or guards against it: the Dry job runs one invocation and no pilot.
+
+- **Interim:** nothing changes. If the measured NativeAOT run fails on `PublishTo{25,50,100}.Baseline`, the rest of those classes are
+  kept and those rows are re-run on their own with `--invocationCount` (as OQ-77's interim did), or the run is repeated with a `--filter`
+  that leaves them out, and the README says which.
+- **Proposal:** extend `FixedInvocationCount.Applies` to the `Baseline` cases of `PublishTo25`, `PublishTo50` and `PublishTo100`, each
+  with a count about what its JIT pilot chooses (a multiple of 16), so a full NativeAOT run needs no manual step. Alternative: first run
+  the pilot alone for those three cases under NativeAOT (`--filter '*Comparison.PublishTo{25,50,100}.Baseline' --runtimes nativeaot10.0`
+  with the README's job) and extend the orderer only for the ones that fail. Needs a decision.
 
 ## Decided
 
@@ -3110,3 +3150,78 @@ shape; Mediator; Performance contract; Consequences), the brief (the host summar
 context), the README (Behavior methods, Hosts, the Benchmarks notes) and whats-left.md. Decision 9's entry ("A pipeline context resolves
 each shared service once") carries an extended note and "Handlers are not registered" a superseded note on its fields. No new open
 question.
+
+### Publish to 25, 50 and 100 handlers (2026-11-28)
+
+Owner decision 41 (2026-11-27), with decision 48's note (2026-11-28): the comparison suite publishes to 25, 50 and 100 notification
+handlers, beside 1 and 5, in three scenario families, for every subject with a publish API: the sync publish from the long-lived scope
+(`PublishToN`), the real-world publish per request scope (a repository lookup and a log message per handler, and Keryx's variant with
+the notification logging behavior), and the async publish to handlers that await the SQLite query, sequential and parallel. `--verify`
+counts them; the README's tables get them after a measured run. Decision 48: they can share the benchmark host once its state size is
+bounded (decision 47); confirm that the existing Keryx rows do not change because of them.
+
+Decision 47's bound did not land (OQ-78, open: one field per pipeline with a context), so, by OQ-78's interim, the fan-out
+notifications are not in `Keryx.Benchmarks.KeryxHost`: their twelve pipelines with a context would have added 96 B to every Keryx
+scope-per-request row there, and their fifteen notification types would have been added to its generic `Publish` dispatch. They are in
+projects of their own, one per library and configuration, for every library, so no subject's existing generated code changes (Mediator's
+generic `Publish`, for example, is a type switch over every notification of its assembly) and every library's fan-out rows come from an
+assembly that holds only the fan-out notifications. What was done:
+
+- **Subjects.** Seven projects, `test/benchmark-subjects/Keryx.Benchmarks.FanOut.{Baseline, KeryxHost, MediatorScoped,
+  MediatorSingleton, MediatorParallel, MediatRHandlers, ZeroAllocMediator}`, each `FanOut.cs` written by
+  `test/benchmark-subjects/GenerateFanOut.cs`, a file-based C# program (`dotnet run --file test/benchmark-subjects/GenerateFanOut.cs`;
+  `-- --check` fails when a file differs from what it writes, and CI's benchmark Dry job runs it so). It writes the messages and the
+  handler classes (`Handler001` to `Handler100`) of every subject from one list, with the bodies of the 1 and 5 handler scenarios
+  (`Probe.Hit()` for the sync publish, `PingedWork.Lookup` and `PingedWork.QueryAsync` for the real-world ones), each library's setup,
+  the baseline's handler and publisher classes (a publisher takes its handlers in its constructor; the sync baseline keeps its non-async
+  path with an `async` fallback), and the fan-out Keryx host's notification logging behavior (the body of
+  `Keryx.Benchmarks.KeryxHost.LoggingBehavior`'s). Each project's configuration is its 1 and 5 handler counterpart's: Keryx a host with
+  `KeryxHost` true; Mediator scoped, singleton, and singleton with `TaskWhenAllPublisher`; MediatR's default container and a second one
+  with `TaskWhenAllPublisher`; ZeroAlloc.Mediator's defaults, with `SetFactory` for the async handlers of the static path.
+- **Scenarios.** Fifteen classes in `test/Keryx.Benchmarks/Comparison/FanOutBenchmarks.cs`, written by the same program:
+  `PublishTo{25,50,100}`, `RealWorldPublish{25,50,100}ScopePerRequest`, `RealWorldPublishBehavior{25,50,100}ScopePerRequest`,
+  `RealWorldPublishAsync{25,50,100}` and `RealWorldPublishParallel{25,50,100}`, with the subjects and the n/a cells of their 5 handler
+  counterparts. They derive from `FanOutBenchmark` (hand-written), for which `Subjects` also builds the fan-out containers; no other
+  scenario builds them, so the other classes' setup is what it was. `[Expect]`: `Hits = N` for the sync publish, `3N` for the
+  per-request, async and parallel publishes (each handler, its lookup or query, its log message), `3N + 3` with the behavior (its call
+  and two messages; the baseline `3N + 2`). ZeroAlloc.Mediator's generated static `Mediator`, `IMediator` and `AddMediator()` are
+  internal with the same names in every assembly, so the runner references its fan-out project under the extern alias `ZeroAllocFanOut`.
+- **Every subject runs 100 handlers.** Each builds (the NativeAOT publish too, with no new trim or AOT warning) and passes `--verify`
+  with 25, 50 and 100 handlers, ZeroAlloc.Mediator 7.0.1 included (its static path and its `IMediator`, sequential and
+  `[ParallelNotification]`). MediatR is n/a under NativeAOT here as everywhere, verified for the fan-out containers: a scratch NativeAOT
+  publish with them enabled failed every fan-out scenario's setup with "A suitable constructor for type 'MediatR.Mediator' could not be
+  located", the reason `NativeAot.MediatRReason` gives for a container without behaviors (all fifteen classes, `mediatr-aot-verify.log`).
+- **Verification.** `--verify` checks 352 comparison benchmarks under the JIT (238 before, 114 new: the `[Benchmark]` methods of
+  `FanOutBenchmarks.cs`) and 317 in the NativeAOT publish (35 MediatR n/a), all passing (`verify-jit.log`, `verify-aot.log`, the second
+  from a NativeAOT publish of the final working tree, `aot-publish-2.log`, with the same 27 trim and AOT warnings as the first, none in
+  Keryx's or the subjects' code); the BenchmarkDotNet Dry job of `--filter '*Publish*'` ran 190 benchmarks under the JIT and 170 under
+  NativeAOT (`--runtimes nativeaot10.0`), every one successful (`dry-jit.log`, `dry-aot.log`).
+- **The existing rows are unchanged.** Bytes per call (`GC.GetAllocatedBytesForCurrentThread` over 10,000 calls after 20,000 warm-up
+  calls, the smallest of ten repeats) of every comparison benchmark that completes synchronously, from a clean `git archive` of HEAD
+  (2c7d9dc) and from the working tree, four runs of each (`bytes-before.txt`, `bytes-before-{2,3,4}.txt`, the same for `after`;
+  `compare_bytes.py` compares them): 183 of the 188 such rows of the existing classes read the same in all eight runs (the 50 yielding
+  ones are not synchronous), every Keryx row among them but one. The other five are not stable from run to run within one tree, so the
+  probe cannot tell a change there: ZeroAlloc.Mediator's `RealWorldPublish5ScopePerRequest` `IMediator` row read 960 B in the first
+  before run and 840 B in the other seven (its container's call-site compilation); three rows of the SQLite query publish to one
+  handler, `RealWorldPublishAsync1` `Baseline` (before 1,176, 1,224, 1,224 and 1,224 B; after 1,176 B in all four), `Keryx_Generic`
+  (before 1,176, 1,225, 1,176 and 1,224 B; after 1,176 B in all four) and `MediatR_Generic` (1,952 B in seven runs, 1,937 B in one before
+  run); and `RealWorldSqlite.MediatR_Generic` (1,408 B in all four before runs; after 1,408, 1,393, 1,344 and 1,408 B). A fractional
+  reading (1,225 B is 1,225.34) means the smallest of the ten repeats did not reach a steady per-call count; the SQLite rows of the
+  existing classes did not change code in this step (the fan-out notifications are in projects of their own), and every after reading of
+  `Keryx_Generic` and `Baseline` is one the before tree also gave. `Keryx.Benchmarks.KeryxHost`'s generated source (81 files) is
+  byte-identical before and after (`gen-before/`, `gen-after/`).
+- **The fan-out rows' bytes** (same probe; for 25, 50 and 100 handlers). Per request scope: Keryx 2,112, 3,712 and 6,912 B (typed and
+  `IMediator`), 2,256, 3,856 and 7,064 B with the behavior; the direct call 5,792, 12,360 and 26,280 B (5,952, 12,520 and 26,448 B with
+  the behavior's messages); ZeroAlloc.Mediator 2,760, 5,160 and 9,960 B; MediatR 9,152, 17,480 and 34,120 B; Mediator scoped 9,832,
+  21,152 and 45,368 B. Sync publish: 0 B for every subject but ZeroAlloc.Mediator's `IMediator` (600, 1,200 and 2,400 B) and MediatR
+  (6,944, 13,472 and 26,512 B). Async and parallel: 29,400, 58,800 and 117,600 B for the direct call, Keryx and Mediator, 30,200,
+  60,400 and 120,800 B for ZeroAlloc.Mediator, and MediatR 36,544 to 146,056 B; each of the 114 fan-out rows read the same in all
+  four after runs. No time was measured in this step.
+- **Not checked yet:** BenchmarkDotNet 0.15.8's NativeAOT pilot on `PublishTo{25,50,100}.Baseline`, which like `PublishTo1.Baseline`
+  (OQ-77) may compile to almost nothing; decision 39's fixed invocation count applies to `PublishTo1.Baseline` only. That gap is OQ-81
+  (open).
+
+Folded into the ADR (Benchmarks: the scenarios, a setup rule for the fan-out projects, CI), the brief (Phase 8), the README (Benchmarks)
+and whats-left.md; OQ-78's interim notes where the benchmarks went. No term changes. OQ-80 (an allocation test that failed once under
+the full test run) and OQ-81 (the NativeAOT pilot on the fan-out direct-call publish) were raised while doing it. The reports are in the
+session scratchpad (`fanout/`).

@@ -44,7 +44,8 @@ internal static class NativeAot
     /// <summary>
     ///     Whether <see cref="Subjects" /> skips <paramref name="library" />'s container: in a NativeAOT build, for a library n/a there.
     /// </summary>
-    public static bool Skips(Library library) => IsActive && library is Library.MediatR or Library.MediatRParallel;
+    public static bool Skips(Library library) =>
+        IsActive && library is Library.MediatR or Library.MediatRParallel or Library.MediatRFanOut or Library.MediatRParallelFanOut;
 
     /// <summary>
     ///     Why the benchmark method <paramref name="benchmark" /> (named for its subject: <c>MediatR_Generic</c>, <c>Keryx_Typed</c>, ...)

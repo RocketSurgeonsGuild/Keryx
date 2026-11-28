@@ -74,8 +74,16 @@
   <Folder Name="/test/benchmark-subjects/">
     <File Path="test/benchmark-subjects/Directory.Build.props" />
     <File Path="test/benchmark-subjects/Directory.Build.targets" />
+    <File Path="test/benchmark-subjects/GenerateFanOut.cs" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.Baseline/Keryx.Benchmarks.Baseline.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.Common/Keryx.Benchmarks.Common.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.Baseline/Keryx.Benchmarks.FanOut.Baseline.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.KeryxHost/Keryx.Benchmarks.FanOut.KeryxHost.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.MediatorParallel/Keryx.Benchmarks.FanOut.MediatorParallel.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.MediatorScoped/Keryx.Benchmarks.FanOut.MediatorScoped.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.MediatorSingleton/Keryx.Benchmarks.FanOut.MediatorSingleton.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.MediatRHandlers/Keryx.Benchmarks.FanOut.MediatRHandlers.csproj" />
+    <Project Path="test/benchmark-subjects/Keryx.Benchmarks.FanOut.ZeroAllocMediator/Keryx.Benchmarks.FanOut.ZeroAllocMediator.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.ImmediateHandlers/Keryx.Benchmarks.ImmediateHandlers.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.KeryxHost/Keryx.Benchmarks.KeryxHost.csproj" />
     <Project Path="test/benchmark-subjects/Keryx.Benchmarks.MediatorParallel/Keryx.Benchmarks.MediatorParallel.csproj" />

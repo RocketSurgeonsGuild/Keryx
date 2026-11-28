@@ -48,4 +48,21 @@
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ImmediateHandlers\Keryx.Benchmarks.ImmediateHandlers.csproj" />
         <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.ZeroAllocMediator\Keryx.Benchmarks.ZeroAllocMediator.csproj" />
     </ItemGroup>
+    <!--
+        The fan-out subjects (owner decision 41): the notifications with 25, 50 and 100 handlers, one project per library beside the ones above
+        (test/benchmark-subjects/GenerateFanOut.cs writes them). ZeroAlloc.Mediator's generated types are internal and have the same names in
+        every assembly, so its fan-out project comes in under an extern alias.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.Baseline\Keryx.Benchmarks.FanOut.Baseline.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.KeryxHost\Keryx.Benchmarks.FanOut.KeryxHost.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorScoped\Keryx.Benchmarks.FanOut.MediatorScoped.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorParallel\Keryx.Benchmarks.FanOut.MediatorParallel.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatorSingleton\Keryx.Benchmarks.FanOut.MediatorSingleton.csproj" />
+        <ProjectReference Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.MediatRHandlers\Keryx.Benchmarks.FanOut.MediatRHandlers.csproj" />
+        <ProjectReference
+            Include="..\benchmark-subjects\Keryx.Benchmarks.FanOut.ZeroAllocMediator\Keryx.Benchmarks.FanOut.ZeroAllocMediator.csproj"
+            Aliases="ZeroAllocFanOut"
+        />
+    </ItemGroup>
 </Project>

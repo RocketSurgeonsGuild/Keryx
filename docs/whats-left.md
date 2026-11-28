@@ -12,7 +12,8 @@ documented, a fixed invocation count for the direct call's NativeAOT `Publish` t
 with 48 (2026-11-28: a transient mediator over a scoped state, one field per pipeline context; the size-bounded layout is OQ-78);
 updated for owner decisions 42, 44 and 45, with 48 (2026-11-28: no handler registrations, a static entry for the host's own handlers,
 KRX025 for a disposable handler class; OQ-79); updated for owner decision 43, with 48 (2026-11-28: a context's handlers and behaviors
-share its services).
+share its services); updated for owner decision 41, with 48 (2026-11-28: publish to 25, 50 and 100 handlers in the benchmarks;
+OQ-80 and OQ-81).
 
 Phases 0 to 8 are implemented on `feature/v1` (draft pull request #1) for the current design: abstractions, handlers, the host, request,
 stream and notification pipelines, cross-assembly discovery, the samples with the Native AOT job, the benchmark suite and the README.
@@ -340,7 +341,37 @@ counts, the static entries' arguments, context summaries) and one is new. Build,
 pass. Details: open-questions, "Handlers and behaviors share a context's services"; the reports are in the session scratchpad
 (`rework-scope/shared/`).
 
+## Done: publish to 25, 50 and 100 handlers (owner decision 41, with 48, 2026-11-28)
+
+The sync publish, the per-request publish (with Keryx's notification-behavior variant) and the async SQLite publish, sequential and
+parallel, also go to 25, 50 and 100 handlers, for every subject with a publish API: fifteen classes (`PublishTo{25,50,100}`,
+`RealWorldPublish{25,50,100}ScopePerRequest`, `RealWorldPublishBehavior{25,50,100}ScopePerRequest`, `RealWorldPublishAsync{25,50,100}`,
+`RealWorldPublishParallel{25,50,100}`), with the subjects and n/a cells of their 5 handler counterparts. Because the scope state is not
+bounded (OQ-78), the notifications are not in the benchmark host: each library has a fan-out project of its own
+(`test/benchmark-subjects/Keryx.Benchmarks.FanOut.*`, seven projects), so no existing subject's generated code changes.
+`test/benchmark-subjects/GenerateFanOut.cs` (a file-based C# program) writes those projects' code and the fifteen classes from one list, so
+every subject has the same handlers; CI's Dry job runs it with `-- --check`. Every subject compiles and runs 100 handlers,
+ZeroAlloc.Mediator included (under an extern alias in the runner); MediatR stays n/a under NativeAOT, its reason checked for the fan-out
+containers. `--verify` passes 352 benchmarks under the JIT (238 before) and 317 in the NativeAOT publish (35 n/a); the Dry job of
+`*Publish*` ran 190 (JIT) and 170 (NativeAOT) benchmarks. The existing rows are unchanged: in four probe runs of each tree, 183 of the 188
+synchronous existing benchmarks read the same bytes per call in every run, and the other five (ZeroAlloc.Mediator's
+`RealWorldPublish5ScopePerRequest` `IMediator` row once, and four SQLite query rows, Keryx's generic `RealWorldPublishAsync1` among them)
+vary from run to run (by 15 to 120 B) within one tree, so the probe cannot tell a change there; the benchmark host's generated source is
+byte-identical. Keryx's fan-out rows allocate 2,112, 3,712 and 6,912 B per request scope (ZeroAlloc.Mediator 2,760, 5,160 and 9,960 B; the
+direct call 5,792, 12,360 and 26,280 B). No time was measured: the README's tables get the new columns from the next measured run. Build,
+1,612 tests (one full run first failed an allocation test that passed on every re-run: OQ-80) and `--verify` pass; no snapshot changed.
+Whether BenchmarkDotNet's NativeAOT pilot can measure `PublishTo{25,50,100}.Baseline` is not checked (OQ-81). Details: open-questions,
+"Publish to 25, 50 and 100 handlers"; the reports are in the session scratchpad (`fanout/`).
+
 ## Decisions for the owner
+
+**OQ-81** is open ([open-questions.md](adr/open-questions.md)): `PublishTo{25,50,100}.Baseline` are direct calls to handlers that
+return `default`, like `PublishTo1.Baseline`, but decision 39's fixed invocation count covers `PublishTo1.Baseline` only, so a measured
+NativeAOT run may hit OQ-77's 0 ns pilot failure on them; the proposal extends `FixedInvocationCount` to those three cases.
+
+**OQ-80** is open ([open-questions.md](adr/open-questions.md)): `HostAllocationTests.A_Mediator_Adds_Only_Itself_To_A_Scope_And_Shares_The_Scope_State`
+failed once in a full test run (60,008 B where 32,000 B is expected) and passed on every re-run; the proposal warms each measured region
+up until two windows agree.
 
 **OQ-79** is open ([open-questions.md](adr/open-questions.md)): in a host, a handler whose injected parameter is named `InvokeAsync`
 gets a field `__keryx_InvokeAsync` next to the static entry of that name, and does not compile (CS0102); the proposal extends KRX015.
@@ -348,7 +379,8 @@ gets a field `__keryx_InvokeAsync` next to the static entry of that name, and do
 **OQ-78** is open ([open-questions.md](adr/open-questions.md)): the scope state has one field per pipeline with a context (8 B each, in
 every scope that uses a context) because decision 47's slot cache measured slower on the long-lived path; the proposal keeps the fields
 up to a threshold and measures a lighter slot read or chunked pages above it. Until it is decided, decision 41's 25/50/100-handler
-benchmarks would add 8 B per new pipeline with a context to every Keryx scope-per-request row of the shared benchmark host.
+benchmarks would add 8 B per new pipeline with a context to every Keryx scope-per-request row of the shared benchmark host, so they
+live in a fan-out host of their own.
 
 OQ-76 (decision 38: the `ValidateOnBuild` trade-off
 accepted, no generator warning) and OQ-77 (decision 39: a fixed invocation count for the direct call's NativeAOT `Publish` to one
@@ -438,7 +470,9 @@ numbering) are decided and applied; decision 22 keeps the generic `Stream` depth
 - Keryx depends on a prerelease, `Specular.Scanning.Sources` 0.4.3-beta.2 (pinned exactly); move to a stable version when one ships.
 - Re-run the comparison benchmarks (JIT and NativeAOT) on the release candidate and update the README's numbers (its tables are from
   decision 37's run at 3575a50; Keryx's scope-per-request cells predate decisions 46, 42, 44 and 43, whose numbers are in the README's
-  notes; NativeAOT was not measured for them).
+  notes; NativeAOT was not measured for them; the 25, 50 and 100 handler classes of decision 41 have never been measured). That run
+  shows whether BenchmarkDotNet's NativeAOT pilot can measure `PublishTo{25,50,100}.Baseline`, or whether they need decision 39's fixed
+  invocation count as `PublishTo1.Baseline` does (OQ-81, open).
 - Generic `Stream` at depth 0 (owner decision 22, tracked for the release, not investigated now): after the type patterns (6e7465a)
   `StreamDepth0` through `IMediator` measured 20 to 60 ns (3 to 9%) slower than before, while its typed row, `StreamDepth3` and the
   generic `Stream<int>` dispatch code did not get worse (open-questions, "Requests are sealed"); code placement is the unverified

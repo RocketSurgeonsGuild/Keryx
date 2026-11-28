@@ -87,7 +87,8 @@ src/Keryx.Analyzers/            generators + DiagnosticAnalyzers + CodeFixProvid
                                 AnalyzerReleases.*.md
 test/Keryx.Tests/               TUnit, TUnit.Assertions.Should, Verify.TUnit, Rocket.Surgery.Extensions.Testing.SourceGenerators
 test/Keryx.Benchmarks/          BenchmarkDotNet; Prototype/ for the Phase 4 gate prototype, Comparison/ for the comparison suite
-test/benchmark-subjects/        one small project per compared library (Keryx host, baseline, Mediator, MediatR, ...)
+test/benchmark-subjects/        one small project per compared library (Keryx host, baseline, Mediator, MediatR, ...), and one
+                                fan-out project per library (Keryx.Benchmarks.FanOut.*) that GenerateFanOut.cs writes
 samples/hosts/, samples/libraries/
 docs/adr/, CONTEXT.md
 ```
@@ -506,8 +507,15 @@ Microsoft.Data.Sqlite database seeded once per process; and (decision 30d) `Ping
 lookup and a log message each) published per request scope, again with the logging behavior as a notification behavior (Keryx only: the
 other libraries' behaviors wrap requests only), to handlers that await the SQLite query published sequentially, and with each library's
 parallel strategy (Keryx `PublishStrategy.Parallel`, Mediator and MediatR `TaskWhenAllPublisher`, ZeroAlloc.Mediator
-`[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same bodies
-in every subject, 104 real-world benchmarks that `--verify` counts, the setup confirmed by the owner (decision 33, OQ-72) and written in
+`[ParallelNotification]`; Mediator's is per assembly, so `Keryx.Benchmarks.MediatorParallel` is its own subject project). The same
+publishes go to 25, 50 and 100 handlers too (owner decision 41: `PublishTo{25,50,100}`, `RealWorldPublish{25,50,100}ScopePerRequest`,
+`RealWorldPublishBehavior{25,50,100}ScopePerRequest`, `RealWorldPublishAsync{25,50,100}`, `RealWorldPublishParallel{25,50,100}`), from
+fan-out projects of their own, one per library and configuration (`test/benchmark-subjects/Keryx.Benchmarks.FanOut.*`, so no other
+subject's generated code or scope state changes; OQ-78), whose code and benchmark classes `test/benchmark-subjects/GenerateFanOut.cs`
+writes from one list (`dotnet run --file test/benchmark-subjects/GenerateFanOut.cs`; CI runs it with `-- --check`); `Subjects` builds
+their containers only for those classes (`FanOutBenchmark`), and ZeroAlloc.Mediator's comes in under the extern alias `ZeroAllocFanOut`
+(open-questions, "Publish to 25, 50 and 100 handlers"). The same bodies
+in every subject, 104 real-world benchmarks that `--verify` counts (352 comparison benchmarks in all with the fan-out ones), the setup confirmed by the owner (decision 33, OQ-72) and written in
 the ADR's Benchmarks section ("Real-world setup rules"); every logging behavior and the baseline read the message type's name once per type
 through `MessageName<T>` in `Keryx.Benchmarks.Common` (decision 36, OQ-75). The comparison suite also runs with
 BenchmarkDotNet's NativeAOT toolchain (owner decisions 29 and 31, `--runtimes nativeaot10.0`): a subject that cannot run there is n/a with
@@ -535,6 +543,8 @@ Decided (owner decision 39): the runner's config gives that benchmark's NativeAO
 iteration, which skips the pilot (`Comparison/FixedInvocationCount.cs`, an orderer, the one place BenchmarkDotNet lets the config change
 a single case; it keeps the case in its class's logical group, so it stays the baseline), while the JIT and Dry jobs and every other
 benchmark keep their settings, so a full NativeAOT run of `--filter '*Comparison*'` no longer fails on it (proved on `PublishTo1`).
+The direct call's `Publish` to 25, 50 and 100 handlers (decision 41) has the same shape and is not covered; whether it needs the fixed
+count is OQ-81 (open).
 
 README, written to the ADR: install, the `Microsoft.Extensions.DependencyInjection.Abstractions` dependency, minimum SDK (.NET 10) and
 C# 14, handler rules, quick start (`AddKeryx()` registers neither handlers nor behaviors), behaviors (the three kind attributes, `[NotificationBehavior]`

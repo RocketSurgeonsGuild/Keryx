@@ -1,3 +1,4 @@
+extern alias ZeroAllocFanOut;
 using Keryx.Benchmarks.Baseline;
 using Keryx.Benchmarks.Common;
 using Keryx.Benchmarks.ImmediateHandlers;
@@ -8,6 +9,13 @@ using Keryx.Benchmarks.MediatorSingleton;
 using Keryx.Benchmarks.MediatRHandlers;
 using Keryx.Benchmarks.ZeroAllocMediator;
 using Microsoft.Extensions.DependencyInjection;
+using BF = Keryx.Benchmarks.FanOut.Baseline;
+using KF = Keryx.Benchmarks.FanOut.KeryxHost;
+using MPF = Keryx.Benchmarks.FanOut.MediatorParallel;
+using MRF = Keryx.Benchmarks.FanOut.MediatRHandlers;
+using MSF = Keryx.Benchmarks.FanOut.MediatorScoped;
+using MSiF = Keryx.Benchmarks.FanOut.MediatorSingleton;
+using ZAF = ZeroAllocFanOut::Keryx.Benchmarks.FanOut.ZeroAllocMediator;
 
 namespace Keryx.Benchmarks.Comparison;
 
@@ -18,7 +26,8 @@ namespace Keryx.Benchmarks.Comparison;
 ///     long-lived scope (<see cref="LongLived" />) and its scope factory (<see cref="Scopes" />), to create a scope per request; the real-world
 ///     parallel publish scenario uses two more containers, Mediator with its <c>TaskWhenAllPublisher</c> (its own assembly) and MediatR with
 ///     its <c>TaskWhenAllPublisher</c>. Every container's SQLite connection is opened here, before any benchmark call. In a NativeAOT build the
-///     containers of the libraries that are n/a there (<see cref="NativeAot" />) are not built.
+///     containers of the libraries that are n/a there (<see cref="NativeAot" />) are not built. The fan-out scenarios (<see cref="FanOutBenchmark" />)
+///     also get the fan-out projects' containers (<see cref="FanOut" />), which no other scenario builds.
 /// </summary>
 internal sealed class Subjects : IDisposable
 {
@@ -26,7 +35,8 @@ internal sealed class Subjects : IDisposable
     private readonly List<IDisposable> _owned = [];
     private readonly Dictionary<Library, (IServiceProvider Root, IServiceProvider LongLived)> _containers = [];
 
-    public Subjects()
+    /// <param name="fanOut">Whether to build the fan-out projects' containers too (<see cref="FanOut" />).</param>
+    public Subjects(bool fanOut = false)
     {
         _ = Container(Library.Baseline, new ServiceCollection().AddBaselineBenchmarks());
 
@@ -66,6 +76,11 @@ internal sealed class Subjects : IDisposable
             MediatRParallel = Container(Library.MediatRParallel, new ServiceCollection().AddMediatRParallelBenchmarks())
                .GetRequiredService<MediatR.IMediator>();
         }
+
+        if (fanOut)
+        {
+            FanOut = new(this);
+        }
     }
 
     public KeryxMediator KeryxTyped { get; }
@@ -79,6 +94,9 @@ internal sealed class Subjects : IDisposable
     public MediatorParallel.Mediator MediatorParallelTyped { get; }
     public Mediator.IMediator MediatorParallelGeneric { get; }
     public MediatR.IMediator MediatRParallel { get; } = null!;
+
+    /// <summary>The fan-out projects' mediators, when this was built for a fan-out scenario; else <see langword="null" />.</summary>
+    public FanOutContainers? FanOut { get; }
 
     /// <summary>An Immediate.Handlers generated handler class, from the scope that lives as long as the benchmark.</summary>
     public T Immediate<T>() where T : notnull => LongLived(Library.ImmediateHandlers).GetRequiredService<T>();
@@ -118,6 +136,59 @@ internal sealed class Subjects : IDisposable
         _containers.Add(library, (root, scope.ServiceProvider));
         return scope.ServiceProvider;
     }
+
+    /// <summary>
+    ///     The fan-out projects' containers (owner decision 41), built like the others: one per library and configuration, the mediators
+    ///     resolved from the long-lived scope (singletons from the root), MediatR's n/a under NativeAOT.
+    /// </summary>
+    internal sealed class FanOutContainers
+    {
+        public FanOutContainers(Subjects subjects)
+        {
+            _ = subjects.Container(Library.BaselineFanOut, BF.BaselineFanOutSetup.AddBaselineFanOutBenchmarks(new ServiceCollection()));
+
+            var keryx = subjects.Container(Library.KeryxFanOut, KF.KeryxFanOutSetup.AddKeryxFanOutBenchmarks(new ServiceCollection()));
+            KeryxTyped = keryx.GetRequiredService<KF.KeryxMediator>();
+            KeryxGeneric = keryx.GetRequiredService<IMediator>();
+
+            var mediatorScoped = subjects.Container(Library.MediatorScopedFanOut, MSF.MediatorScopedFanOutSetup.AddMediatorScopedFanOutBenchmarks(new ServiceCollection()));
+            MediatorScopedTyped = mediatorScoped.GetRequiredService<MSF.Mediator>();
+            MediatorScopedGeneric = mediatorScoped.GetRequiredService<Mediator.IMediator>();
+
+            _ = subjects.Container(Library.MediatorSingletonFanOut, MSiF.MediatorSingletonFanOutSetup.AddMediatorSingletonFanOutBenchmarks(new ServiceCollection()));
+            var mediatorSingleton = subjects._containers[Library.MediatorSingletonFanOut].Root;
+            MediatorSingletonTyped = mediatorSingleton.GetRequiredService<MSiF.Mediator>();
+            MediatorSingletonGeneric = mediatorSingleton.GetRequiredService<Mediator.IMediator>();
+
+            _ = subjects.Container(Library.MediatorParallelFanOut, MPF.MediatorParallelFanOutSetup.AddMediatorParallelFanOutBenchmarks(new ServiceCollection()));
+            var mediatorParallel = subjects._containers[Library.MediatorParallelFanOut].Root;
+            MediatorParallelTyped = mediatorParallel.GetRequiredService<MPF.Mediator>();
+            MediatorParallelGeneric = mediatorParallel.GetRequiredService<Mediator.IMediator>();
+
+            if (!NativeAot.Skips(Library.MediatRFanOut))
+            {
+                MediatR = subjects.Container(Library.MediatRFanOut, MRF.MediatRFanOutSetup.AddMediatRFanOutBenchmarks(new ServiceCollection()))
+                   .GetRequiredService<MediatR.IMediator>();
+                MediatRParallel = subjects.Container(Library.MediatRParallelFanOut, MRF.MediatRFanOutSetup.AddMediatRParallelFanOutBenchmarks(new ServiceCollection()))
+                   .GetRequiredService<MediatR.IMediator>();
+            }
+
+            ZeroAlloc = subjects.Container(Library.ZeroAllocFanOut, ZAF.ZeroAllocFanOutSetup.AddZeroAllocFanOutBenchmarks(new ServiceCollection()))
+               .GetRequiredService<ZeroAllocFanOut::ZeroAlloc.Mediator.IMediator>();
+        }
+
+        public KF.KeryxMediator KeryxTyped { get; }
+        public IMediator KeryxGeneric { get; }
+        public MSF.Mediator MediatorScopedTyped { get; }
+        public Mediator.IMediator MediatorScopedGeneric { get; }
+        public MSiF.Mediator MediatorSingletonTyped { get; }
+        public Mediator.IMediator MediatorSingletonGeneric { get; }
+        public MPF.Mediator MediatorParallelTyped { get; }
+        public Mediator.IMediator MediatorParallelGeneric { get; }
+        public MediatR.IMediator MediatR { get; } = null!;
+        public MediatR.IMediator MediatRParallel { get; } = null!;
+        public ZeroAllocFanOut::ZeroAlloc.Mediator.IMediator ZeroAlloc { get; }
+    }
 }
 
 /// <summary>The containers <see cref="Subjects" /> builds, one per library.</summary>
@@ -132,4 +203,12 @@ internal enum Library
     ZeroAlloc,
     MediatorParallel,
     MediatRParallel,
+    BaselineFanOut,
+    KeryxFanOut,
+    MediatorScopedFanOut,
+    MediatorSingletonFanOut,
+    MediatorParallelFanOut,
+    MediatRFanOut,
+    MediatRParallelFanOut,
+    ZeroAllocFanOut,
 }

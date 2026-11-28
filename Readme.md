@@ -706,6 +706,14 @@ Notifications, each to 1 and to 5 handlers:
   `[PublishStrategy(PublishStrategy.Parallel)]`, Mediator's `TaskWhenAllPublisher` (a generator option, so a third Mediator project,
   singleton, shown in the Mediator singleton rows), MediatR's `TaskWhenAllPublisher` (a second container) and ZeroAlloc.Mediator's
   `[ParallelNotification]`.
+- The same four scenarios with 25, 50 and 100 handlers (owner decision 41): `RealWorldPublish{25,50,100}ScopePerRequest`,
+  `RealWorldPublishBehavior{25,50,100}ScopePerRequest`, `RealWorldPublishAsync{25,50,100}` and `RealWorldPublishParallel{25,50,100}`,
+  with the same subjects, handler bodies and n/a cells. Their notifications live in a fan-out project per library
+  (`test/benchmark-subjects/Keryx.Benchmarks.FanOut.*`, written by `test/benchmark-subjects/GenerateFanOut.cs` so every library has
+  the same handlers), not in the projects the other rows measure, so adding them changed none of those rows. They have not been measured
+  yet: the tables get their columns from the next measured run. Bytes per call, exact (`GC.GetAllocatedBytesForCurrentThread`), per
+  request scope with 25, 50 and 100 handlers: Keryx 2,112, 3,712 and 6,912 B; ZeroAlloc.Mediator 2,760, 5,160 and 9,960 B; the direct
+  call 5,792, 12,360 and 26,280 B; MediatR 9,152, 17,480 and 34,120 B; Mediator scoped 9,832, 21,152 and 45,368 B.
 
 Per request scope:
 
@@ -804,6 +812,10 @@ A publish whose handlers are all static and whose behaviors inject nothing (ever
 strategy is static (open-questions OQ-70): Keryx's typed overload measures 0.44 ns and 0.48 ns (0.34 and 0.44 ns in decision 32's run,
 0.65 and 0.84 ns before OQ-70), inlined like the direct call, and `IMediator` 3.31 ns and 4.07 ns (3.19 and 3.93 ns in decision 32's run;
 at this scale a nanosecond moves between runs), all 0 B.
+
+`PublishTo25`, `PublishTo50` and `PublishTo100` (owner decision 41) publish to 25, 50 and 100 such handlers, from each library's fan-out
+project (above); they have not been measured yet, and the table gets their columns from the next measured run. Every subject allocates
+0 B there except ZeroAlloc.Mediator's `IMediator` (600, 1,200 and 2,400 B) and MediatR (6,944, 13,472 and 26,512 B).
 
 ### NativeAOT
 

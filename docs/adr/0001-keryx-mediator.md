@@ -97,6 +97,9 @@ once for its behavior methods and its handlers together, by the shared-service r
 constructor the context calls. A transient dependency is one instance per context, shared by a notification's handlers and behaviors
 or by a request's handler and its behaviors (Injected parameters; Generated pipeline shape; Mediator; Performance contract;
 Consequences; open-questions, "Handlers and behaviors share a context's services").
+Amended a nineteenth time 2026-11-28 (owner decision 41, with 48): the comparison suite also publishes to 25, 50 and 100 handlers in
+the sync, per-request (with Keryx's behavior variant), async and parallel publish scenarios, from fan-out projects of their own per
+library that one program writes, so no existing subject changes (Benchmarks; open-questions, "Publish to 25, 50 and 100 handlers").
 The replaced designs are listed under Alternatives considered. This replaces the draft "Source-generated mediator library" ADR (working
 title "Mediator"). Every placeholder name is replaced with the Keryx name, and every open question in the draft is answered below.
 
@@ -1561,7 +1564,8 @@ A failed gate does **not** stop implementation (decided 2026-11-26). The measure
 - ZeroAlloc.Mediator 7.0.1 (its generator, `ZeroAlloc.Mediator.Generator`, pinned to the same version).
 
 Scenarios: `Send` through the typed overload and the generic entry point; 0, 1, 3 and 8 behaviors; synchronous and `Task.Yield` handlers;
-`Stream` of 100 items with 0 and 3 stream behaviors; `Publish` to 1 and 5 handlers. Keryx also runs `SendUnitYieldValueTask` and
+`Stream` of 100 items with 0 and 3 stream behaviors; `Publish` to 1, 5, 25, 50 and 100 handlers (the last three: owner decision 41,
+below). Keryx also runs `SendUnitYieldValueTask` and
 `SendUnitYieldTask` (an `IRequest` whose `ValueTask`/`Task` handler yields, against the same handler awaited directly), the benchmark the
 Performance contract names for `UnitAdapter.ToUnit`.
 
@@ -1576,7 +1580,8 @@ Real-world `Ping` -> `Pong` scenarios (owner decision 30, 2026-11-27), for every
 - **Data access:** a handler that runs a parameterized scalar query against an in-memory Microsoft.Data.Sqlite database, created and
   seeded once per benchmark process (and every container's connection opened in setup, so neither is in a measured call); SQLite's async
   methods complete synchronously.
-- **Notifications** (decision 30d), 1 and 5 handlers each, for every subject with a publish API (Immediate.Handlers has none):
+- **Notifications** (decision 30d), 1 and 5 handlers each, and 25, 50 and 100 (owner decision 41, 2026-11-27), for every subject with a
+  publish API (Immediate.Handlers has none):
     - **Publish per request scope:** create a scope, resolve the entry point, publish a `Pinged` notification, dispose the scope, inside
       the measured method; each handler looks the pong up in the scoped repository and writes a log message. A second pair adds the same
       logging behavior as a notification behavior, where the library has notification behaviors (only Keryx; Mediator, MediatR and
@@ -1655,6 +1660,15 @@ above:
   strategy: Keryx's `PublishStrategy.Parallel`, Mediator's `TaskWhenAllPublisher` (a generator option fixed per assembly, so a subject
   assembly of its own with Mediator's default singleton lifetime), MediatR's `TaskWhenAllPublisher` (a second container) and
   ZeroAlloc.Mediator's `[ParallelNotification]`.
+- **Fan-out (25, 50 and 100 handlers, owner decision 41).** The sync publish, the per-request publish (with Keryx's behavior variant),
+  and the async and parallel publishes to 25, 50 and 100 handlers use the bodies, configurations and n/a cells of their 5 handler
+  counterparts, but the notifications live in projects of their own, one per library and configuration
+  (`test/benchmark-subjects/Keryx.Benchmarks.FanOut.*`), so they change no other subject's generated code or scope state (for Keryx:
+  open-questions OQ-78) and every library's fan-out rows come from an assembly holding only them. One program,
+  `test/benchmark-subjects/GenerateFanOut.cs`, writes those projects' code and the fan-out benchmark classes from one list, so every
+  subject has the same handlers; its handlers are named `Handler001` to `Handler100`. The runner builds the fan-out containers only for the
+  fan-out scenarios, and references ZeroAlloc.Mediator's fan-out project under an extern alias (its generated types are internal with the
+  same names in every assembly).
 - **n/a cells**, each checked by building or running it: Mediator singleton in the behavior scenarios and the per-request publish (its
   singleton handlers cannot take the scoped repository and validator); ZeroAlloc.Mediator's static class in the behavior scenarios (its
   static `Send` passes no services to behaviors) and in every per-request scenario (it has no scope); every library but Keryx in the
@@ -1674,7 +1688,8 @@ open-questions OQ-77): the direct call's `Publish` to one handler is a call that
 stage measures as 0 ns and then throws on, so the runner's config gives its NativeAOT job a fixed invocation count (160,000,000 calls per
 iteration, which skips the pilot; `Comparison/FixedInvocationCount.cs`). The case stays in its class's logical group, so it is still
 the baseline of that class's ratios, and every other job (the JIT's, the Dry job, one with `--invocationCount` given) and every other
-benchmark keeps its settings. `--verify` runs in the NativeAOT build too: the benchmark project published with
+benchmark keeps its settings (whether the direct call's `Publish` to 25, 50 and 100 handlers needs the same is open-questions OQ-81, open).
+`--verify` runs in the NativeAOT build too: the benchmark project published with
 NativeAOT (`-p:KeryxBenchmarksNativeAot=true`, which sets `PublishAot` for that publish only, since `PublishAot` writes the AOT feature
 switches into a JIT build's runtimeconfig) checks every NativeAOT subject's results and handler and behavior calls, and lists the n/a ones.
 Its scenarios are listed, not found by scanning the assembly, so the check has no trim warnings, and a benchmark run fails when a comparison
@@ -1682,9 +1697,9 @@ scenario is missing from the list. The benchmark and subject projects build with
 NativeAOT publish, warnings in Keryx and the subject projects are errors and none are suppressed, while the package assemblies' warnings
 (BenchmarkDotNet and its dependencies, MediatR) stay warnings.
 
-CI builds the benchmarks, runs `Keryx.Benchmarks --verify` (every comparison benchmark is called with a call counter on, and the run
-fails when a library does not run the scenario's handlers and behaviors), and runs every benchmark, the real-world scenarios included,
-with `--job Dry` only. Its NativeAOT job (Linux, with the ILCompiler's prerequisites installed) publishes the suite with NativeAOT, runs
+CI checks that the fan-out projects are what `GenerateFanOut.cs` writes (`-- --check`), builds the benchmarks, runs
+`Keryx.Benchmarks --verify` (every comparison benchmark is called with a call counter on, and the run fails when a library does not run
+the scenario's handlers and behaviors), and runs every benchmark, the real-world scenarios included, with `--job Dry` only. Its NativeAOT job (Linux, with the ILCompiler's prerequisites installed) publishes the suite with NativeAOT, runs
 `--verify` in that binary, and runs every benchmark but the JIT-only prototype once with `--job Dry --runtimes nativeaot10.0`, so
 NativeAOT breakage fails the pull
 request. Numbers are never published from shared runners. The README's numbers come from local runs, with the machine and job stated:

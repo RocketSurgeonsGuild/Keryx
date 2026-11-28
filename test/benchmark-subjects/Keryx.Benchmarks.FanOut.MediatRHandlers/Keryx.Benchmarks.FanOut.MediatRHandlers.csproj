@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The fan-out scenarios' MediatR 15 subject (owner decision 41): the notifications with 25, 50 and 100 handlers, in a project of their own
+        like every library's fan-out subject, run without a license key (allowed for benchmarking). FanOut.cs is written by
+        ../GenerateFanOut.cs.
+    -->
+    <ItemGroup>
+        <PackageReference Include="MediatR" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <PackageReference Include="Microsoft.Extensions.Logging" />
+    </ItemGroup>
+</Project>
